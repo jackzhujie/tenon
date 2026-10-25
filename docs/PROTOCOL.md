@@ -70,15 +70,39 @@
 
 ## 5. 对话/编排协议（复刻核心）
 
+### 5.1 请求层（客户端实测）
 - **AsyncChat**：`POST /api/v1/studio/async/conversation/chat`
   req `conversation.AsyncChatRequest`：`conversationID, userMessage, options, immediateExecute, idempotentKey, requestSource, bizType`
-- **流式端点**：`POST /af/api/v1/studio/stream/conversation/chat`（SSE 流）+ `POST /api/v1/studio/stop`（StopChat）
-- **幂等**：`idempotentKey` 字段（消息队列串行处理的外部保证）
+  客户端实际构造：`{idempotentKey, immediateExecute, conversationID, userMessage:{content, parts, attachments, attachmentIDs, quoteAttachmentIDs}, options:{model, overrides}}`
+- **流式端点**：`POST /af/api/v1/studio/stream/conversation/chat`（`streamChatUrl`，SSE）+ `POST /api/v1/studio/stop`（StopChat，body `conversationID, replyGroupID, agentID, bizType`）
+- **流状态查询**：`GET /api/v1/studio/:appID/conversation/:conversationID/streaming_status`（GetStreamingStatus）
+- **幂等**：`idempotentKey`（来自 `userMessage.parts[]` 里带 idempotentKey 的 part）
+- **暂存队列**（消息队列式对话的机制）：`sendMessageCacheList` **上限 10 条**，生成中发的新消息入队；`immediateExecute=true` 可插队立即执行；超出上限 Toast 提示不再入队
+- **传输层**：Frontier WS SDK（`version_code: fws_1.0.0`）用于服务端推送，`/ws/v2?device_platform=web&access_key&fpid&aid&device_id&xsack&xaack&xsqos&qos_level&qos_sdk_version=2`，多端点重试 + QoS + ACK
+
+### 5.2 消息与工具调用结构（Agent 协议骨架）
+- 消息对象：`{replyGroupID, content, parts[], attachments[], tools[]}`
+- 工具调用：`tools[] = {name, output, status, toolCallId}`，`status` 取 `in_progress|completed`
+  - `app_init` 工具：output 含 Spec 内容 → 客户端 `parseAppInitContent()` 转成 Spec 对象
+  - Spec 更新类工具：output 含 `specID / path / content`，写入 `spec.files[]`（`{name, path, content, status, draftContent, isSaved}`）
+- **Spec 文件体系**（沙箱内 / 协议层均以此组织）：
+  - `init_spec.json`（应用初始化规格，JSON）
+  - `task_implement.json`（任务实施清单，JSON）
+  - `spec.md` / `spec_doc.md`（人类可读规格）
+- **CoT 分组**：流内含 `cotGroup`（思维链分组），客户端统计 `cotGroupCount` 用于渲染「思考过程」
 - **规格（Spec）**：`GET /api/v1/studio/:appID/conversation/:cid/spec`（GetSpecByConversation）、`POST .../spec_meta`（UpsertSpecMeta）——应用 DSL 与会话绑定
 - **子任务**：`pro_sub_task` CRUD（CreateProSubTask/List/Get/Update/Delete）——「开发计划-任务清单」的落库形式
 - **检查点**：`POST /api/v1/studio/:appID/checkpoint/list_by_convs`（版本快照与回滚）
-- **产物版本**：`POST /api/v1/studio/artifacts/:artifact_id/reset_version`（回滚）；artifacts 按 conversation 关联（ListConversationArtifacts）
+- **产物版本 / 回滚**（客户端 `resetArtifactVersion` 实测字段）：
+  - 必填：`appID` + `sandboxID`（缺则抛错「sandbox not bound」）
+  - Checkpoint 回滚：`{artifactType:"checkpoint", checkPointID}`
+  - Artifact 版本回滚：`{artifactID, version, artifactName?}`
+  - Git 提交回退：`{commitID, revertTargetEndTime?}`
+  - 数据回滚开关：`dbRestore`（连同数据库一起回退）
 - **在线状态**：`POST /af/api/v1/studio/app/:appID/presence/heartbeat|leave`
+
+### 5.3 Copilot 服务层 API 清单（客户端封装，复刻时对应 `orchestrator` crate）
+`FeidaListMessage / FeidaCreateConversation / FeidaListConversation / FeidaUpdateConversation / FeidaUpdateMessage / FeidaStopChat / FeidaGetAppArtifact / FeidaUpsertSpecMeta` + `GetSpecByConversation` + `GetWorkspaceFile` + `streamChatUrl` + `resetArtifactVersion`
 
 ## 6. 发布协议
 
@@ -98,7 +122,23 @@
 DataTableService / DataloomService（表 CRUD）+ **VectorMetaService（向量元数据——AI 应用 RAG 支撑）** + Bitable 互通（plugin_components 下读写多维表格）。
 **复刻映射**：SQLite 表 + sqlite-vec/FTS5 做向量/全文；多维表格互通做成可选插件。
 
-## 9. 环境与基建细节
+## 9. 沙箱基建（HAR 实测，复刻的关键参考）
+
+- **底层**：火山引擎 **VEFaaS**（`sandboxType:"vefaas"`），沙箱实例 ID 形如 `vefaas-1soj617x-bai6zcoodv-…-sandbox`，代码目录 `/home/gem/workspace/code`
+- **绑定 API**：`GET /af/api/v1/studio/app/:appID/instance/get_or_bind?sandboxID=xxx`
+  响应：`{sandboxInstanceID, previewURL, isFrozen, sandboxID, bizStatus:{fileOperate|preview|dependencyRestore|devServer: {status:"ready"}}, codeDir}`
+  → 复刻映射：我们本地用一个进程 + 目录替代，但**「实例绑定 + 就绪状态分维度上报」**这一套值得照搬（预览/依赖/devServer 分别 ready 才可用）
+- **统一响应信封**：`{data: …, status_code: "0"}`（全站一致，含错误码在 status_code）
+- **预览域名**：每应用独立子域 `https://{region}-{appID}-{sandboxID}.aiforce.run/app/{appID}`，短时效 JWT `sso_token` 直通（exp ≈ iat + 300s）
+- **WS 端点**（实测两条）：
+  - `wss://ws.aiforce.run/app/{appID}/ws?token=…&sandbox_token=…`（`Sec-WebSocket-Protocol: vite-hmr`）→ **Vite HMR 中继**
+  - `wss://ws.aiforce.run/af/webide/{tenantID}/{sandboxID}/code-server/stable-{commit}?connectionType=…` → **VS Code WebIDE 通道**（Agent 改代码/跑命令走这里）
+- **运行时 RBAC**：`POST .../__runtime__/api/v1/permissions/roles` → `{data:{roleList:["admin"]}}`；生成代码里统一 `403 → "无操作权限，请联系管理员分配角色"`
+- **生成应用数据 API**：标准自动 CRUD，`GET /api/dishes` → `{items:[{id:uuid, name, price:"28.00", category, status, createdAt, updatedAt}]}`（金额用字符串、时间 ISO）
+- **dev 日志**：`GET .../dev/logs/server-logs/stream`（SSE）+ `POST .../dev/logs/collect-batch`
+- **routes.json**：`[{path:"/"},{path:"/my-orders"},…]` 极简路由清单
+
+## 9b. 环境与基建细节
 
 - 环境矩阵：boe（测试）/ ppe（预发）/ prod；header `x-use-boe|ppe` + `x-tt-env`
 - 域名族：accounts.* / aily.* / apaas.feishuapp.cn / internal-api-lark-api.{region}.cn
@@ -114,9 +154,27 @@ DataTableService / DataloomService（表 CRUD）+ **VectorMetaService（向量�
 5. 自动化触发器纳入 M3+（妙搭是独立面板体系，量大）
 6. routes.json 极简形状直接沿用
 
-## 11. 待补（依赖 HAR 采集）
+## 11. 采集状态与待补
 
-- [ ] SSE 事件流的具体事件类型/字段形状（stream/conversation/chat 的 chunk 格式）
-- [ ] Frontier WS 消息帧格式（QoS、ack）
-- [ ] 发布/回滚完整时序
-- [ ] OpenClaw agent 协议
+### 已完成（本阶段证据）
+| 数据 | 来源 | 状态 |
+|---|---|---|
+| 364 RPC / 25 Service API surface | IDE chunks 静态提取 | ✅ |
+| 沙箱绑定/预览/日志/数据 API/路由 | HAR（50MB，页面加载流量） | ✅ |
+| 对话请求层 + 暂存队列 + 工具调用结构 | IDE chunks（0122/0129/0142） | ✅ |
+| Spec 文件体系（4 个文件） | IDE chunks 常量提取 | ✅ |
+| 回滚协议字段 | IDE chunks（resetArtifactVersion） | ✅ |
+| Frontier WS SDK 参数 | IDE chunk 0051 | ✅ |
+| code-server / Vite HMR WS 端点 | HAR + nettap | ✅ |
+
+### 仍待补（需用户额度恢复后重采，**已有工具链就绪，10 分钟可完成**）
+- [ ] SSE 流的**逐事件**字段形状（`stream/conversation/chat` 每个 event 的 data 结构）——拦截器 v2 已布防（含 XHR 流式 + WS 二进制 base64），额度恢复后重走一次操作流即可收割
+- [ ] 发布 REST 调用的实际请求/响应体（`PublishApp` 时序）
+- [ ] code-server WS **二进制帧**内容（Agent 如何写文件/跑命令——对 appgen 设计价值极高）
+- [ ] 回滚的 UI 入口位置（用户未找到；协议层已明确，仅需确认入口）
+- [ ] OpenClaw agent 协议细节
+
+### 采集工具链（已就绪，可复用）
+- `/tmp/nettap2.js`：页面内网络拦截器（fetch + SSE tee + XHR 流式 + WS 二进制 base64）
+- `/tmp/cdp-hold-persist.mjs`：持久化注入（托管后台任务运行，刷新自动布防）
+- `/tmp/cdp-await-eval.mjs` + `/tmp/rea-full.mjs`：CDP 求值 / rea stdio 直连（MCP 管道断时的兜底）
