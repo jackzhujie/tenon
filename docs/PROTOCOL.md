@@ -101,6 +101,34 @@
   - 数据回滚开关：`dbRestore`（连同数据库一起回退）
 - **在线状态**：`POST /af/api/v1/studio/app/:appID/presence/heartbeat|leave`
 
+### 5.2b 多 Agent 编排配置（★ 复刻的黄金参考，实测 `GET /af/api/v1/studio/multi_agent/default_config?app_type=6`）
+
+共 **6 个内置 Agent**，每个含 `agent_key / name / description / model_tier_key / scheduling_mode / enabled / visible / configurable`：
+
+| key | 名称 | 职责（官方描述） | 模型档位 |
+|---|---|---|---|
+| `miaoda` | 妙搭助手 | **核心调度者**：理解需求、拆解任务、协调各助手协同完成开发 | comprehensive |
+| `Explore` | 代码检索 | 深入探索应用代码与关联服务，查询数据库结构、权限配置、日志记录 | fast |
+| `CodeAct` | 脚本帮手 | 编写并运行临时脚本，完成导入、转换、整理与一次性探查任务 | comprehensive |
+| `Librarian` | 调研助手 | 提前厘清规则、资料与约束条件，减少试错，降低返工成本 | fast |
+| `E2E` | 验收测试 | 用浏览器替你实际操作应用，验收功能是否正常、排查页面问题 | comprehensive |
+| `Reviewer` | 问题审查 | 深度审查代码的设计、性能与安全风险，定位根因并给出改进建议 | thinking |
+
+**关键机制**：
+- **模型分档路由**：`fast / comprehensive / thinking` 三档——同一 Agent 按档位选不同能力模型（复刻时映射到我们的 BYOK 模型档位配置）
+- `scheduling_mode: auto`（自动调度，主 Agent 决定何时唤起子 Agent）
+- `enabled / visible / configurable` 三态开关：部分 Agent 对用户隐藏（`miaoda`、`Explore` 为 visible=false）、是否允许用户配置
+- **复刻映射**：我们的 `orchestrator` crate 直接按此 6 角色建模（调度 + 检索 + 脚本 + 调研 + E2E 验收 + 审查），这是经过产品验证的最小完备 Agent 集
+
+### 5.2c 模型与风格配置
+
+- `GET /af/api/v1/studio/chat/model/list?bizType=miaoda` → 9 个模型：`auto`(智能选择)、`doubao-seed-2.1-turbo`、`deepseek-v4.1-flash`、`deepseek-v4-pro`、`deepseek-v4-flash`、`glm-5.3`、`glm-5.3-flash`、`glm-5.3-flashx`、`qwen-3.8-max`
+  → 印证我们的 **BYOK 多提供商 + "智能选择"默认档**设计正确
+- `GET /af/api/v1/studio/design_style/templates?scene=application_default` → 设计风格预设（每个含多张预览图 + cover_url）
+  → 对应我们「风格预设」功能
+- `GET /af/api/v1/studio/market/resources?resource_types=plugin|skill` → 插件/技能市场（OpenClaw 生态）
+- `GET /af/api/v1/studio/entitlements` → 配额/订阅（购买链接指向 feishu.cn/member/subscription）
+
 ### 5.3 Copilot 服务层 API 清单（客户端封装，复刻时对应 `orchestrator` crate）
 `FeidaListMessage / FeidaCreateConversation / FeidaListConversation / FeidaUpdateConversation / FeidaUpdateMessage / FeidaStopChat / FeidaGetAppArtifact / FeidaUpsertSpecMeta` + `GetSpecByConversation` + `GetWorkspaceFile` + `streamChatUrl` + `resetArtifactVersion`
 
@@ -166,6 +194,8 @@ DataTableService / DataloomService（表 CRUD）+ **VectorMetaService（向量�
 | 回滚协议字段 | IDE chunks（resetArtifactVersion） | ✅ |
 | Frontier WS SDK 参数 | IDE chunk 0051 | ✅ |
 | code-server / Vite HMR WS 端点 | HAR + nettap | ✅ |
+| **多 Agent 花名册（6 个 Agent + 三档模型路由）** | nettap v2（`/af/api/v1/studio/multi_agent/default_config`） | ✅ |
+| 模型列表 / 设计风格 / 插件市场 / 配额 | nettap v2（home 页 XHR） | ✅ |
 
 ### 仍待补（需用户额度恢复后重采，**已有工具链就绪，10 分钟可完成**）
 - [ ] SSE 流的**逐事件**字段形状（`stream/conversation/chat` 每个 event 的 data 结构）——拦截器 v2 已布防（含 XHR 流式 + WS 二进制 base64），额度恢复后重走一次操作流即可收割
