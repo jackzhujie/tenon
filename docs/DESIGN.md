@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.5
+# DESIGN.md — 详细方案设计 v1.2.6
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -91,7 +91,7 @@
 flowchart TB
   subgraph Shell["Electron 39 壳（薄）"]
     M["main：窗口/菜单/托盘/自动更新<br/>spawn 子进程 · 只做原生能力"]
-    P["preload：注入 baseUrl + token<br/>暴露原生桥"]
+    P["同源托管：server 发 index.html 时<br/>注入 window.__TENON__ + CSP"]
   end
 
   subgraph Web["Tenon Web App（React 19 + shadcn）"]
@@ -151,11 +151,33 @@ flowchart TB
 - server 以**独立子进程**运行：`spawn(process.execPath, [serverEntry], { env: { ELECTRON_RUN_AS_NODE: '1' } })`
   - 不额外打包 Node 运行时（复用 Electron 内置的 22.22.1）
   - server 崩溃不影响窗口，自动重启 + 现场恢复（pi-durable `resume()`）
-- 渲染器只认一个 `window.__STUDIO__ = { baseUrl, token, platform, version }`，**Electron 与浏览器走完全相同的代码路径**
+- 渲染器只认一个 `window.__TENON__ = { token }`（v1.2.6 起由 **server 在响应 index.html 时注入**，
+  不是 preload），**Electron 与浏览器走完全相同的代码路径**
 - 这样「Web 打开」不是附加功能，而是**架构的自然结果**；Agent（包括我）可以用浏览器/HTTP 直接驱动产品，读 DOM、截图、跑流程
 
-### 2.3 为什么这样分
+### 2.2.1 桌面壳落地约束（v1.2.6 实测）
 
+M1 第 9 步把 §2.2 的三条原则落成 `apps/desktop`。四条当时没写、踩了才知道：
+
+1. **页面由 server 同源发出去，不用 `file://`、不用 preload 注入 Token。**
+   `startServer({ webDir })` 让 Fastify 托管 `apps/web/dist`：首页免 Token，
+   **响应 index.html 时把 `window.__TENON__={token}` 与 CSP 写进 `<head>`**，其余 `/rpc/*`、`/events`、`/api/*` 照旧要 Token。
+   好处是页面与接口同源（CORS 彻底不参与）、前端路由回落只写一次、Token 不必经过任何特权通道。
+2. **打包后 `process.execPath` 是 Tenon 自己，不是 node。**
+   所以 supervisor 一律 `spawn(process.execPath, [server.mjs], { env: {...env, ELECTRON_RUN_AS_NODE: '1'} })`，
+   既不要求用户装 node，也不用再塞一份 node 二进制（Electron 39 内置 22.22.1，`node:sqlite` 实测可用）。
+3. **server 打成一个文件（esbuild），`templates` 必须落在 `dist/templates`。**
+   依赖全是纯 JS（产品库是 `node:sqlite`，PGlite 只属于生成应用），12MB 单文件、零原生模块 —— 铁律 3 在打包脚本里
+   用"扫 `dist/` 找 `.node`/`binding.gyp`，发现就失败"兜住。`registry.ts` 按 `import.meta.url` 找 `../templates`，
+   所以 `dist/server/server.mjs` 的兄弟目录必须叫 `templates`。
+4. **生命周期只有一个出口：`TENON_READY`。** 端口是 0（系统分配）、Token 每次随机；
+   就绪前退出 → 报错并把 stderr 带出去；就绪后崩溃 → 退避重启并把**新地址**交回窗口；
+   关窗即退出（单窗口产品留着进程 = 留一个占端口的 server）。
+
+已知限制（M2 处理）：预览装依赖走 `pnpm install`（`TENON_PNPM` 可覆盖）。**没有 pnpm 的机器上，桌面版能建应用、能对话，但预览起不来。**
+正式发布要么内置一个包管理器，要么改走 `npm` + 随包的 lockfile。
+
+### 2.3 为什么这样分
 | 备选 | 问题 |
 |---|---|
 | 业务逻辑写在 Electron main（IPC） | Web 形态要重写一遍；main 崩溃=整个 App 崩；Agent 无法驱动 |
@@ -246,9 +268,11 @@ tenon/
 │   │   │   └── styles/
 │   │   └── vite.config.ts
 │   └── desktop/                  # Electron 壳（不含业务）
-│       ├── src/main/             # 窗口、server supervisor、菜单、更新
-│       ├── src/preload/
-│       └── electron-builder.yml
+│       ├── src/main.ts           # 窗口、导航守卫、SMOKE 探针（只有生命周期）
+│       ├── src/supervisor.ts     # spawn server + 解析 TENON_READY + 退避重启（不 import electron）
+│       ├── src/paths.ts          # 打包前后资源路径的唯一算法
+│       ├── build.mjs             # esbuild 打 server 单文件 + 拷模板与 web 产物 + 扫原生模块
+│       └── electron-builder.yml  # files: 主进程 / extraResources: server,web,templates
 ├── packages/
 │   ├── protocol/                 # ★ zod 契约：RPC 入参出参、SSE 事件、领域类型
 │   ├── server/                   # Fastify 应用装配、路由、SSE 总线

@@ -1,0 +1,22 @@
+{
+  "name": "@tenon/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron 壳：spawn 本机 server、读 TENON_READY、把浏览器换成窗口（业务一行都不在这里）",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node scripts/launch.mjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "electron": "39.8.10",
+    "electron-builder": "26.18.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  },
+  "author": "Tenon"
+}

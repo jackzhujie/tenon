@@ -10,6 +10,16 @@ import { TRANSPORT, rpcFail } from '@tenon/protocol'
 /** 健康检查不需要 Token：外部 supervisor / 探针要用，且它不泄露任何用户数据 */
 const PUBLIC_PATHS = new Set<string>([TRANSPORT.healthPath])
 
+export interface AuthOptions {
+  /**
+   * 额外放行的路径（页面与它的静态资源）。
+   *
+   * 注意方向：这是**白名单**，默认仍然是"没 Token 就 401"。
+   * 反过来写（"除接口外全放行"）看着更省事，但下一个新增的接口会默认裸奔。
+   */
+  isPublic?: (path: string) => boolean
+}
+
 function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a)
   const right = Buffer.from(b)
@@ -26,10 +36,11 @@ export function extractToken(request: FastifyRequest): string | undefined {
   return typeof fromQuery === 'string' && fromQuery !== '' ? fromQuery : undefined
 }
 
-export function requireBearer(token: string) {
+export function requireBearer(token: string, options: AuthOptions = {}) {
   return async function authHook(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const path = request.url.split('?')[0] ?? request.url
     if (PUBLIC_PATHS.has(path)) return
+    if (options.isPublic?.(path) === true) return
     const provided = extractToken(request)
     if (provided === undefined || !safeEqual(provided, token)) {
       await reply

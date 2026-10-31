@@ -1,22 +1,24 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-10-31（M1 主干第 1~7 步 + **工具层 + 生成器 + 预览网关 + Web 渲染器**落地，73 个测试 + 9 项端到端冒烟 + 14 项真机 e2e 全绿；`pnpm dev:web` 浏览器里全流程走通）
+> 最后更新：2026-10-31（**M1 全部 9 步落地**：88 个测试 + 9 项端到端冒烟 + 14 项预览 e2e + 8 项桌面冒烟全绿；`pnpm dev:web` 与打包后的 `Tenon.app` 都实测走通）
 
 ---
 
 ## 0. 一句话现状
 
-**M0 逆向完成 → DESIGN v1.2.5 → 四个 spike 全过 → M1 主干第 1~8 步已落地：一条命令起界面，对话里改代码，右侧 iframe 当场热更新。**
+**M1 完成（第 1~9 步）：一条命令起界面，对话里改代码，右侧 iframe 当场热更新，并且已经能打成 `Tenon.app` 双击运行。**
 
 先跑这三条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
-pnpm dev:faux                   # 只想看 server：faux 模型，不需要 API Key（打印 TENON_READY）
-pnpm test                       # 73 项单测 + 集成测试（约 40s）
+pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
+pnpm test                       # 88 项单测 + 集成测试（约 55s）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 14 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 改文件 → HMR（要联网）
+pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
+pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界面、退出后不留孤儿进程
 ```
 
 - `packages/{protocol,core,agent,server}` 已建；`pnpm typecheck` 全绿（含四个 spike）
@@ -30,7 +32,10 @@ pnpm e2e:preview                # 14 项真机全链路：建应用 → 装依�
   挂到 App Gateway 后面，iframe 打开的就是它（实测 4.3s 就绪，含依赖安装）
 - **有界面了**：`apps/web`（React 19 + Vite 7 + Tailwind 4）左栏会话 + 右栏 iframe，`pnpm dev:web` 一条命令起；
   浏览器里实测：建应用 → 自动起预览 → iframe 出现模板页 → 改 `repo/src/App.tsx` → **iframe 不刷新就变了**
-- **还没做**：Electron 壳（第 9 步）
+- **能装成桌面应用了**：`apps/desktop` 主进程只做生命周期（spawn server → 读 `TENON_READY` → 开窗口），
+  页面由 server **同源托管**并在 index.html 里注入 Token（不走 preload、不走 `file://`）；
+  `pnpm pack:desktop` 出 `Tenon.app`，打包冒烟实测：窗口出界面 → 退出后子进程收干净
+- **M1 到此为止**：下一步是 M2（让生成的应用有后端：NestJS + PGlite + 迁移 + 单一 `DATABASE_URL`）
 
 ---
 
@@ -108,11 +113,11 @@ pnpm e2e:preview                # 14 项真机全链路：建应用 → 装依�
 | 6.6 | **生成器**：`templates/react-vite` 铺进 `repo/`，与首次 commit 同一个动作 | ✅ | `packages/generator/` |
 | 7 | **预览**：App Gateway + dev server 编排（`preview.start/stop/status` + `preview.status` 事件） | ✅ | `packages/gateway/` |
 | 8 | **Web 模式**：`pnpm dev:web` 全流程可用（前端 React 19 + Vite 7） | ✅ | `apps/web` + `scripts/dev-web.ts` |
-| 9 | **Electron 壳**：最后接入，打包冒烟（mac + win） | ⬜ 下一步 | `apps/desktop`，spawn `server/src/bin.ts` 读 `TENON_READY` |
+| 9 | **Electron 壳** + 同源托管 + 打包冒烟 | ✅ mac 实测（win 待 M6 有机器时补） | `apps/desktop`（main/supervisor/paths + build.mjs）、`packages/server/src/static.ts` |
 
-**M1 的闭环已经完整**：界面上点「新建应用」→ 铺模板 → 自动起预览 → 在对话里说需求 → Agent 改代码 → iframe 热更新。
-`data-tenon-loc` 的编译期注入按计划留到 M3。`data-tenon-loc` 的编译期注入按计划留到 M3 ——
-它是编译期插件，对已存在的应用补上不产生任何返工，不急。
+**M1 完成**：界面上点「新建应用」→ 铺模板 → 自动起预览 → 在对话里说需求 → Agent 改代码 → iframe 热更新 →
+关掉窗口、双击 `Tenon.app` 再来一次，数据都在。
+`data-tenon-loc` 的编译期注入按计划留到 M3 —— 它是编译期插件，对已存在的应用补上不产生任何返工，不急。
 
 ### 4.3 M1 验收（DoD）
 
@@ -123,21 +128,25 @@ pnpm e2e:preview                # 14 项真机全链路：建应用 → 装依�
 - [x] 每轮对话产生一个 git commit —— `chat.ts` 每轮结束调 `commitAll`；**本轮没有文件改动时不产生空提交**。
       工具层接上后已能真的产出 commit（`tools.test.ts` 断言：建应用 1 个 + 写文件那轮 1 个）
 - [x] 杀进程重启后，对话与任务能续跑（`resume()`）—— `packages/server/test/chat.test.ts` 的「崩溃续跑」用例：生成中途关进程 → 重启 → 这一轮自己跑完（403ms）
+- [x] 打包成桌面应用并双击可用 —— `pnpm pack:desktop` 出 `Tenon.app`（x64，289MB）；
+      `pnpm smoke:desktop:packaged` 八项全过：**窗口加载的是渲染器（标题「Tenon · 榫」）**、拿到了注入的 Token、
+      不落错误页、退出后 server 真的停了（端口没人听）。安装包内**零原生模块**（`build.mjs` 扫 `dist/` 兜底）
 
-### 4.4 下一步具体做什么（第 9 步：Electron 壳）
+### 4.4 下一步具体做什么（M2 第 1 步：让生成的应用有后端）
 
-M1 的功能面只剩"打包成桌面应用"这一层。**不做 Electron 也已经是可用产品**（`pnpm dev:web`），
-所以第 9 步的重点不是功能，而是把三件事做对：
+M1 已完成。M2 的目标是「生成的应用不只是页面，而是有库、有接口、能 CRUD」，
+而**三档数据库供给已经在 spike 里验过**（`docs/SPIKES.md`），所以第一步不是调研，是接线：
 
-1. **窗口 = 壳**：`apps/desktop` 主进程 spawn `packages/server/src/bin.ts`（`ELECTRON_RUN_AS_NODE=1`），
-   读 stdout 的 `TENON_READY {url,token}` → `loadURL` 到 web 的构建产物（同源托管，不走 CORS）。
-   **业务一行都不许写进主进程**，否则 Web 模式与 Agent 自调试一起废（铁律 1）。
-2. **生命周期**：窗口关闭 → SIGTERM 子进程 → 等它把 `tenon.db` 关干净；崩溃 → 重启子进程并保留窗口。
-   端口/token 每次都变，所以**只能从 `TENON_READY` 读**，不许拼。
-3. **打包**：`extraResources` 带上 `packages/generator/templates/`（或设 `TENON_TEMPLATES_DIR`）、
-   带上 `apps/web/dist`。装完体积与原生模块清单都要复核（铁律 3：安装包内不得有需要按平台编译的依赖）。
-
-做完之后 M2 才是"让生成的应用有后端"（NestJS + PGlite + 迁移 + `DATABASE_URL` 单一环境变量）。
+1. **`packages/db-provisioner`**：把 spike 的结论固化成接口 —— `DatabaseProvider { start(), stop(), connectionString(), dump(), restore() }`。
+   默认档 `pglite`（WASM 版 PG，零安装），发布档 `postgres`（Docker/外部/云）。
+   **`pool.max` 必须是 1**（v1.2.1 的硬约束，写进接口注释与测试）。
+2. **`templates/nest-api`**：NestJS 11 + TypeORM + PostgreSQL 方言 + zod 共享层。
+   迁移只写一份，`pglite` 与 `postgres` 跑同一份 —— 这是 M2 的验收核心（DESIGN §17）。
+3. **`preview.start` 加后端一半**：起的进程从 1 个变 2 个（Vite + Nest），网关按路径分流（`/api/*` → Nest）。
+   注意 v1.2.5 那条：**端口先定再告诉别人**，否则 HMR 与 API 都会指空气。
+4. **`DATABASE_URL` 是生成应用唯一认的环境变量**（铁律 2）。切换库只改它，代码零改动。
+5. 顺带欠账：桌面版预览依赖系统 `pnpm`（`TENON_PNPM` 可覆盖）。M2 要给安装包找一个自带包管理器的方案，
+   否则「双击装完却起不来预览」是必然投诉。
 
 ### 4.5 代码地图（只列已落地的）
 
@@ -173,7 +182,8 @@ packages/
     ├── src/auth.ts      #   Bearer（/api/health 免 Token）
     ├── src/cors.ts      #   只放行回环 origin；预检必须排在鉴权**之前**
     ├── src/handlers.ts  #   `satisfies HandlerMap` → 漏实现编译期就报错
-    ├── src/bin.ts       #   CLI 入口，打印 TENON_READY
+    ├── src/static.ts    #   同源托管 web 产物：页面免 Token + index.html 注入 __TENON__ 与 CSP
+    ├── src/bin.ts       #   CLI 入口，打印 TENON_READY（TENON_WEB_DIR 可选）
     └── test/support.ts  #   集成测试夹具：boot / rpc / openSse（先连后发只此一份实现）
 
 apps/web/                # 渲染器：server 的纯客户端（DESIGN §14.6）
@@ -185,14 +195,24 @@ apps/web/                # 渲染器：server 的纯客户端（DESIGN §14.6）
 ├── src/features/preview/PreviewPanel.tsx  # iframe + 「装依赖→起服务→首屏」三段进度
 └── src/features/apps/   #   AppMenu / NewAppDialog（默认选能跑的那个模板）
 
+apps/desktop/            # Electron 壳：只做生命周期（DESIGN §2.2.1）
+├── src/main.ts          #   窗口 / 导航守卫 / 关窗即退出 / SMOKE 探针
+├── src/supervisor.ts    #   spawn server（ELECTRON_RUN_AS_NODE）+ 解析 TENON_READY + 退避重启（不 import electron，可单测）
+├── src/paths.ts         #   打包前后资源路径的唯一算法（dist/ ↔ Contents/Resources/ 同构）
+├── build.mjs            #   esbuild 打 server 单文件 + 拷模板/web + 扫原生模块（铁律 3 兜底）
+├── scripts/launch.mjs   #   清掉 ELECTRON_RUN_AS_NODE 再起 electron
+└── electron-builder.yml #   files: 主进程 / extraResources: server,web,templates
+
 scripts/
 ├── dev-web.ts           # 起 server → 读 TENON_READY → 把 url/token 注入 Vite
 ├── smoke.ts             # 端到端冒烟（真 spawn bin.ts）
+├── smoke-desktop.ts     # 桌面冒烟：真起 Electron / Tenon.app，加载界面后退出并验证不留孤儿进程
 └── e2e-preview.ts       # 14 项真机断言（含 HMR 经网关的真实推送）
 ```
 
 依赖方向（DESIGN §3.2）**禁止反向**：`protocol ← 全部`；`server → {core, agent, generator, gateway}`；
-`agent/gateway → core`；`generator → protocol`（只拿 `TenonError`）；`apps/web → protocol`（**只有类型 + 两个常量**）。
+`agent/gateway → core`；`generator → protocol`（只拿 `TenonError`）；`apps/web → protocol`（**只有类型 + 两个常量**）；
+`apps/desktop` **不 import 任何 `@tenon/*`**（只 spawn 进程，DESIGN 铁律 1）。
 `core` 不依赖 `generator`：铺模板走 `AppStore.create` 的 `scaffold` 钩子，由 `server` 注入（DESIGN §8.7）。
 
 ---
@@ -239,6 +259,13 @@ scripts/
 | **flex 子项少了 `flex-1` 会静默塌成 0 高** | 两栏根节点是 `<section class="flex flex-col">` 的子项，不给增长就退回内容高度，里面的 `flex-1 overflow-y-auto` 连带塌掉。症状像"数据没回来"，DOM 里文字却都在 |
 | **默认模板不能取 `templates[0]`** | `blank` 排在最前（最简单），但建完是空目录 → 预览必然以「没有 package.json」失败，用户第一眼是红字。默认取 `react-vite`；`entry === null` 的模板不自动起预览 |
 | **`status` 不从列表里取就一直是「准备中」** | `select` / `booted` 两个归约都要 `apps.find(id)?.status`。只置 `null` 的话，界面要等到这个应用下次推 `app.status` 才正常 |
+| **环境里的 `ELECTRON_RUN_AS_NODE` 会把 `electron .` 变成 node** | 表现是 `import { app } from 'electron'` 报 `does not provide an export named 'BrowserWindow'`，看着像"Electron 不支持 ESM"（其实 39 支持）。根因：带着这个变量，主进程按普通 node 跑，`'electron'` 解析到 npm 包里那个"返回可执行文件路径"的 shim。**从 IDE / 其他 Electron 应用里启动脚本时会自动带上它**。启动前必须删（`apps/desktop/scripts/launch.mjs` + `supervisor` 只对自己 spawn 的 server 设它） |
+| **esbuild 打 ESM 单文件必须注入 `require`** | 依赖里有 CJS（isomorphic-git → shim → `sha.js`），产物以 `Dynamic require of "buffer" is not supported` 崩在启动第一行。`banner: { js: "createRequire(import.meta.url)" }`，见 `apps/desktop/build.mjs` |
+| **打包后 `process.execPath` 不是 node** | 是 Tenon 自己。所以要 `ELECTRON_RUN_AS_NODE=1` 才能跑 `server.mjs`；好处是不用再塞一份 node（Electron 39 内置 22.22.1，`node:sqlite` 实测可用） |
+| **`templates` 的目录位置是隐式契约** | `registry.ts` 按 `import.meta.url` 找 `../templates`。server 打成 `dist/server/server.mjs` 后，模板必须落 `dist/templates`（打包后是 `Contents/Resources/templates`）。改名就静默找不到模板 |
+| **静态托管要分"页面公开"与"接口公开"** | 页面与 assets 免 Token（否则窗口里只有 401 的 JSON），但 `/rpc/*`、`/events`、`/api/*` 必须照旧要 Token。别写成"除接口外全放行"——下一个新增接口会默认裸奔 |
+| **SPA 回落不能对 `/assets/*.js` 生效** | 回落成 HTML 时浏览器只报 `SyntaxError: Unexpected token '<'`，根本看不出是 404。`looksLikeFile()` 按扩展名区分 |
+| **`index.html` 不能被缓存** | 它是注入 Token 的那一份，缓存住 = 上一个进程的 token（必然 401）。`no-cache`；只有带哈希的 `/assets/` 给 `immutable` |
 
 ---
 
@@ -253,14 +280,19 @@ scripts/
 日常入口（在仓库根目录）：
 
 ```bash
-pnpm dev:web        # ★ 日常开工：server + 前端一起起，浏览器开 127.0.0.1:5173
-pnpm dev:faux       # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
-pnpm dev:server     # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test           # vitest：7 个 packages/apps + 4 个 spikes
-pnpm smoke          # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
-pnpm e2e:preview    # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
-pnpm build:web      # 前端产物（Electron 打包时用）
-pnpm typecheck      # 6 个 packages + apps/web + 4 个 spikes + scripts
+pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏览器开 127.0.0.1:5173
+pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
+pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
+pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
+pnpm test                  # vitest：8 个 packages/apps + 4 个 spikes（88 项）
+pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
+pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
+pnpm build:web             # 前端产物
+pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates}
+pnpm pack:desktop          # electron-builder --dir → apps/desktop/release/mac/Tenon.app
+pnpm smoke:desktop         # 桌面冒烟（开发态）：真起 Electron，8 项断言
+pnpm smoke:desktop:packaged # 同上，但跑打包后的 Tenon.app
+pnpm typecheck             # 7 个 packages + 2 个 apps + 4 个 spikes + scripts（13 个项目）
 ```
 
 spike 复跑入口（历史证据，仍在）：
@@ -272,8 +304,12 @@ pnpm spike:gateway  # 网关 HMR 代理
 pnpm spike:loc      # 定位插件精度
 ```
 
-服务端环境变量：`TENON_HOME`（数据目录，默认 `~/.tenon`）、`TENON_PORT`（0=随机）、
-`TENON_HOST`、`TENON_TOKEN`、`TENON_FAUX=1`（假模型）、`TENON_LOG=1`（pino）。
+服务端环境变量：`TENON_HOME`（数据目录，默认 `~/.tenon`；桌面版默认 `<userData>/home`）、
+`TENON_PORT`（0=随机）、`TENON_HOST`、`TENON_TOKEN`、`TENON_FAUX=1`（假模型）、`TENON_LOG=1`（pino）、
+`TENON_WEB_DIR`（给了就同源托管这份渲染器产物）、`TENON_TEMPLATES_DIR`（模板目录）、`TENON_PNPM`（装依赖用的包管理器）。
+
+> 桌面版冒烟在**受限环境**（容器 / 无 GPU / 从 IDE 里跑）需要 `--no-sandbox --disable-gpu`，
+> `scripts/smoke-desktop.ts` 已经代劳；产品本身不传这两个开关。
 
 > `spikes/*/pgdata*`、`spikes/*/work/` 是运行产物，已 gitignore；`results/*.json` 保留入库作为证据。
 

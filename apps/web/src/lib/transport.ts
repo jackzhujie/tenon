@@ -4,8 +4,8 @@
  * | 形态 | `baseUrl` | `token` |
  * |---|---|---|
  * | 开发（`pnpm dev:web`） | Vite 注入的 `__TENON_BASE__` | Vite 注入的 `__TENON_TOKEN__` |
- * | Electron | preload 挂到 `window.__TENON__` | 同上，来自 supervisor |
- * | Web / 同源托管 | `location.origin` | 无（同源 + server 自己认定来源） |
+ * | Electron / 同源托管 | `location.origin` | server 在 index.html 里注入的 `window.__TENON__` |
+ * | 纯 Web（反代在别的域名） | 同左，靠注入 | 同左 |
  *
  * 为什么 token 不能写死在代码里：它是**每次启动随机生成**的（见 `server/src/auth.ts`）。
  * 所以它只能是运行时注入，前端不生成它、不保存它、也不往日志里打。
@@ -39,9 +39,15 @@ function trimTrailingSlash(value: string): string {
 
 export function resolveEndpoint(): TenonEndpoint {
   const bridge = typeof window === 'undefined' ? undefined : window.__TENON__
-  if (bridge?.baseUrl !== undefined && bridge.baseUrl !== '') {
+  if (bridge !== undefined) {
+    /*
+     * 只带 token 也算桥接：同源托管时 server 只注入 `{token}`，
+     * `baseUrl` 省掉就是 `location.origin`。以前这里要求 baseUrl 非空，
+     * 结果**同源形态下注入的 token 被整份丢掉**，界面能打开但所有请求 401。
+     */
+    const base = bridge.baseUrl === undefined || bridge.baseUrl === '' ? location.origin : bridge.baseUrl
     return {
-      baseUrl: trimTrailingSlash(bridge.baseUrl),
+      baseUrl: trimTrailingSlash(base),
       token: bridge.token === undefined || bridge.token === '' ? null : bridge.token,
     }
   }

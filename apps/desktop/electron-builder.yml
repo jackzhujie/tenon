@@ -1,0 +1,45 @@
+# 打包配置。三条约定都在 `build.mjs` 里铺好了，这里只负责搬运：
+#
+# - `files` 只放主进程：`dist/main.mjs` 的外部依赖只有 `electron` 本身，
+#   所以 asar 里没有任何需要按平台编译的东西（铁律 3，`build.mjs` 末尾会扫一遍）
+# - `extraResources` 把 `dist/{server,web,templates}` 原样放到 `Contents/Resources/` 下，
+#   和开发态的 `apps/desktop/dist/` **同构** —— 主进程不需要知道自己在不在 asar 里
+# - `identity: null`：本地冒烟不签名。正式发布要换成真证书（M6 才会碰到）
+appId: dev.tenon.app
+productName: Tenon
+copyright: Tenon
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/main.mjs
+  - package.json
+
+extraResources:
+  - from: dist/server
+    to: server
+  - from: dist/web
+    to: web
+  - from: dist/templates
+    to: templates
+
+asar: true
+# 模板与页面在 asar 外面（生成器要按真实路径读文件），所以只有主进程进 asar
+
+mac:
+  category: public.app-category.developer-tools
+  identity: null
+  target:
+    - target: dmg
+    - target: zip
+
+win:
+  target:
+    - target: nsis
+
+linux:
+  category: Development
+  target:
+    - target: AppImage

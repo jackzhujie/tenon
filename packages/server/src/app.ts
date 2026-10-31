@@ -23,6 +23,7 @@ import { requireBearer } from './auth.js'
 import { corsHeaderRecord, handleCors } from './cors.js'
 import { createHandlers, type HandlerMap, type ServerDeps } from './handlers.js'
 import { SseBus } from './sse.js'
+import { createStaticServing, type StaticServing } from './static.js'
 
 const HEARTBEAT_MS = 15_000
 
@@ -36,6 +37,12 @@ export interface BuildServerOptions {
   token: string
   version?: string
   logger?: boolean
+  /**
+   * 渲染器产物目录（`apps/web/dist`）。给了就由 server 同源发页面，
+   * 并把 Token 注入 index.html —— Electron 壳与 Web 模式都走这条路。
+   * 不给就是纯 API 服务（测试、将来纯前后端分离部署）。
+   */
+  web?: { dir: string }
 }
 
 export interface TenonServer {
@@ -64,7 +71,17 @@ export function buildServer(options: BuildServerOptions): TenonServer {
 
   // ★ CORS 必须在鉴权之前：预检请求不带 Authorization，先鉴权会把预检打成 401
   app.addHook('onRequest', handleCors)
-  app.addHook('onRequest', requireBearer(options.token))
+  // 页面与静态资源免 Token（它们本身就是公开的 JS/CSS）；接口一律要 Token
+  const web = options.web === undefined ? null : createStaticServing({
+    dir: options.web.dir,
+    token: options.token,
+  })
+  app.addHook(
+    'onRequest',
+    requireBearer(options.token, {
+      isPublic: (path) => web !== null && web.isPublicPath(path),
+    }),
+  )
 
   app.setErrorHandler((error, request, reply) => {
     if (isTenonError(error)) {
@@ -174,6 +191,21 @@ export function buildServer(options: BuildServerOptions): TenonServer {
     // 不再走 fastify 的 reply 生命周期，交给 raw socket
     return reply
   })
+
+  // ---------------------------------------------------------------- 静态页面
+
+  /*
+   * 通配路由只接"没人认领"的 GET：`/rpc/:method` 是 POST、`/events` 是精确路由，
+   * find-my-way 的优先级是 静态 > 参数 > 通配，所以这里不会把接口抢走。
+   * 返回 false 的（受保护前缀、非 GET）落到下面的 404 处理器。
+   */
+  if (web !== null) {
+    app.get('/*', async (request, reply) => {
+      if (await web.handle(request, reply)) return reply
+      // 走到这里说明是「受保护前缀但方法不对」之类，不是页面请求，别假装成 SPA
+      return reply.code(404).type('text/plain; charset=utf-8').send('Not Found')
+    })
+  }
 
   // ---------------------------------------------------------------- 兜底
 

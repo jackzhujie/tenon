@@ -42,9 +42,9 @@
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.5**；四个技术 spike 全部跑通。**M1 主干第 1~8 步已落地**：
-六个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `server`）+ 渲染器 `apps/web` ——
-一条命令起界面，左栏对话、右栏 iframe。
+M0 逆向研究完成；方案 **v1.2.6**；四个技术 spike 全部跑通。**M1 全部完成**：
+六个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `server`）+ 两个 app
+（渲染器 `apps/web`，浏览器与窗口共用一套代码；壳 `apps/desktop`，只做生命周期）。
 
 能力边界（都已实测）：
 
@@ -52,22 +52,28 @@ M0 逆向研究完成；方案 **v1.2.5**；四个技术 spike 全部跑通。**
 - Agent 有 `read/write/edit/bash` 四个工具，**写完的文件进得了这一轮的 commit**
 - 新建应用用 `react-vite` 模板铺出可跑工作区，`preview.start` 装依赖 + 起 Vite + 挂到 App Gateway
 - **改 `repo/src/App.tsx` → iframe 里的标题当场变**（HMR 经网关的 WebSocket 透传，页面不整页刷新）
+- **能打成桌面应用**：`pnpm pack:desktop` → `Tenon.app`，双击打开就是上面那套界面；
+  主进程不 import 任何 `@tenon/*`（铁律：Electron 只当壳）
 
-73 个测试 + 9 项端到端冒烟 + 14 项真机 e2e 全绿。
+88 个测试 + 9 项端到端冒烟 + 14 项预览 e2e + 8 项桌面冒烟全绿。安装包内**零原生模块**。
 
 想先跑起来看（**不需要任何 API Key**，用的是 pi-ai 自带的 faux 模型）：
 
 ```bash
 pnpm install
-pnpm dev:web      # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
-pnpm test         # 73 项单测 / 集成测试
-pnpm smoke        # 9 项端到端（spawn 真进程，走 HTTP + SSE）
-pnpm e2e:preview  # 14 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
+pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
+pnpm dev:desktop            # ★ 或者直接起桌面版
+pnpm test                   # 88 项单测 / 集成测试
+pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
+pnpm e2e:preview            # 14 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
+pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app
+pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后不留孤儿进程
 ```
 
-接真模型：`TENON_FAUX=0 pnpm dev:web`，再去设置里加一个 OpenAI 兼容的提供商。
+接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**还没做的**：Electron 壳（第 9 步）—— 见 [STATUS.md §4.2/§4.4](docs/STATUS.md)。实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
+**下一步**：M2 —— 让生成的应用有后端（NestJS + PGlite + 迁移 + 单一 `DATABASE_URL`），见 [STATUS.md §4.4](docs/STATUS.md)。
+实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License
 

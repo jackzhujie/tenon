@@ -21,6 +21,7 @@ async function main(): Promise<void> {
     port,
     ...(flag('TENON_HOST') === undefined ? {} : { host: flag('TENON_HOST') }),
     ...(flag('TENON_TOKEN') === undefined ? {} : { token: flag('TENON_TOKEN') }),
+    ...(flag('TENON_WEB_DIR') === undefined ? {} : { webDir: flag('TENON_WEB_DIR') }),
     logger: flag('TENON_LOG') !== undefined,
   })
 

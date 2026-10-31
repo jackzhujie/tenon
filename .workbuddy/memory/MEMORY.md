@@ -7,16 +7,16 @@
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
 ## 当前状态（2026-10-31 深夜）
-M0 逆向完成 → **DESIGN v1.2.5** → 四个 spike 全过 → **M1 主干第 1~8 步已落地**。
-六个包 `packages/{protocol,core,agent,generator,gateway,server}` + 渲染器 `apps/web`：
-服务能起、能对话（SSE 流式）、能落库、能每轮自动 git 提交、崩溃后 `resume()` 续跑；
-**Agent 有 read/write/edit/bash 四个工具、写完的文件进得了这一轮的 commit**；
-**新建应用用 `react-vite` 铺出可跑工作区，`preview.start` 装依赖 + 起 Vite + 挂网关**；
-**`pnpm dev:web` 一条命令起界面：左栏对话、右栏 iframe，改 `repo/src/App.tsx` → iframe 当场变（HMR 经网关）**。
-`pnpm typecheck` 12 project + `pnpm test` 73 项 + `pnpm smoke` 9 项 + `pnpm e2e:preview` 14 项全绿；
-`pnpm dev:web` / `pnpm dev:faux` 都不需要任何 API Key。
-**下一步**：第 9 步 Electron 壳（`apps/desktop`：spawn `bin.ts` + `ELECTRON_RUN_AS_NODE` → 读 `TENON_READY` → `loadURL` 到 `apps/web/dist`）。
-**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 下一步拆解 / §4.5 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`（唯一事实来源）。
+**M1 全部 9 步完成** → DESIGN **v1.2.6**。六个包 + 两个 app（`apps/web` 渲染器、`apps/desktop` 壳）。
+服务能起、能对话（SSE 流式）、能落库、每轮自动 git 提交、崩溃后续跑；
+Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮的 commit；
+新建应用铺 `react-vite` 模板 → `preview.start` 装依赖 + 起 Vite + 挂网关 → iframe 打开就是它；
+`pnpm dev:web` 一条命令起界面，改 `repo/src/App.tsx` → iframe 当场变（HMR 经网关）；
+**`pnpm pack:desktop` 出 `Tenon.app`（289MB、零原生模块），打包冒烟 8 项全过**。
+`pnpm typecheck` 13 project + `pnpm test` 88 项 + `smoke` 9 + `e2e:preview` 14 + `smoke:desktop(:packaged)` 8 全绿。
+**下一步**：M2 第 1 步 —— `packages/db-provisioner`（pglite 默认 / postgres 发布，`pool.max=1`）+ `templates/nest-api`，
+`preview.start` 扩成 Vite + Nest 双进程按路径分流。欠账：桌面版预览依赖系统 pnpm。
+**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 下一步拆解 / §4.5 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`。
 
 ## 三条铁律
 1. **Electron 只做壳**，业务全在本地 HTTP Server（否则 Web 模式 / Agent 自调试 / SaaS 化全废）
@@ -68,6 +68,16 @@ M0 逆向完成 → **DESIGN v1.2.5** → 四个 spike 全过 → **M1 主干第
 - **默认模板取 `react-vite` 不取 `templates[0]`**（`blank` 排第一但建完跑不起来）；`entry === null` 的模板不自动起预览
 - **`select` / `booted` 都要从 apps 里取回 `status`**，只置 null 会一直显示「准备中」
 - **CORS 预检必须排在鉴权之前**（OPTIONS 不带 Authorization）；SSE `reply.hijack()` 后要手写 `corsHeaderRecord`
+
+## 桌面壳硬约束（v1.2.6，Electron 实测）
+- **环境里的 `ELECTRON_RUN_AS_NODE` 会让 `electron .` 变成 node**：症状是 `import { app } from 'electron'` 报 `does not provide an export named 'BrowserWindow'`（像"不支持 ESM"，其实支持）。从 IDE/其他 Electron 应用启动脚本会自带它 → 启动前必须删（`apps/desktop/scripts/launch.mjs`），`scrubEnv` 也剥掉
+- **esbuild 打 ESM 单文件必须 `banner: createRequire(import.meta.url)`**（isomorphic-git 依赖链里有 CJS），否则 `Dynamic require of "buffer" is not supported`
+- **打包后 `process.execPath` 是 Tenon 自己**：spawn server 必须带 `ELECTRON_RUN_AS_NODE=1`；Electron 39 内置 node 22.22.1，`node:sqlite` 可用，不必再塞 node
+- **`templates` 必须是 bundle 的兄弟目录**：`registry.ts` 按 `import.meta.url` 找 `../templates` → `dist/templates`（打包后 `Resources/templates`）
+- **页面由 server 同源托管并在 index.html 注入 `__TENON__` + CSP**：不用 preload、不用 `file://`。页面/assets 免 Token，`/rpc/*`、`/events`、`/api/*` 要 Token（白名单方向）
+- **SPA 回落不能对 `/assets/*.js` 生效**（回落成 HTML 只有 `SyntaxError`）；**index.html 必须 `no-cache`**（它携带 token）
+- **冒烟要在页面内断言 `window.__TENON__.token`**，不要在外部 fetch index.html（探针打印后进程就退出，是竞态）
+- 受限环境（容器/无 GPU）起 Chromium 要 `--no-sandbox --disable-gpu`，只给冒烟脚本
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程

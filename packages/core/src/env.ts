@@ -18,6 +18,9 @@ export function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) continue
     if (key.startsWith('TENON_')) continue
+    // 桌面版用它把 Electron 的可执行文件当 node 跑；漏给生成应用没有任何好处，
+    // 却会让「子进程里再起一个 electron」变成静默的"当 node 跑了"
+    if (key === 'ELECTRON_RUN_AS_NODE') continue
     if (SECRETISH.test(key)) continue
     out[key] = value
   }

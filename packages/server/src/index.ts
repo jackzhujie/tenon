@@ -26,6 +26,8 @@ export interface StartServerOptions {
   token?: string
   version?: string
   logger?: boolean
+  /** 给了就把渲染器产物同源发出去并注入 Token（Electron 壳 / Web 模式） */
+  webDir?: string
   /** 测试用：库进内存，不碰真实 HOME */
   inMemoryDb?: boolean
   /**
@@ -91,6 +93,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     token,
     ...(options.version === undefined ? {} : { version: options.version }),
     ...(options.logger === undefined ? {} : { logger: options.logger }),
+    ...(options.webDir === undefined ? {} : { web: { dir: options.webDir } }),
   })
 
   await server.app.listen({ host, port: options.port ?? 0 })

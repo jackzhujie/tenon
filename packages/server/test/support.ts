@@ -14,6 +14,8 @@ export const TEST_TOKEN = 'test-token'
 export interface BootOptions {
   env?: NodeJS.ProcessEnv
   preview?: Pick<PreviewManagerOptions, 'launch' | 'installDeps' | 'readyTimeoutMs'>
+  /** 给了就由 server 同源托管这份产物（`static.test.ts` 用） */
+  webDir?: string
 }
 
 export function boot(dir: string, options: BootOptions = {}): Promise<RunningServer> {
@@ -22,6 +24,7 @@ export function boot(dir: string, options: BootOptions = {}): Promise<RunningSer
     token: TEST_TOKEN,
     env: { TENON_HOME: dir, TENON_FAUX: '1', ...(options.env ?? {}) },
     ...(options.preview === undefined ? {} : { preview: options.preview }),
+    ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
   })
 }
 
