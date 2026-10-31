@@ -3,101 +3,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SseEvent } from '@tenon/protocol'
-import { startServer, type RunningServer } from '../src/index.js'
+import type { RunningServer } from '../src/index.js'
+import { boot as bootServer, openSse, rpc } from './support.js'
 
 let dir: string
 let running: RunningServer | undefined
 
-async function boot(): Promise<RunningServer> {
-  return startServer({ port: 0, token: 'test-token', env: { TENON_HOME: dir, TENON_FAUX: '1' } })
-}
-
-async function rpc<T>(server: RunningServer, method: string, input: unknown = {}): Promise<T> {
-  const response = await fetch(`${server.url}/rpc/${method}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer test-token' },
-    body: JSON.stringify(input),
-  })
-  const body = (await response.json()) as { ok: boolean; data?: T; error?: unknown }
-  if (!body.ok) throw new Error(`${method} 失败：${JSON.stringify(body.error)}`)
-  return body.data as T
-}
-
-interface SseClient {
-  readonly events: SseEvent[]
-  /** 连接建立（收到首帧）后 resolve —— 必须等它，否则会漏掉开头的增量 */
-  readonly connected: Promise<void>
-  waitFor(predicate: (events: SseEvent[]) => boolean, timeoutMs?: number): Promise<void>
-  close(): void
-}
-
-function openSse(server: RunningServer, appId: string): SseClient {
-  const events: SseEvent[] = []
-  const controller = new AbortController()
-  const waiters = new Set<() => void>()
-  let connectedResolve: () => void = () => {}
-  const connected = new Promise<void>((resolve) => {
-    connectedResolve = resolve
-  })
-
-  void (async (): Promise<void> => {
-    const response = await fetch(`${server.url}/events?appId=${appId}`, {
-      headers: { authorization: 'Bearer test-token' },
-      signal: controller.signal,
-    })
-    const reader = response.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let first = true
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      if (first) {
-        first = false
-        connectedResolve()
-      }
-      buffer += decoder.decode(value, { stream: true })
-      let index = buffer.indexOf('\n\n')
-      while (index >= 0) {
-        const frame = buffer.slice(0, index)
-        buffer = buffer.slice(index + 2)
-        index = buffer.indexOf('\n\n')
-        const dataLine = frame.split('\n').find((line) => line.startsWith('data: '))
-        if (dataLine !== undefined) events.push(JSON.parse(dataLine.slice(6)) as SseEvent)
-      }
-      for (const waiter of [...waiters]) waiter()
-    }
-  })().catch(() => {
-    // 主动 close 会 reject fetch，这不是错误
-  })
-
-  return {
-    events,
-    connected,
-    waitFor(predicate, timeoutMs = 20_000) {
-      return new Promise<void>((resolve, reject) => {
-        const finish = (): void => {
-          clearTimeout(timer)
-          waiters.delete(check)
-        }
-        const timer = setTimeout(() => {
-          finish()
-          reject(new Error('等待 SSE 事件超时'))
-        }, timeoutMs)
-        const check = (): void => {
-          if (!predicate(events)) return
-          finish()
-          resolve()
-        }
-        waiters.add(check)
-        check()
-      })
-    },
-    close() {
-      controller.abort()
-    },
-  }
-}
+const boot = (): Promise<RunningServer> => bootServer(dir)
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'tenon-chat-'))

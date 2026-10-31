@@ -12,7 +12,8 @@
 import type { MutableModels, Provider } from '@earendil-works/pi-ai/models'
 import { createModels, createProvider } from '@earendil-works/pi-ai/models'
 import * as completions from '@earendil-works/pi-ai/api/openai-completions'
-import { fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai/providers/faux'
+import type { FauxResponseStep } from '@earendil-works/pi-ai/providers/faux'
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai/providers/faux'
 import { TenonError } from '@tenon/protocol'
 import type { CoreServices } from '@tenon/core'
 import { SETTING_KEYS } from '@tenon/core'
@@ -28,6 +29,14 @@ export interface ModelChoice {
   readonly modelId: string
 }
 
+/**
+ * faux 的剧本一步。刻意用**自己的**窄类型而不是 pi 的 `AssistantMessage`：
+ * 调用方（测试、演示脚本）不该为了写一句台词去 import pi（铁律 3）。
+ */
+export type ScriptStep =
+  | { readonly text: string }
+  | { readonly tool: string; readonly args: Record<string, unknown> }
+
 export interface ResolvedModel {
   readonly mode: 'faux' | 'openai-compatible'
   readonly choice: ModelChoice
@@ -37,10 +46,16 @@ export interface ResolvedModel {
    * 真实 provider 下是 no-op。
    */
   primeTurn(userText: string): void
+  /**
+   * 测试/演示专用：给下一轮换一份剧本（`tool` 那一步会真的调用工具）。
+   * 真实 provider 下是 no-op —— 生产路径永远不会走到这里。
+   */
+  script(steps: readonly ScriptStep[]): void
 }
 
 interface FauxHandle {
   appendResponses(messages: unknown[]): void
+  setResponses(messages: unknown[]): void
 }
 
 function readParams(paramsJson: string | null): { contextWindow?: number; maxTokens?: number } {
@@ -66,11 +81,17 @@ function buildFaux(): ResolvedModel {
   const models = createModels()
   models.setProvider(faux.provider)
   const handle = faux as unknown as FauxHandle
+  // script() 换过剧本后，下一次 primeTurn 不能再追加默认台词，否则会排在剧本后面
+  let scripted = false
   return {
     mode: 'faux',
     choice: { provider: FAUX_PROVIDER_ID, modelId: FAUX_MODEL_ID },
     models,
     primeTurn(userText: string) {
+      if (scripted) {
+        scripted = false
+        return
+      }
       const excerpt = userText.replace(/\s+/g, ' ').slice(0, 40)
       handle.appendResponses([
         fauxAssistantMessage(
@@ -80,7 +101,19 @@ function buildFaux(): ResolvedModel {
         ),
       ])
     },
+    script(steps: readonly ScriptStep[]) {
+      handle.setResponses(steps.map(toFauxStep))
+      scripted = true
+    },
   }
+}
+
+function toFauxStep(step: ScriptStep): FauxResponseStep {
+  if ('text' in step) return fauxAssistantMessage(step.text)
+  return fauxAssistantMessage([fauxToolCall(step.tool, step.args as never)], {
+    // 不带这个，agent 循环不会去执行工具，只会当成一段"说完就停"的消息
+    stopReason: 'toolUse',
+  })
 }
 
 function buildOpenAICompatible(
@@ -141,6 +174,9 @@ function buildOpenAICompatible(
     models,
     primeTurn() {
       /* 真实 provider 不需要预置响应 */
+    },
+    script() {
+      /* 只有 faux 有剧本 */
     },
   }
 }

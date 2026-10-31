@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.2
+# DESIGN.md — 详细方案设计 v1.2.3
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -370,6 +370,27 @@ await harness.resume()          // ★ 每个进程启动必须调用：续跑�
 - **会话池**：LRU 保持 N 个应用 harness 打开（默认 3），其余按 `contextRetentionMs` 回收；`close` 前确保 `commit` 落盘
 - **崩溃恢复**：子进程重启 → `Harness.open` + `resume()` → 未完成 generation/tool 继续；模型半截回答保留并标记 aborted
 - **工具重放策略**：只读类工具标 `replay: 'safe'`（读文件、搜索、查询）；写文件/跑命令/发布**绝不**标记，崩溃后交回模型决策
+
+### 4.3.1 工具层（`packages/agent/src/tools/coding.ts`）
+
+> **v1.2.3 落地要点**：`pi-coding-agent` 与 `pi-durable` 对「工具」的定义**不一样**，直接用会编译不过、运行时也不通。
+
+| | `pi-coding-agent` | `pi-durable` |
+|---|---|---|
+| 工厂 | `createReadToolDefinition(cwd)` | `defineTool({ ... })` |
+| 执行签名 | `execute(toolCallId, params, signal, onUpdate, ctx)` | `execute(args, api, context)` |
+| 返回值 | `AgentToolResult{ content, details, isError }` | `ToolExecutionResult{ output, details, isError }` |
+| 流式 | `onUpdate(累计快照)` | `api.output(增量)` |
+| 上下文 | `ExtensionToolContext`（UI/会话一大坨） | chord `Context`（`abortSignal` + telemetry） |
+
+结论：**必须有一层 adapter**（这正好是铁律 3 的第二个落地点，和 `models.ts` 同一个道理）。
+
+- **ctx 可以传 `undefined`**：bash 关掉 `exposeSessionEnvironment`，read/write/edit 根本不碰 ctx。不要为了"看起来对"去伪造一个 `ExtensionToolContext`
+- **`onUpdate` 是累计快照，`api.output` 要增量** → 按前缀差量下发；快照被截断后不再是前缀就停止实时推流（最终结果仍完整）
+- **`edit` 的入参是 `edits: [{ oldText, newText }]`**，不是 `old_string/new_string`。给模型看的 schema 由 `pi-coding-agent` 提供，别自己另写一份
+- **`section()` 的 key 必须匹配 `/^[a-z][a-z0-9_-]*$/`** —— 写成 `tenon.workspace` 会让**每一轮 submit** 抛 `INTERNAL`（点号不合法）
+- **边界**：文件工具的 `path` 必须在 `repo/` 内（越界返回错误结果、不抛异常，让模型自己改）；bash 的 `cwd` 钉死 + 环境变量按名字洗掉密钥与 `TENON_*`。系统调用级隔离留给 M7
+- **`replay` 分级**：`read`/`write` = `safe`（幂等）；`edit`/`bash` = `unsafe`（`oldText` 可能已失效、`npm install` 重跑有副作用）
 
 ### 4.4 妙搭概念 → pi-durable 原语（映射表）
 

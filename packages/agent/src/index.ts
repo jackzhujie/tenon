@@ -14,6 +14,7 @@ export * from './models.js'
 export * from './harness-pool.js'
 export * from './normalize.js'
 export * from './docs.js'
+export * from './tools/coding.js'
 export { ChatService } from './chat.js'
 
 export interface AgentRuntimeOptions {

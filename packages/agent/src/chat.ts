@@ -81,6 +81,7 @@ export class ChatService {
   private readonly inflight = new Map<string, SubmissionHandle>()
   private readonly watchers = new Map<string, AgentEventStream>()
   private readonly deltas: DeltaCoalescer
+  private closed = false
 
   constructor(private readonly options: ChatServiceOptions) {
     this.deltas = new DeltaCoalescer((appId, text) => {
@@ -166,6 +167,25 @@ export class ChatService {
     }
   }
 
+  /**
+   * 状态变化必须**同时**落库与推事件：前端靠 `app.status` 判断"这一轮结束了吗"，
+   * 用它去放开输入框。之前只写库不推事件，前端只能猜（或者等 git.commit —— 没改动时就没有）。
+   *
+   * 关闭之后一律跳过：进程正在退出时，submission 的 settle 回调可能晚于 `close()` 到达，
+   * 那时 `tenon.db` 已经关了，写库会抛 `database is not open` 变成 unhandled rejection
+   * （测试里表现为"33 项全过但有 2 个 unhandled error"）。
+   */
+  private setStatus(appId: string, status: 'idle' | 'running' | 'error'): void {
+    if (this.closed) return
+    try {
+      this.options.apps.setStatus(appId, status)
+      this.options.publish({ type: 'app.status', appId, status })
+    } catch (err) {
+      // 状态是给人看的信息，落不了库不值得把进程带崩；真出错有别的日志兜着
+      console.error(`[tenon] 写入应用状态失败（${status}）：`, err)
+    }
+  }
+
   async submit(appId: string, input: Omit<ChatSubmitInput, 'appId'>): Promise<{ submissionId: string }> {
     const app = this.options.apps.require(appId)
     if (input.content.trim() === '') {
@@ -186,19 +206,23 @@ export class ChatService {
       ctx,
     )
     this.inflight.set(appId, submission)
-    this.options.apps.setStatus(appId, 'running')
+    this.setStatus(appId, 'running')
 
     void submission
       .wait(ctx)
       .then(async (settled) => {
         this.deltas.flushNow(appId)
         this.inflight.delete(appId)
-        this.options.apps.setStatus(appId, 'idle')
-        await this.commitTurn(app, submission.id, settled.status)
+        // 先提交再放 idle：前端看到「空闲」时版本列表必须已经是新的
+        try {
+          await this.commitTurn(app, submission.id, settled.status)
+        } finally {
+          this.setStatus(appId, 'idle')
+        }
       })
       .catch((err: unknown) => {
         this.inflight.delete(appId)
-        this.options.apps.setStatus(appId, 'error')
+        this.setStatus(appId, 'error')
         this.options.publish({
           type: 'error',
           appId,
@@ -219,6 +243,8 @@ export class ChatService {
     submissionId: unknown,
     status: string,
   ): Promise<void> {
+    // 进程正在退出：这一轮没跑完，别在这时候去动 git
+    if (this.closed) return
     const paths = appPaths(this.options.home, app.id)
     const result = await gitops
       .commitAll(paths.repoDir, `chat: ${status === 'done' ? '一轮对话' : `未完成（${status}）`}`, {
@@ -250,7 +276,7 @@ export class ChatService {
     await submission.abort(ctx)
     this.deltas.flushNow(appId)
     this.inflight.delete(appId)
-    this.options.apps.setStatus(appId, 'idle')
+    this.setStatus(appId, 'idle')
     return true
   }
 
@@ -285,6 +311,7 @@ export class ChatService {
   }
 
   async close(): Promise<void> {
+    this.closed = true
     this.deltas.flushAll()
     this.deltas.dispose()
     for (const [appId, stream] of this.watchers) {
