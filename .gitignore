@@ -1,27 +1,35 @@
-# Rust
-/target/
-**/*.rs.bk
-
-# Node
+# ---- 依赖与构建 ----
 node_modules/
 dist/
+dist-electron/
+out/
+release/
+*.tsbuildinfo
+.turbo/
+.pnpm-store/
+
+# ---- 日志与临时 ----
+*.log
+npm-debug.log*
 .DS_Store
+Thumbs.db
 
-# Tauri
-apps/desktop/src-tauri/target/
-apps/desktop/src-tauri/gen/
-
-# 逆向研究产物（内部，不开源）
-docs/reverse/*.har
-docs/reverse/*.saz
-docs/reverse/*.mitm
-docs/reverse/*.asar
-docs/reverse/**/bundle-dump/
-
-# 本地数据
+# ---- 本地数据（绝不入库）----
 *.sqlite
 *.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.studio/
+.env
+.env.local
 
-# IDE
+# ---- 逆向研究产物（内部，不随开源发布）----
+docs/reverse/
+*.har
+*.saz
+*.mitm
+
+# ---- IDE ----
 .idea/
 .vscode/
+!.vscode/extensions.json
