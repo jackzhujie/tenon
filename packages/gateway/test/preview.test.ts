@@ -97,6 +97,13 @@ describe('PreviewManager', () => {
     expect(ready.readiness).toEqual({ deps: 'ready', server: 'ready', preview: 'ready' })
     expect(ready.url).not.toBeNull()
     expect(ready.gatewayPort).not.toBe(ready.upstreamPort)
+    /*
+     * ★ 端口必须**一一对上**：`gatewayPort` 会被写进 dev server 的 `TENON_GATEWAY_PORT`，
+     * 模板拿它做 `server.hmr.clientPort`。这里若只是「有个端口、url 也能打开」，
+     * 随机端口照样通过 —— 但浏览器里的 HMR 会去连那个没人监听的端口，永远不工作，
+     * 而且页面上看不出任何异常（页面是走 url 打开的）。
+     */
+    expect(new URL(ready.url as string).port).toBe(String(ready.gatewayPort))
 
     const response = await fetch(ready.url as string)
     expect(await response.text()).toBe('<h1>你好</h1>')

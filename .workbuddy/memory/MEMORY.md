@@ -7,13 +7,15 @@
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
 ## 当前状态（2026-10-31 深夜）
-M0 逆向完成 → **DESIGN v1.2.4** → 四个 spike 全过 → **M1 主干第 1~7 步已落地**（`599ed98`、`6f08edb`、最新一次）。
-六个包 `packages/{protocol,core,agent,generator,gateway,server}`：
+M0 逆向完成 → **DESIGN v1.2.5** → 四个 spike 全过 → **M1 主干第 1~8 步已落地**。
+六个包 `packages/{protocol,core,agent,generator,gateway,server}` + 渲染器 `apps/web`：
 服务能起、能对话（SSE 流式）、能落库、能每轮自动 git 提交、崩溃后 `resume()` 续跑；
 **Agent 有 read/write/edit/bash 四个工具、写完的文件进得了这一轮的 commit**；
-**新建应用会用 `react-vite` 模板铺出可跑工作区，`preview.start` 装依赖 + 起 Vite + 挂网关，iframe 打开的就是它**。
-`pnpm test` 62 项 + `pnpm smoke` 9 项 + `pnpm e2e:preview` 12 项全绿；`pnpm dev:faux` 不需要任何 API Key。
-**下一步**：`apps/web`（会话 + iframe 两栏）→ `pnpm dev:web` → Electron 壳。
+**新建应用用 `react-vite` 铺出可跑工作区，`preview.start` 装依赖 + 起 Vite + 挂网关**；
+**`pnpm dev:web` 一条命令起界面：左栏对话、右栏 iframe，改 `repo/src/App.tsx` → iframe 当场变（HMR 经网关）**。
+`pnpm typecheck` 12 project + `pnpm test` 73 项 + `pnpm smoke` 9 项 + `pnpm e2e:preview` 14 项全绿；
+`pnpm dev:web` / `pnpm dev:faux` 都不需要任何 API Key。
+**下一步**：第 9 步 Electron 壳（`apps/desktop`：spawn `bin.ts` + `ELECTRON_RUN_AS_NODE` → 读 `TENON_READY` → `loadURL` 到 `apps/web/dist`）。
 **开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 下一步拆解 / §4.5 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`（唯一事实来源）。
 
 ## 三条铁律
@@ -56,6 +58,16 @@ M0 逆向完成 → **DESIGN v1.2.4** → 四个 spike 全过 → **M1 主干第
 - **先定端口再 `strictPort`**：让 dev server 自己换端口 = 网关指空气 + iframe 白屏无报错
 - **`@vitejs/plugin-react` 6.x 的 peer 是 `vite@^8`**：模板用 vite 7 必须配 5.x
 - **`preview.start` 立刻返回 `starting`**，进度靠 SSE `preview.status`，就绪发 `preview.ready`（别在 RPC 里等安装）
+
+## 渲染器硬约束（v1.2.5，`apps/web` 实测）
+- **`startGateway` 必须显式传 `port`**：端口是「先占后告诉」的（`findFreePorts` → `TENON_GATEWAY_PORT` → 模板的 `server.hmr.clientPort`）。网关自己随机挑一个，浏览器就被指去没人监听的端口 → **页面照常打开、日志干净，只有 HMR 永远不来**。断言必须是「`url` 的端口 === `gatewayPort`」，用 `url` 连 WS 是自证
+- **`.bin/<cli>` 是 shell 包装**，`node .bin/tsx` → `SyntaxError`；要读 `package.json.bin` 拿 `.js/.mjs` 入口再交给 node
+- **浏览器只 import `@tenon/protocol/browser`**（零依赖子路径）：主入口的 `z.object` 在模块顶层求值，rollup tree-shake 不掉，实测 356KB → 256KB
+- **`TRANSPORT` 是路径与头名的唯一来源**：server 的 `app.ts`/`auth.ts`/`cors.ts` 不许再手写 `'/rpc/'`、`authorization`
+- **flex 子项少了 `flex-1` 会静默塌成 0 高**（DOM 里文字都在，界面上什么都没有）
+- **默认模板取 `react-vite` 不取 `templates[0]`**（`blank` 排第一但建完跑不起来）；`entry === null` 的模板不自动起预览
+- **`select` / `booted` 都要从 apps 里取回 `status`**，只置 null 会一直显示「准备中」
+- **CORS 预检必须排在鉴权之前**（OPTIONS 不带 Authorization）；SSE `reply.hijack()` 后要手写 `corsHeaderRecord`
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程

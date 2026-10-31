@@ -23,12 +23,3 @@ export function rpcOk<T>(data: T): RpcSuccess<T> {
 export function rpcFail(error: z.infer<typeof ErrorPayload>): RpcFailure {
   return { ok: false, error }
 }
-
-/** 传输层约定：RPC 走 `POST /rpc/<method>`，body 即入参；事件走 `GET /events?appId&since` */
-export const TRANSPORT = {
-  rpcPathPrefix: '/rpc/',
-  eventsPath: '/events',
-  healthPath: '/api/health',
-  /** 渲染器与本机 server 之间唯一的凭证头 */
-  tokenHeader: 'authorization',
-} as const

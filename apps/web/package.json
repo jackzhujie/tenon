@@ -1,0 +1,26 @@
+{
+  "name": "@tenon/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tenon 渲染器：会话 + 预览两栏（只依赖 @tenon/protocol，不 import 任何服务端实现）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tenon/protocol": "workspace:*",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}

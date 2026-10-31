@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.4
+# DESIGN.md — 详细方案设计 v1.2.5
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -869,6 +869,19 @@ App Gateway  http://127.0.0.1:<gwPort>     ← iframe / 浏览器访问的唯一
 几百次之后 dev server 撞在 FD 上限上开始莫名拒绝连接。这个坑只有"真的去关一遍 stub 上游"才暴露
 （`server.close()` 永远等不到回调，测试直接卡在 afterEach）。
 
+**★ v1.2.5 补一条（最贵的一条，M1 实测）**：`startGateway` 的 `port` **必须显式传**，不能让它自己挑。
+
+```
+原因链：findFreePorts 先占下 gwPort → 写进 TENON_GATEWAY_PORT → 模板用它做 server.hmr.clientPort
+        → 若不把 gwPort 传给 startGateway，网关会随机再绑一个
+        → 浏览器里的 HMR 客户端被指去那个"已经写死在配置里、但没人监听"的端口
+```
+
+症状极其隐蔽：**页面照常打开**（iframe 用的是 `url`），服务端日志干净，我们自己连 `url` 的探针也能连上——
+只有"iframe 里那份热更新"永远不来，表现为"改了代码要手动刷新"。所以断言要落在
+**「`url` 的端口 === `gatewayPort`」**上（`packages/gateway/test/preview.test.ts` + `scripts/e2e-preview.ts`
+各有一条），而不是"有个端口能打开就行"。
+
 Vite 侧配置：
 
 ```ts
@@ -1223,6 +1236,23 @@ CMD ["node", "dist/server/main.js"]
 1. 选提供商 + 填 Key（可跳过，之后在设置里配）→ 连通性测试（发一句"ping"，显示延迟与模型名）
 2. 选默认档位映射（fast / comprehensive / thinking）
 3. 建第一个应用：给 3 个示例需求模板（内部工具 / 数据看板 / 表单审批）
+
+### 14.6 渲染器实现约束（v1.2.5，`apps/web` 实测）
+
+Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` 说 RPC、经 `lib/stream.ts` 收 SSE，
+不直连数据库、不 import 任何 `@tenon/core|agent`。三条落地时撞出来的硬约束：
+
+1. **浏览器只 import `@tenon/protocol/browser`**。主入口的 `z.object(...)` 全在模块顶层求值，
+   rollup 无法 tree-shake —— 实测把 zod 整张表打进产物：356KB → 256KB（gzip 109KB → 80KB，模块数 146 → 48）。
+   该子路径只许放零运行时依赖的导出。
+2. **`SSE` 必须"先连上再提交"**，且只能按 `sseEventTypes` 逐个 `addEventListener` ——
+   `EventSource` 对带 `event:` 的帧不触发 `onmessage`，漏一种就是那类事件静默消失。
+3. **两栏根节点必须 `flex min-h-0 flex-1 flex-col`**。少了 `flex-1` 它退回内容高度，
+   里面的 `flex-1 overflow-y-auto` 连带塌成 0 —— DOM 里文字都在，界面上什么都没有。
+   症状特别像"数据没回来"，实测是纯 CSS。
+
+交互上还有两条"第一次打开就会被看见"的默认值：默认模板取 `react-vite` 而不是列表第一条（`blank` 建完是空目录，
+预览必然失败）；`select` / `booted` 都要从应用列表里取回 `status`，否则状态栏会一直停在「准备中」。
 
 ---
 

@@ -226,7 +226,14 @@ export class PreviewManager {
       if (run.cancelled) return
 
       // 3. 网关先起：url 立刻确定，前端不用等 dev server
-      const gateway = await startGateway({ routes: [{ prefix: '/', port: vitePort }] })
+      //
+      // `port` 必须显式传：这个端口是**提前用 `findFreePorts` 占好**的，
+      // 而且已经通过 `TENON_GATEWAY_PORT` 告诉了 dev server 的 vite 配置
+      // （模板里 `server.hmr.clientPort` 就用它）。不传的话网关会随机再挑一个，
+      // 于是「告诉浏览器的端口」和「真正在听的端口」不是一个 ——
+      // 症状极隐蔽：页面照常打开（iframe 用的是 url），但 HMR 的 WebSocket 永远连不上，
+      // 因为客户端被指去了那个没人监听的端口。
+      const gateway = await startGateway({ routes: [{ prefix: '/', port: vitePort }], port: gatewayPort })
       run.gateway = gateway
       run.url = gateway.url
       if (run.cancelled) {

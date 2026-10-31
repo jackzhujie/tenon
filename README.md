@@ -42,23 +42,32 @@
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.4**；四个技术 spike 全部跑通。**M1 主干第 1~7 步已落地**：
-六个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `server`）能起服务、能对话、能落库、能自动提交，
-Agent 有 `read/write/edit/bash` 四个工具、能真的改代码；新建应用会用 `react-vite` 模板铺出可跑的工作区，
-`preview.start` 装依赖 + 起 Vite + 挂到 App Gateway 后面 —— **iframe 里打开的就是它**（实测 4.3s 就绪）。
-62 个测试 + 9 项端到端冒烟 + 1 条真机 e2e 全绿。
+M0 逆向研究完成；方案 **v1.2.5**；四个技术 spike 全部跑通。**M1 主干第 1~8 步已落地**：
+六个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `server`）+ 渲染器 `apps/web` ——
+一条命令起界面，左栏对话、右栏 iframe。
 
-想先跑起来看（**不需要任何 API Key**）：
+能力边界（都已实测）：
+
+- 服务能起、能对话、能落库、每轮自动 git 提交，崩溃重启后这一轮能续跑
+- Agent 有 `read/write/edit/bash` 四个工具，**写完的文件进得了这一轮的 commit**
+- 新建应用用 `react-vite` 模板铺出可跑工作区，`preview.start` 装依赖 + 起 Vite + 挂到 App Gateway
+- **改 `repo/src/App.tsx` → iframe 里的标题当场变**（HMR 经网关的 WebSocket 透传，页面不整页刷新）
+
+73 个测试 + 9 项端到端冒烟 + 14 项真机 e2e 全绿。
+
+想先跑起来看（**不需要任何 API Key**，用的是 pi-ai 自带的 faux 模型）：
 
 ```bash
 pnpm install
-pnpm dev:faux     # 起 server，打印 TENON_READY {url,port,token,home,model}
-pnpm test         # 62 项单测 / 集成测试
+pnpm dev:web      # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
+pnpm test         # 73 项单测 / 集成测试
 pnpm smoke        # 9 项端到端（spawn 真进程，走 HTTP + SSE）
-pnpm e2e:preview  # 真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件
+pnpm e2e:preview  # 14 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 ```
 
-**还没做的**：Web 前端、Electron 壳 —— 见 [STATUS.md §4.2/§4.4](docs/STATUS.md)。实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
+接真模型：`TENON_FAUX=0 pnpm dev:web`，再去设置里加一个 OpenAI 兼容的提供商。
+
+**还没做的**：Electron 壳（第 9 步）—— 见 [STATUS.md §4.2/§4.4](docs/STATUS.md)。实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License
 

@@ -1,21 +1,22 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-10-31（M1 主干第 1~6 步 + **工具层 + 生成器 + 预览网关**落地，62 个测试 + 9 项端到端冒烟 + 1 条真机 e2e 全绿）
+> 最后更新：2026-10-31（M1 主干第 1~7 步 + **工具层 + 生成器 + 预览网关 + Web 渲染器**落地，73 个测试 + 9 项端到端冒烟 + 14 项真机 e2e 全绿；`pnpm dev:web` 浏览器里全流程走通）
 
 ---
 
 ## 0. 一句话现状
 
-**M0 逆向完成 → DESIGN v1.2.4 → 四个 spike 全过 → M1 主干第 1~7 步已落地（能跑、能写代码、能在 iframe 里看到应用）。**
+**M0 逆向完成 → DESIGN v1.2.5 → 四个 spike 全过 → M1 主干第 1~8 步已落地：一条命令起界面，对话里改代码，右侧 iframe 当场热更新。**
 
 先跑这三条验证它还活着：
 
 ```bash
-pnpm install && pnpm dev:faux   # 不需要 API Key，用 faux 模型起服务（会打印 TENON_READY）
-pnpm test                       # 62 项单测 + 集成测试
+pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
+pnpm dev:faux                   # 只想看 server：faux 模型，不需要 API Key（打印 TENON_READY）
+pnpm test                       # 73 项单测 + 集成测试（约 40s）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
-pnpm e2e:preview                # 真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 改文件（要联网）
+pnpm e2e:preview                # 14 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 改文件 → HMR（要联网）
 ```
 
 - `packages/{protocol,core,agent,server}` 已建；`pnpm typecheck` 全绿（含四个 spike）
@@ -27,7 +28,9 @@ pnpm e2e:preview                # 真机全链路：建应用 → 装依赖 → 
   写完的文件进得了这一轮的 commit（`packages/agent/src/tools/coding.ts`）
 - **能真的看到一个应用**：`app.create` 会用 `react-vite` 模板铺出可跑的工作区，`preview.start` 装依赖 + 起 Vite +
   挂到 App Gateway 后面，iframe 打开的就是它（实测 4.3s 就绪，含依赖安装）
-- **还没做**：Web 前端（第 8 步）、Electron 壳（第 9 步）
+- **有界面了**：`apps/web`（React 19 + Vite 7 + Tailwind 4）左栏会话 + 右栏 iframe，`pnpm dev:web` 一条命令起；
+  浏览器里实测：建应用 → 自动起预览 → iframe 出现模板页 → 改 `repo/src/App.tsx` → **iframe 不刷新就变了**
+- **还没做**：Electron 壳（第 9 步）
 
 ---
 
@@ -104,32 +107,37 @@ pnpm e2e:preview                # 真机全链路：建应用 → 装依赖 → 
 | 6.5 | **工具层**：read/write/edit/bash 接进 pi-durable（cwd 钉在 `repo/`、越界拒写、环境洗净） | ✅ | `packages/agent/src/tools/coding.ts` |
 | 6.6 | **生成器**：`templates/react-vite` 铺进 `repo/`，与首次 commit 同一个动作 | ✅ | `packages/generator/` |
 | 7 | **预览**：App Gateway + dev server 编排（`preview.start/stop/status` + `preview.status` 事件） | ✅ | `packages/gateway/` |
-| 8 | **Web 模式**：`pnpm dev:web` 全流程可用（前端 React 19 + Vite 7） | ⬜ 下一步 | `apps/web` |
-| 9 | **Electron 壳**：最后接入，打包冒烟（mac + win） | ⬜ | `apps/desktop`，spawn `server/src/bin.ts` 读 `TENON_READY` |
+| 8 | **Web 模式**：`pnpm dev:web` 全流程可用（前端 React 19 + Vite 7） | ✅ | `apps/web` + `scripts/dev-web.ts` |
+| 9 | **Electron 壳**：最后接入，打包冒烟（mac + win） | ⬜ 下一步 | `apps/desktop`，spawn `server/src/bin.ts` 读 `TENON_READY` |
 
-**M1 的生成链路已经闭合**：`app.create` 铺模板 → Agent 用工具改代码 → `preview.start` 起 dev server → iframe 看结果。
-唯一缺的是**给人用的界面**（第 8 步）。`data-tenon-loc` 的编译期注入按计划留到 M3 ——
+**M1 的闭环已经完整**：界面上点「新建应用」→ 铺模板 → 自动起预览 → 在对话里说需求 → Agent 改代码 → iframe 热更新。
+`data-tenon-loc` 的编译期注入按计划留到 M3。`data-tenon-loc` 的编译期注入按计划留到 M3 ——
 它是编译期插件，对已存在的应用补上不产生任何返工，不急。
 
 ### 4.3 M1 验收（DoD）
 
-- [ ] `pnpm dev:web` 打开即可对话 —— server 侧已具备，缺 Web 前端（第 8 步）
-- [x] 生成一个纯前端 Todo 应用，iframe 里热更新生效 —— 链路已通：模板铺得出、dev server 起得来、网关打得开、
-      改文件后 dev server 立刻重新转译（`pnpm e2e:preview` 逐条打印）。**"Todo" 本身要等 Web 前端能对话后由 Agent 写**
+- [x] `pnpm dev:web` 打开即可对话 —— 浏览器实测：建应用 → 发消息 → 流式回来 → 自动 git 提交 → 版本数 +1
+- [x] 生成一个纯前端 Todo 应用，iframe 里热更新生效 —— 模板铺得出、dev server 起得来、网关打得开；
+      **浏览器里实测**：改 `repo/src/App.tsx` 的 `<h1>` → iframe 里的标题当场变，页面没有整页刷新（计数不归零）。
+      `pnpm e2e:preview` 另有 14 条机器人断言（含「HMR 推送指向刚改的模块」）。**真正"Todo 应用"要等接真模型**
 - [x] 每轮对话产生一个 git commit —— `chat.ts` 每轮结束调 `commitAll`；**本轮没有文件改动时不产生空提交**。
       工具层接上后已能真的产出 commit（`tools.test.ts` 断言：建应用 1 个 + 写文件那轮 1 个）
 - [x] 杀进程重启后，对话与任务能续跑（`resume()`）—— `packages/server/test/chat.test.ts` 的「崩溃续跑」用例：生成中途关进程 → 重启 → 这一轮自己跑完（403ms）
 
-### 4.4 下一步具体做什么（第 8 步：`apps/web`）
+### 4.4 下一步具体做什么（第 9 步：Electron 壳）
 
-1. ~~**工具层**~~ ✅ / ~~**生成器**~~ ✅（`packages/generator`，DESIGN §8.7）/ ~~**网关**~~ ✅（`packages/gateway`）
-2. **`apps/web`**（React 19 + Vite 7，只依赖 `@tenon/protocol`）：
-   - 左栏会话（`chat.history` + SSE 增量），右栏 iframe（`preview.ready` 的 url）
-   - 应用列表 / 新建（`app.create` → 自动 `preview.start`）/ 模板选择（`template.list`）
-   - `preview.status` 事件驱动「装依赖 → 起服务 → 就绪」三段进度，**不要白屏**
-   - SSE 客户端**先连后发**（DESIGN §4.5 第 4 条）；`since` 断线续传、`stream.reset` 时重拉 `chat.history`
-3. **`pnpm dev:web`**：并行起 server（`bin.ts` 打印 `TENON_READY`）+ web（从 `TENON_READY` 那行取 url/token）
-4. **Electron 壳**（第 9 步）：spawn `bin.ts`、读 `TENON_READY`、窗口加载 web 的构建产物
+M1 的功能面只剩"打包成桌面应用"这一层。**不做 Electron 也已经是可用产品**（`pnpm dev:web`），
+所以第 9 步的重点不是功能，而是把三件事做对：
+
+1. **窗口 = 壳**：`apps/desktop` 主进程 spawn `packages/server/src/bin.ts`（`ELECTRON_RUN_AS_NODE=1`），
+   读 stdout 的 `TENON_READY {url,token}` → `loadURL` 到 web 的构建产物（同源托管，不走 CORS）。
+   **业务一行都不许写进主进程**，否则 Web 模式与 Agent 自调试一起废（铁律 1）。
+2. **生命周期**：窗口关闭 → SIGTERM 子进程 → 等它把 `tenon.db` 关干净；崩溃 → 重启子进程并保留窗口。
+   端口/token 每次都变，所以**只能从 `TENON_READY` 读**，不许拼。
+3. **打包**：`extraResources` 带上 `packages/generator/templates/`（或设 `TENON_TEMPLATES_DIR`）、
+   带上 `apps/web/dist`。装完体积与原生模块清单都要复核（铁律 3：安装包内不得有需要按平台编译的依赖）。
+
+做完之后 M2 才是"让生成的应用有后端"（NestJS + PGlite + 迁移 + `DATABASE_URL` 单一环境变量）。
 
 ### 4.5 代码地图（只列已落地的）
 
@@ -163,13 +171,28 @@ packages/
 └── server/              # 只做「挂到 HTTP 上」
     ├── src/app.ts       #   Fastify 装配 / RPC 路由 / SSE / 错误处理
     ├── src/auth.ts      #   Bearer（/api/health 免 Token）
+    ├── src/cors.ts      #   只放行回环 origin；预检必须排在鉴权**之前**
     ├── src/handlers.ts  #   `satisfies HandlerMap` → 漏实现编译期就报错
     ├── src/bin.ts       #   CLI 入口，打印 TENON_READY
     └── test/support.ts  #   集成测试夹具：boot / rpc / openSse（先连后发只此一份实现）
+
+apps/web/                # 渲染器：server 的纯客户端（DESIGN §14.6）
+├── src/lib/rpc.ts       #   唯一的 RPC 出口；入参返回值由 protocol 方法表推导
+├── src/lib/stream.ts    #   SSE：先连后发 / since 续传 / stream.reset 重拉
+├── src/lib/fences.ts    #   围栏切分（纯逻辑，独立可测：流式未闭合时的闪烁问题）
+├── src/hooks/useWorkspace.ts  # ★ 事件 → 界面状态的唯一归约点（reducer 在这）
+├── src/features/chat/   #   MessageList（乐观插入 + 粘底）/ Composer / ChatPanel
+├── src/features/preview/PreviewPanel.tsx  # iframe + 「装依赖→起服务→首屏」三段进度
+└── src/features/apps/   #   AppMenu / NewAppDialog（默认选能跑的那个模板）
+
+scripts/
+├── dev-web.ts           # 起 server → 读 TENON_READY → 把 url/token 注入 Vite
+├── smoke.ts             # 端到端冒烟（真 spawn bin.ts）
+└── e2e-preview.ts       # 14 项真机断言（含 HMR 经网关的真实推送）
 ```
 
 依赖方向（DESIGN §3.2）**禁止反向**：`protocol ← 全部`；`server → {core, agent, generator, gateway}`；
-`agent/gateway → core`；`generator → protocol`（只拿 `TenonError`）。
+`agent/gateway → core`；`generator → protocol`（只拿 `TenonError`）；`apps/web → protocol`（**只有类型 + 两个常量**）。
 `core` 不依赖 `generator`：铺模板走 `AppStore.create` 的 `scaffold` 钩子，由 `server` 注入（DESIGN §8.7）。
 
 ---
@@ -210,6 +233,12 @@ packages/
 | **状态只写库不推事件，前端永远不知道这一轮结束** | `chat.ts` 的 `setStatus()` 现在同时落库 + 推 `app.status`；而且**先提交 git 再发 idle**，否则前端看到"空闲"时版本列表还是旧的 |
 | **submission 的 settle 回调可能晚于 `close()` 到达** | 那时 `tenon.db` 已关，写库抛 `database is not open` → unhandled rejection（表现为"33 项测试全过但有 2 个 error"）。`ChatService` 有 `closed` 门；写状态还要 try/catch |
 | **测试闸门不能等 `git.commit`** | 这一轮没有文件改动就不会产生提交，等它会一直挂到超时。等 `app.status: idle`（它在提交之后发）|
+| **`startGateway` 不传 `port` = HMR 永远不工作** | 端口是**先占后告诉**的：`findFreePorts` 占下 `gwPort` → 写进 `TENON_GATEWAY_PORT` → 模板用它做 `server.hmr.clientPort`。网关若自己再随机挑一个，浏览器就被指去那个没人监听的端口。**页面照常打开、日志干净、连 `url` 的探针也能连上**，只有热更新永远不来。断言要落在「`url` 的端口 === `gatewayPort`」 |
+| **`.bin/<cli>` 是 shell 包装，不能用 `node` 跑** | `spawn(process.execPath, ['.bin/tsx'])` 会得到 `SyntaxError: missing ) after argument list`（那是 `sh` 脚本）。要读包自己的 `package.json.bin` 拿 `.js/.mjs` 入口再交给 node —— `scripts/dev-web.ts` 的 `resolvePackageBin()` |
+| **浏览器别 import `@tenon/protocol` 主入口** | 主入口的 `z.object(...)` 全在模块顶层求值，rollup 无法 tree-shake。实测 356KB → 256KB（146 → 48 个模块）。前端只 import `@tenon/protocol/browser` |
+| **flex 子项少了 `flex-1` 会静默塌成 0 高** | 两栏根节点是 `<section class="flex flex-col">` 的子项，不给增长就退回内容高度，里面的 `flex-1 overflow-y-auto` 连带塌掉。症状像"数据没回来"，DOM 里文字却都在 |
+| **默认模板不能取 `templates[0]`** | `blank` 排在最前（最简单），但建完是空目录 → 预览必然以「没有 package.json」失败，用户第一眼是红字。默认取 `react-vite`；`entry === null` 的模板不自动起预览 |
+| **`status` 不从列表里取就一直是「准备中」** | `select` / `booted` 两个归约都要 `apps.find(id)?.status`。只置 `null` 的话，界面要等到这个应用下次推 `app.status` 才正常 |
 
 ---
 
@@ -224,11 +253,14 @@ packages/
 日常入口（在仓库根目录）：
 
 ```bash
-pnpm dev:faux       # TENON_FAUX=1 起 server，打印 TENON_READY {url,port,token,home,model}
+pnpm dev:web        # ★ 日常开工：server + 前端一起起，浏览器开 127.0.0.1:5173
+pnpm dev:faux       # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server     # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test           # vitest：core（db/git/secrets/apps）+ server（rpc/sse/chat/续跑）
+pnpm test           # vitest：7 个 packages/apps + 4 个 spikes
 pnpm smoke          # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
-pnpm typecheck      # 4 个 packages + 4 个 spikes
+pnpm e2e:preview    # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
+pnpm build:web      # 前端产物（Electron 打包时用）
+pnpm typecheck      # 6 个 packages + apps/web + 4 个 spikes + scripts
 ```
 
 spike 复跑入口（历史证据，仍在）：

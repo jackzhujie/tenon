@@ -1,0 +1,109 @@
+import { useState } from 'react'
+import { Header } from './Header.js'
+import { ChatPanel } from '../features/chat/ChatPanel.js'
+import { PreviewPanel } from '../features/preview/PreviewPanel.js'
+import { NewAppDialog } from '../features/apps/NewAppDialog.js'
+import { useWorkspace } from '../hooks/useWorkspace.js'
+import { cn } from '../lib/cn.js'
+
+function BootScreen({ label }: { label: string }) {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <span className="flex size-8 items-center justify-center rounded-lg bg-brand text-[15px] font-medium text-[#20120a]">
+          榫
+        </span>
+        <p className="text-[12px] text-faint">{label}</p>
+      </div>
+    </div>
+  )
+}
+
+function ErrorBar({ message, onDismiss }: { message: string; onDismiss(): void }) {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-6">
+      <div className="pointer-events-auto flex max-w-[80%] items-start gap-3 rounded-lg border border-bad/30 bg-[#241413] px-3.5 py-2 shadow-lg shadow-black/50">
+        <p className="text-[12px] leading-relaxed text-bad">{message}</p>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="shrink-0 text-[11px] text-bad/60 hover:text-bad"
+        >
+          知道了
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export function App() {
+  const workspace = useWorkspace()
+  const { state } = workspace
+  const [creating, setCreating] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
+
+  if (state.booting) {
+    return (
+      <BootScreen
+        label={state.error === null ? '正在连接本地服务…' : `连不上本地服务：${state.error}`}
+      />
+    )
+  }
+
+  return (
+    <div className="relative flex h-full flex-col">
+      <Header
+        apps={state.apps}
+        activeApp={workspace.activeApp}
+        model={state.model}
+        stream={state.stream}
+        onSelectApp={workspace.selectApp}
+        onCreate={() => setCreating(true)}
+      />
+
+      <main className="flex min-h-0 flex-1">
+        <section
+          className={cn(
+            'flex min-h-0 flex-col border-r border-line',
+            fullscreen ? 'hidden' : 'w-[46%] max-w-[640px] min-w-[380px]',
+          )}
+        >
+          <ChatPanel
+            app={workspace.activeApp}
+            status={state.status}
+            messages={state.messages}
+            live={state.live}
+            commits={state.commits}
+            stream={state.stream}
+            submitting={state.submitting}
+            hasApps={state.apps.length > 0}
+            onSend={(content) => void workspace.submit(content)}
+            onStop={() => void workspace.stop()}
+            onCreate={() => setCreating(true)}
+          />
+        </section>
+
+        <section className="flex min-w-0 flex-1 flex-col">
+          <PreviewPanel
+            appId={state.activeAppId}
+            preview={state.preview}
+            fullscreen={fullscreen}
+            onStart={(restart) => void workspace.startPreview(restart)}
+            onToggleFullscreen={() => setFullscreen((value) => !value)}
+          />
+        </section>
+      </main>
+
+      <NewAppDialog
+        open={creating}
+        templates={state.templates}
+        onClose={() => setCreating(false)}
+        onCreate={workspace.createApp}
+      />
+
+      {state.error !== null && !state.booting && (
+        <ErrorBar message={state.error} onDismiss={workspace.clearError} />
+      )}
+    </div>
+  )
+}

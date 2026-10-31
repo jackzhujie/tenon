@@ -5,6 +5,7 @@
  */
 export * from './errors.js'
 export * from './domain.js'
+export * from './transport.js'
 export * from './rpc.js'
 export * from './events.js'
 export * from './result.js'

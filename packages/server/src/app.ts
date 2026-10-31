@@ -8,6 +8,7 @@ import type { CoreServices } from '@tenon/core'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import {
+  TRANSPORT,
   TenonError,
   isRpcMethod,
   isTenonError,
@@ -19,6 +20,7 @@ import {
   type SseEvent,
 } from '@tenon/protocol'
 import { requireBearer } from './auth.js'
+import { corsHeaderRecord, handleCors } from './cors.js'
 import { createHandlers, type HandlerMap, type ServerDeps } from './handlers.js'
 import { SseBus } from './sse.js'
 
@@ -60,6 +62,8 @@ export function buildServer(options: BuildServerOptions): TenonServer {
     bodyLimit: 8 * 1024 * 1024,
   })
 
+  // ★ CORS 必须在鉴权之前：预检请求不带 Authorization，先鉴权会把预检打成 401
+  app.addHook('onRequest', handleCors)
   app.addHook('onRequest', requireBearer(options.token))
 
   app.setErrorHandler((error, request, reply) => {
@@ -88,14 +92,14 @@ export function buildServer(options: BuildServerOptions): TenonServer {
 
   // ---------------------------------------------------------------- 健康检查
 
-  app.get('/api/health', async () => {
+  app.get(TRANSPORT.healthPath, async () => {
     const data = await handlers.health({} as never)
     return rpcOk(data)
   })
 
   // ---------------------------------------------------------------- RPC
 
-  app.post<{ Params: { method: string } }>('/rpc/:method', async (request, reply) => {
+  app.post<{ Params: { method: string } }>(`${TRANSPORT.rpcPathPrefix}:method`, async (request, reply) => {
     const method = request.params.method
     if (!isRpcMethod(method)) {
       return reply.code(404).send(
@@ -119,7 +123,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
 
   // ---------------------------------------------------------------- SSE
 
-  app.get<{ Querystring: { appId?: string; since?: string } }>('/events', (request, reply) => {
+  app.get<{ Querystring: { appId?: string; since?: string } }>(TRANSPORT.eventsPath, (request, reply) => {
     const appId = request.query.appId
     const sinceRaw = request.query.since
     const since = sinceRaw === undefined || sinceRaw === '' ? undefined : Number(sinceRaw)
@@ -135,6 +139,9 @@ export function buildServer(options: BuildServerOptions): TenonServer {
       connection: 'keep-alive',
       // 反代（M6 的自托管）常常缓冲 SSE，显式关掉
       'x-accel-buffering': 'no',
+      // hijack 会跳过 Fastify 的响应流程，之前在 hook 里设的 header 全部失效 ——
+      // 这里必须自己再写一遍，否则跨端口的 EventSource 直接被浏览器拦掉
+      ...corsHeaderRecord(request.headers.origin),
     })
     raw.write(': connected\n\n')
 

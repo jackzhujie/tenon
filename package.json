@@ -13,17 +13,20 @@
     "spike:agent": "pnpm --filter @tenon/spike-agent start",
     "spike:gateway": "pnpm --filter @tenon/spike-gateway start",
     "spike:loc": "pnpm --filter @tenon/spike-loc start",
-    "typecheck": "tsc --noEmit -p packages/protocol && tsc --noEmit -p packages/core && tsc --noEmit -p packages/generator && tsc --noEmit -p packages/gateway && tsc --noEmit -p packages/agent && tsc --noEmit -p packages/server && tsc --noEmit -p spikes/db && tsc --noEmit -p spikes/agent && tsc --noEmit -p spikes/gateway && tsc --noEmit -p spikes/loc",
-    "clean": "rm -rf node_modules **/node_modules",
     "spike:db:probe": "pnpm --filter @tenon/spike-db exec tsx src/probe.ts",
+    "typecheck": "tsc --noEmit -p packages/protocol && tsc --noEmit -p packages/core && tsc --noEmit -p packages/generator && tsc --noEmit -p packages/gateway && tsc --noEmit -p packages/agent && tsc --noEmit -p packages/server && tsc --noEmit -p apps/web && tsc --noEmit -p spikes/db && tsc --noEmit -p spikes/agent && tsc --noEmit -p spikes/gateway && tsc --noEmit -p spikes/loc && tsc --noEmit -p tsconfig.scripts.json",
     "dev:server": "tsx packages/server/src/bin.ts",
     "dev:faux": "TENON_FAUX=1 tsx packages/server/src/bin.ts",
+    "dev:web": "tsx scripts/dev-web.ts",
+    "build:web": "pnpm --filter @tenon/web build",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "tsx scripts/smoke.ts",
-    "e2e:preview": "tsx scripts/e2e-preview.ts"
+    "e2e:preview": "tsx scripts/e2e-preview.ts",
+    "clean": "rm -rf node_modules **/node_modules"
   },
   "devDependencies": {
+    "@tenon/protocol": "workspace:*",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "@types/node": "22.20.5",

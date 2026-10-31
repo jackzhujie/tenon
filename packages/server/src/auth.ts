@@ -5,10 +5,10 @@
  */
 import { timingSafeEqual } from 'node:crypto'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { rpcFail } from '@tenon/protocol'
+import { TRANSPORT, rpcFail } from '@tenon/protocol'
 
 /** 健康检查不需要 Token：外部 supervisor / 探针要用，且它不泄露任何用户数据 */
-const PUBLIC_PATHS = new Set(['/api/health'])
+const PUBLIC_PATHS = new Set<string>([TRANSPORT.healthPath])
 
 function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a)
@@ -18,7 +18,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export function extractToken(request: FastifyRequest): string | undefined {
-  const header = request.headers.authorization
+  const header = request.headers[TRANSPORT.tokenHeader]
   if (typeof header === 'string' && header.startsWith('Bearer ')) return header.slice(7).trim()
   // SSE 走 EventSource 时无法自定义请求头，允许 query 传（仍然是 127.0.0.1 内的短连接）
   const query = request.query as Record<string, unknown> | undefined

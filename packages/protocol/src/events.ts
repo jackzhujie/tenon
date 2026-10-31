@@ -141,6 +141,17 @@ export const SseEvent = z.discriminatedUnion('type', [
 export type SseEvent = z.infer<typeof SseEvent>
 export type SseEventType = SseEvent['type']
 
+/**
+ * 运行时清单本体在 `event-names.ts`（零依赖，浏览器直接用）。
+ * 这里只留两道编译期闸门：`satisfies` 防拼错，`_exhaustive` 防漏 —— 漏一种是静默故障。
+ */
+export { sseEventTypes } from './event-names.js'
+import { sseEventTypes } from './event-names.js'
+
+type MissingEventType = Exclude<SseEventType, (typeof sseEventTypes)[number]>
+const _exhaustiveEventTypes: MissingEventType extends never ? true : never = true
+void _exhaustiveEventTypes
+
 /** 分发式 Omit（直接 Omit 会把 union 塌成「所有字段都可选」） */
 type DistributeOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
