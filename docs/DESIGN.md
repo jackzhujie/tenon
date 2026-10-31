@@ -1099,6 +1099,17 @@ CMD ["node", "dist/server/main.js"]
 
 ### 15.3 沙箱隔离的**平台差异**（重要，别到最后才发现）
 
+> **先澄清一层容易被混淆的事：pi 生态本身没有任何平台问题。**
+> `@earendil-works/pi-durable` / `pi-ai` / `chord` / `pi-codemode` 1.4.0 都是**纯 TypeScript npm 包**（2026-10-31 实测校验）：
+> - 包内**零原生模块** —— 无 `.node` / `.gyp` / `.dylib` / `.so` / `.dll` / `.wasm`
+> - **无平台相关 `optionalDependencies`**，`os` / `cpu` 字段为空
+> - 唯一硬约束是 `engines: node >= 22.19`（内部依赖 `node:sqlite`、`node:worker_threads` 等 Node **内置**模块）
+>
+> 所以在 Windows x64 上，`npm i` 之后即为可用状态：**不需要 node-gyp、不需要编译工具链、不需要 WSL**。
+>
+> 因此，本文档后续提到的所有「Windows 差异」—— Electron 打包与签名、`embedded-postgres` 原生二进制路径与安装、`gondolin` 缺失微 VM 后端、端口探测命令（`lsof` → `netstat`）——**全部发生在 Tenon 自己引入的本地基建层，与 pi 无关**。
+> 推论：**只跑 Server + Web 模式（不打包桌面端、不启用本地 PG）时，Windows 的适配成本接近于零**；桌面首发 Windows 的额外工作量集中在打包发货环节，而非 Agent 运行时。
+
 `gondolin` 微 VM 是可选的高档隔离，但它的可用性**按平台不同**：
 
 | 平台 | gondolin 后端 | 状态 | 我们的策略 |
