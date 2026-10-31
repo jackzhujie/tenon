@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.1
+# DESIGN.md — 详细方案设计 v1.2
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -14,8 +14,8 @@
 | 3 | Agent 运行时 | `pi-durable` 1.4（Harness/任务图/子会话/压缩/重放）+ `pi-ai` 1.4（BYOK）+ `chord` 1.4（**插件宿主基座**）+ `pi-codemode`（代码沙箱）|
 | 4 | Agent 应用栈 | React 19 + shadcn/ui + Tailwind 4 + Vite 7 + TS ESM；Node 22 |
 | 5 | 生成应用栈 | 前端同上（+ React Router 7 + TanStack Query + zod）；后端 **NestJS 11 + TypeORM + PostgreSQL** |
-| 5b | 数据库供给 | 应用只认**一个 Postgres 连接串**；供给由平台决定：`embedded`（真 PG 二进制，默认）/ `docker` / `external` / 降级 `sqlite` —— 详见 §6.4 |
-| 5c | 组件与插件 | **chord 插件模型**：一 feature 一 contract + 每宿主一 facet；免费/收费组件走同一套安装协议 —— 详见 §21 |
+| 5b | 数据库供给 | 应用只认**一个 Postgres 连接串**；两档供给：**`pglite`**（WASM 版 PG，零安装，默认）/ **`postgres`**（Docker 自带 / external / 云托管，发布档）；`embedded` 与 `sqlite` 仅作逃生口 —— 详见 §6.4 |
+| 5c | 组件与插件 | **chord 插件模型**：一 feature 一 contract + 每宿主一 facet；**L2 官方插件分发节奏 = M5 bundled 内置 → M6 Hub 官方独源 → M7 开放第三方上架**；免费/收费组件走同一套安装协议 —— 详见 §21 |
 | 6 | 版本管理 | **Git**（isomorphic-git）：每轮改动自动 commit，发布时 push + tag；回滚 = revert + 可选 DB 快照还原 |
 | 7 | 发布 | 生成 **Docker 产物**（多阶段构建、单容器单端口，compose 内含 PostgreSQL）+ 可选静态导出 |
 | 8 | 预览 | 每应用一个 **App Gateway**（稳定端口）→ Vite dev server + Nest，HMR 走 WS 代理 |
@@ -24,7 +24,7 @@
 | 11 | 记忆 | 每个应用仓库内 `docs/AGENTS.md` + `.tenon/memory/*` ，Agent 有读写纪律 |
 | 12 | 协议 | **AGPL-3.0-only**（Tenon/Server）+ **Apache-2.0**（Runtime SDK / 模板 / 生成物骨架）+ 商业双许可 |
 | 13 | 首发平台 | **macOS（ARM64/x64）+ Windows（x64）**；Linux 作为次优先目标随 M5 补齐 |
-| 14 | 免费策略 | **个人免费**（含全部核心能力）；企业为协作/合规付费；**组件市场**区分免费与收费组件 |
+| 14 | 免费策略 | **个人免费**（含全部核心能力）；企业为协作/合规付费；**L2 官方插件先随包内置、后进 Hub 官方独源**，第三方市场与收费组件延至 M7 |
 
 ---
 
@@ -162,6 +162,50 @@ flowchart TB
 | server 内嵌 main 进程 | 同上崩溃隔离问题；Electron Node 版本受 Chromium 升级节奏约束 |
 | 只做 Web（不套壳） | 用户要桌面级体验（文件对话框、托盘、自动更新、离线） |
 
+### 2.4 Electron 与 SaaS 的关系（**正交，不是前置条件**）
+
+一句话：**Electron 不是 SaaS 的前提，两者运行在不同位置上。**
+
+因为 §2.2 已经确定「Electron 只做壳、业务在 HTTP Server」，所以：
+
+| 部署形态 | 有无壳 | Server 跑在哪 | 谁访问 |
+|---|---|---|---|
+| **桌面版** | Electron | 用户机器（`ELECTRON_RUN_AS_NODE` 子进程）| 本机渲染器 |
+| **自托管** | 无 | 用户自己的服务器 | 浏览器 |
+| **SaaS** | 无 | 云端容器 | 浏览器 |
+
+**同一份 server 代码，换个位置跑就是另一种形态。** 这是「Electron 不做业务」这条设计的真正红利 —— 它不只是让 Web 模式能开，而是让 SaaS 化**不需要重写**。
+
+**那 Electron 到底给了什么？** 四项本地特权。这才是「生成的应用能做什么」的分界线：
+
+| 生成应用能做什么 | 桌面版 | SaaS 纯 Web | SaaS + 桌面客户端 |
+|---|---|---|---|
+| 读用户本地 Excel / PDF / 图片 | ✅ | ❌ 需先上传 | ✅ 经客户端桥 |
+| 连内网数据库 / ERP / localhost 服务 | ✅ | ❌ | ✅ |
+| 调本地 CLI（ffmpeg / python / git）| ✅ | ⚠️ 仅容器内预装 | ✅ |
+| 离线可用 | ✅ | ❌ | ⚠️ 部分（缓存）|
+| 分享链接给同事直接用 | ❌ 需自托管 | ✅ | ✅ |
+| 定时任务 / Webhook 7x24 在线 | ❌ 关机即停 | ✅ | ✅ |
+| 多人同时使用 | ❌ 单用户 | ✅ | ✅ |
+| **数据不出本机** | ✅ | ❌ | ⚠️ 混合 |
+
+> **结论：SaaS 不是桌面版的超集，而是互补形态。** 所以「有了 SaaS 就不需要桌面版」与「桌面版能替代 SaaS」都不成立。妙搭没有选择（只能云端），Tenon 有 —— **"数据不出本机 + 自带 key + 能碰本地资源"正是 SaaS 抢不走的差异**。
+
+**SaaS 化真正的成本不在 Electron，而在这六项 adapter**（全在 server 层，与壳无关）：
+
+| 缺口 | 本地实现 | 云端实现 |
+|---|---|---|
+| 多租户隔离 | 不需要 | 每应用一个容器 / 微 VM（`gondolin` 在 Linux 可用 —— **这里才是它的主战场**）|
+| 文件存储 | 本地 fs | 对象存储（S3 兼容）|
+| 密钥 | `safeStorage` | KMS / Vault |
+| 应用数据库 | PGlite | 托管 PG（每租户一个 database）|
+| 认证 · 计费 · 配额 | 无 | OAuth + 计量 + 套餐 |
+| 长连接 | 直连 | WS / SSE 负载均衡 + 粘性会话 |
+
+**判断标准：本地能力有没有被抽象成接口。** 抽象了，SaaS 化是换实现；没抽象，就要动业务代码。这就是 `db-provisioner` / `NodeExecutionEnv` / `SecretStore` 这几层现在必须包好的原因 —— 它们不只是为了本地能跑，更是**给 SaaS 预留的插槽**。
+
+> **可选的产品形态（M7 再评估）**：SaaS 版提供桌面客户端，让它退化为「本地能力代理」—— 云端应用通过安全通道请求客户端读写本地文件。这是 Figma 桌面版 / VS Code Remote 的路子，做出来即"云端协作 + 本地数据"的独一份。但安全模型复杂（权限弹窗、路径白名单、审计日志），M6 前不碰。
+
 ---
 
 ## 3. 技术栈与仓库结构
@@ -182,8 +226,8 @@ flowchart TB
 | 插件宿主 | `@earendil-works/chord` | **精确锁定 1.4.x** | plugin facet、状态复制、principal 授权 |
 | 契约 | zod（我们）+ TypeBox（chord） | 4.x / 1.3.x | zod 用于 RPC；TypeBox 用于 chord contract（其运行时要求）|
 | Git | isomorphic-git | 1.x | 纯 JS 无原生依赖；检测到系统 git 时可切换 |
-| 产品库 | better-sqlite3 | 12.x | `tenon.db` / `harness.sqlite` / `telemetry.db`（单机注册表，零安装）|
-| 应用库 | **PostgreSQL 18**（typeorm + pg） | 18.x | `embedded-postgres`（默认）/ docker / external / pglite 降级 —— 见 §6.4 |
+| 产品库 | **`node:sqlite`（Node 内置）** | Node 22.5+ 自带 | `tenon.db` / `harness.sqlite` / `telemetry.db`（单机注册表，零安装、**零原生模块、无需 `@electron/rebuild`**）|
+| 应用库 | **PostgreSQL 18**（typeorm + pg） | 18.x | `pglite`（默认）/ `postgres`（发布）；`embedded`、`sqlite` 为逃生口 —— 见 §6.4 |
 | 日志 | pino | 9.x | 结构化、可被探针管道消费 |
 | 测试 | Vitest + Playwright | — | 单测 + Agent E2E |
 
@@ -213,7 +257,7 @@ tenon/
 │   ├── generator/                # 模板渲染 + 代码生成（AST 级补丁）
 │   ├── component-host/           # ★ chord 宿主：facet 加载、principal 解析、插槽装配
 │   ├── component-market/         # ★ 组件仓库客户端、manifest 校验、license 校验、本地缓存
-│   ├── db-provisioner/           # ★ PG 四档供给（embedded/docker/external/lite）
+│   ├── db-provisioner/           # ★ PG 两档供给（pglite 默认 / postgres 发布）+ 逃生口。统一暴露 DatabaseProvider 接口
 │   ├── runtime-sdk/              # 注入生成应用的探针 / inspector / 数据客户端
 │   └── ui/                       # 共享设计系统（shadcn 之上）
 ├── components/                   # ★ 官方组件源码（L2）
@@ -477,7 +521,7 @@ docs/
 │       │   ├── runtime/*.jsonl     # 运行时事件（按天轮转，保留 7 天）
 │       │   ├── telemetry.db        # pi-telemetry 跨度与指标（chord/telemetry-sqlite）
 │       │   └── cache/              # 依赖缓存、截图、构建产物
-│       ├── pgdata/                 # ★ embedded Postgres 数据目录（供给方式 = embedded 时）
+│       ├── pgdata/                 # ★ 应用数据库目录（pglite 默认；供给 = embedded 时为 PG data dir）
 │       └── exports/<releaseId>/    # Docker 上下文 / 静态包
 └── models.json.enc                 # 加密的提供商配置（Electron 走 safeStorage）
 ```
@@ -527,23 +571,39 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 
 `rewindable` 的意义：任意历史时刻的规格与计划都可读回（对应妙搭的 spec 版本）。
 
-### 6.4 数据库供给策略（PostgreSQL 是默认，不是可选项）
+### 6.4 数据库供给策略（PGlite 默认，PostgreSQL 发布）
 
 **设计原则：应用代码只认一个 `DATABASE_URL`。** 生成的 NestJS 代码里没有任何"我跑在桌面还是 Docker"的判断，供给方式完全由平台层决定。这一条是硬约束 —— 一旦应用代码开始关心运行环境，导出就必然破。
 
-| 供给模式 | 何时使用 | 实现 | 性能 | 依赖 |
+> **v1.2 定案（2026-10-31）**：原先的四档（`embedded` 默认 / `docker` / `external` / `lite` 降级）**过度设计** —— 四档里有三档都是在解决"如何让一个原生 PostgreSQL 在用户机器上跑起来"，而这件事本身就是麻烦的来源。真正的解法是：**让默认档根本不需要"安装"**。故改为 **两档 + 两个逃生口**，方言始终是 PostgreSQL。
+
+| 供给模式 | 何时使用 | 实现 | 并发 / 性能 | 依赖 |
 |---|---|---|---|---|
-| **`embedded`**（默认）| 桌面本地开发 | `embedded-postgres` 18.6，下载官方 PG 二进制，在应用专属端口（13000+hash）拉起，数据落 `pgdata/` | **= 真 PG** | 无（首次自动下载 ~30MB）|
-| `docker` | 用户已装 Docker，或需要与生产完全一致 | `docker run postgres:18-alpine`，命名卷持久化 | = 真 PG | Docker |
-| `external` | 企业接入已有 PG / RDS | 直接使用用户提供的连接串，只做连通性与版本校验 | 取决于服务端 | 用户自备 |
-| `lite`（降级）| 一句话生成的小应用、演示、CI | `@electric-sql/pglite` 0.5 + `pg-gateway`，把 WASM PG 暴露成 TCP 端口 | 中等（单连接，并发受限）| 无（3.7MB gzipped）|
+| **`pglite`**（默认）| 桌面本地开发、预览、单用户应用、CI | `@electric-sql/pglite` 0.5 + `pg-gateway`，把 **WASM 版 PostgreSQL** 暴露成 TCP 端口，TypeORM 走标准 `pg` driver；数据落 `pgdata/` | 单写者串行；约为原生 PG 的 1/3~1/5 | **无**（~3.7MB gzipped，纯 WASM，零原生二进制）|
+| **`postgres`**（发布）| Docker 导出、生产部署、SaaS | ① compose 内置 `postgres:18-alpine` ② 用户 `external` 连接串 ③ 云托管 PG | 原生 | Docker 或用户自备 |
+
+**两个逃生口（适配器代码保留，不设为默认）**：
+
+- `embedded` —— `embedded-postgres` 原生二进制。仅在用户明确要求"要原生性能且拒绝 Docker"时手动开启；Windows 路径与服务安装的麻烦因此被移出主路径。
+- `sqlite` —— 极端降级档：仅当目标环境**连 WASM 都跑不起来**（极罕见）时，应用库降级为 `node:sqlite`。此时 migration 需适配（**这是唯一会引入方言分裂的档，默认永不启用**）。注意产品库（`tenon.db` 等）与此无关，它本来就是 SQLite。
 
 四条实现要点：
 
-1. **对应用永远是真 PG 协议。** 即使 `lite` 模式也通过 `pg-gateway` 暴露 TCP，TypeORM 走标准 `pg` driver。所以「lite 演示 → 升级到 embedded/docker」**不需要改一行代码、不需要改 migration**，只换端口。
-2. **端口与生命周期归 App Gateway 管**（见 §9）。Gateway 在应用启动时按 manifest 拉起 DB → 等 `pg_isready` → 注入连接串 → 起 Nest。DB 崩溃由 Gateway 重启并上报状态，前端能在 readiness 面板看到 `db: down`。
-3. **迁移与快照。** TypeORM migration 是唯一 schema 事实来源；每次发布前 `pg_dump --format=custom` 存快照到 `exports/<releaseId>/db.dump`，回滚时可 `pg_restore`（对应妙搭 `resetArtifactVersion` 的 `dbRestore` 开关）。`lite` 模式用 `pg_dump` 的 SQL 纯文本替代（PGlite 不支持 custom 格式）。
+1. **方言一致性是本次选型的第一约束。** PGlite 不是"SQLite 的替代品"，它就是 **PostgreSQL 编译到 WASM** —— 同一份 PG 解析器、同一套类型系统、同一套 SQL 语义。所以「本地 PGlite → 发布到真 PG」**不需要改一行应用代码、不需要重写 migration**，只换连接串。这是纯 SQLite 方案给不了的（见下方"为什么不用纯 SQLite"）。
+2. **端口与生命周期归 App Gateway 管**（见 §9）。Gateway 在应用启动时按 manifest 拉起 DB（PGlite 进程内进程 / PG 用 `pg_isready` 探活）→ 注入连接串 → 起 Nest。DB 崩溃由 Gateway 重启并上报状态，前端能在 readiness 面板看到 `db: down`。
+3. **迁移与快照。** TypeORM migration 是唯一 schema 事实来源。快照分两级：PGlite 用 `dumpDataDir()` 做整库归档（对应 `exports/<releaseId>/db.tar.gz`）；发布档用 `pg_dump --format=custom`（回滚时 `pg_restore`，对应妙搭 `resetArtifactVersion` 的 `dbRestore` 开关）。**跨档迁移**（PGlite → 真 PG）走 `pg_dump` 逻辑导出，因为方言一致所以可以直接导入。
 4. **Docker 导出产物自带 PostgreSQL。** `docker-compose.yml` 里 `db`（postgres:18-alpine + 健康检查 + 命名卷）+ `app`（NestJS 单容器，`depends_on: service_healthy`）。用户 `docker compose up -d` 即上线，不需要外部数据库。
+
+#### PGlite 的四个已知限制（必须在 `packages/db-provisioner` 里兜住）
+
+| 限制 | 影响 | 缓解 |
+|---|---|---|
+| **单连接串行** | TypeORM 默认连接池 10，连 `pg-gateway`（0.3.0-beta.4）会串行化，高并发请求可能超时 | `pool.max = 1~2`；NestJS 侧单例连接；Gateway 做请求队列 |
+| **性能约为原生 1/3~1/5** | 数据量大或复杂聚合会明显变慢 | 只做开发/预览/单用户；超阈值时 UI 提示"升级到 PostgreSQL"并给一键迁移 |
+| **扩展受限** | PostGIS 等需外部依赖的扩展不可用 | 常用扩展可通过 `@electric-sql/pglite/vector` 等子入口加载（**pgvector 可用**，AI 小助手的向量检索不受影响）|
+| **0.x 版本** | API 可能变 | 与 pi 全家同样策略：`save-exact` 锁版本 + 适配器隔离，业务代码只见 `DatabaseProvider` 接口 |
+
+> **为什么不用纯 SQLite**（用户 2026-10-31 提出，已评估并否决）：技术上完全可行（Electron 内置 Node 自带 `node:sqlite`，零依赖零体积，已实测确认）。但有两个长期代价：① **方言分裂** —— 本地 SQLite 而 SaaS 云端必须 PG，`jsonb`/数组/`timestamptz`/全文检索全不同，TypeORM 只能退化兼容，最终以"本地跑通、上云炸"的形式爆雷；② **AI 生成质量** —— SQLite 是动态类型，类型写错运行时静默通过，而 PG 会直接报错，对"生成代码"场景，严格性就是质量。PGlite 同时拿到了 SQLite 的零安装与 PG 的方言，是这两个约束的交集。
 
 > **为什么之前写 SQLite 是错的**：需求里明确要"高性能应用 + 通用组件 + 未来 AI 小助手"，这些都指向真 PG（并发写、`pgvector`、行级锁、`LISTEN/NOTIFY`）。SQLite 在多写并发与扩展生态上是硬短板，且切库要重写 migration —— 早期省一天，后期赔一周。已改，旧方案见附录 A。
 
@@ -931,8 +991,10 @@ submission.done
 
 代码能回滚，schema 也能回滚（下迁移），但**数据**不一定。策略：
 
-- 每个执行过迁移的 commit → 用 `pg_dump --format=custom` 生成 DB 快照 `snapshots/<sha>.dump`（保留最近 20 个 + 所有 release）
-- 回滚时可选 `dbRestore: true` → 还原快照（**默认关闭**，UI 明确提示"会丢失此后数据"）
+- 每个执行过迁移的 commit → 生成 DB 快照 `snapshots/<sha>.*`（保留最近 20 个 + 所有 release）
+  - `pglite` 档：`dumpDataDir()` → `snapshots/<sha>.tar.gz`（WASM 实例的整目录归档）
+  - `postgres` 档：`pg_dump --format=custom` → `snapshots/<sha>.dump`
+- 回滚时可选 `dbRestore: true` → 还原快照（**默认关闭**，UI 明确提示"会丢失此后数据"）；两档统一用 `DatabaseProvider.restore()` 抽象，调用方不感知实现
 - 发布时必存快照 → 对应 release 可"回滚到上线版本（含数据）"
 
 ### 12.4 与 pi-durable 的对齐
@@ -981,7 +1043,8 @@ RUN pnpm build          # tsc(server) + vite build(client)
 # ---- runtime ----
 FROM node:22-alpine AS runner
 WORKDIR /app
-ENV NODE_ENV=production PORT=3000 DATABASE_URL=file:/data/app.db
+ENV NODE_ENV=production PORT=3000
+# DATABASE_URL 由 compose 注入（postgres://app:***@db:5432/app），镜像内不写死
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./
@@ -993,8 +1056,8 @@ CMD ["node", "dist/server/main.js"]
 ```
 
 - Nest 用 `ServeStaticModule` 托管 `dist/client`，**只有一个端口**（反代友好）
-- 启动时自动跑迁移（`migrationsRun: true`），DB 落在 `/data` 卷
-- `docker-compose.yml` **默认即含 PostgreSQL**（`db` 服务 + 命名卷 + `service_healthy` 依赖）；`lite` 档仅在本地预览使用，不进生产产物
+- 启动时自动跑迁移（`migrationsRun: true`）；**业务数据在 `db` 服务的命名卷里**，`/data` 卷只放上传文件与日志
+- `docker-compose.yml` **默认即含 PostgreSQL**（`db` 服务 + 命名卷 + `service_healthy` 依赖）；`pglite` 档仅在本地开发与预览使用，**不进生产产物** —— 导出时自动把 `DATABASE_URL` 改写成 compose 内的 `postgres://` 连接串，应用代码零改动
 - 镜像大小目标 < 250MB（alpine + prod 依赖裁剪）
 
 ### 13.3 发布流程（UI）
@@ -1108,7 +1171,8 @@ CMD ["node", "dist/server/main.js"]
 > 所以在 Windows x64 上，`npm i` 之后即为可用状态：**不需要 node-gyp、不需要编译工具链、不需要 WSL**。
 >
 > 因此，本文档后续提到的所有「Windows 差异」—— Electron 打包与签名、`embedded-postgres` 原生二进制路径与安装、`gondolin` 缺失微 VM 后端、端口探测命令（`lsof` → `netstat`）——**全部发生在 Tenon 自己引入的本地基建层，与 pi 无关**。
-> 推论：**只跑 Server + Web 模式（不打包桌面端、不启用本地 PG）时，Windows 的适配成本接近于零**；桌面首发 Windows 的额外工作量集中在打包发货环节，而非 Agent 运行时。
+> **v1.2 后该清单进一步收窄**：应用库默认改为 PGlite（纯 WASM）、产品库改用 Node 内置 `node:sqlite` 之后，**整个可用安装包里不含任何需要按平台编译的原生模块**；`embedded-postgres` 降为逃生口，不再位于默认路径。剩余平台差异只有三项：Electron 打包与签名、`gondolin` 后端缺失、端口探测命令。
+> 推论：**只跑 Server + Web 模式（不打包桌面端）时，Windows 的适配成本接近于零**；桌面首发 Windows 的额外工作量集中在打包发货环节，而非 Agent 运行时。
 
 `gondolin` 微 VM 是可选的高档隔离，但它的可用性**按平台不同**：
 
@@ -1153,7 +1217,7 @@ CMD ["node", "dist/server/main.js"]
 |---|---|---|
 | 单机搭建、全栈生成、Git、Docker 导出 | ✅ | ✅ |
 | 6 Agent 全量、精调、可观测 | ✅ | ✅ |
-| **PostgreSQL 全档供给（含 embedded）** | ✅ | ✅ |
+| **PostgreSQL 全部供给模式（pglite / postgres / embedded）** | ✅ | ✅ |
 | **安装免费组件（L1/L2/L3）** | ✅ | ✅ |
 | 团队协作（多人同应用、评论、审批） | ❌ | ✅ |
 | 企业 SSO / RBAC / 审计日志 | ❌ | ✅ |
@@ -1192,16 +1256,16 @@ CMD ["node", "dist/server/main.js"]
 | 阶段 | 目标 | 验收（DoD） |
 |---|---|---|
 | **M1 骨架与对话** | monorepo、server、harness 池、SSE、应用注册、Git 自动提交、静态 React 应用预览、Web 模式 | ① `pnpm dev:web` 打开可对话；② 生成一个纯前端 Todo 应用并在 iframe 热更新；③ 每轮产生 commit；④ 杀进程重启后对话续跑 |
-| **M2 全栈生成** | Nest 模板、zod 共享、TypeORM/迁移、**PostgreSQL 四档供给**、CRUD 生成、runtime SDK、日志/错误面板 | ① 生成带 CRUD + 真 PG 的全栈应用；② `lite` 与 `embedded` 两种模式跑同一份 migration；③ Docker compose（含 db）构建并跑起来；④ 前端异常出现在错误面板 |
+| **M2 全栈生成** | Nest 模板、zod 共享、TypeORM/迁移、**PostgreSQL 两档供给（pglite 默认 / postgres 发布）**、CRUD 生成、runtime SDK、日志/错误面板 | ① 生成带 CRUD + PG 方言的全栈应用（默认 PGlite，零安装）；② **PGlite 与 PostgreSQL 两档跑同一份 TypeORM migration，切换只改连接串**；③ 从 PGlite `pg_dump` 迁移到 Docker PG，数据零丢失；④ Docker compose（含 db）构建并跑起来；⑤ 前端异常出现在错误面板 |
 | **M3 精调与版本** | inspector、框选、截图、Diff 视图、回滚（含 `pg_dump`/`pg_restore`）、发布 push | ① 点选元素改样式并自验；② 框选区域批量改；③ 回滚到任意 commit，代码与数据一致 |
 | **M4 多 Agent 与可观测增强** | 6 角色子 Agent、E2E 自验收、Reviewer、用量/预算、`taskGraph` 状态面板 | ① E2E 子 Agent 能发现并修复一个注入的 bug；② 任务图实时反映子会话；③ 超预算拦截 |
-| **M5 组件体系（内部定型）** | chord 宿主接入、6 个标准插槽、`install_component` 工具、L1 内置积木清单、L2 首发 3 个官方组件（AI 小助手 / Excel 导出 / 审批流）| ① 用一句话给应用装上 AI 小助手并可用；② 卸载后代码与 `AGENTS.md` 同步清理；③ 组件热重载不丢状态 |
-| **M6 平台化与开源** | **macOS + Windows 双平台安装包**、组件市场（免费/收费 + license 校验）、视觉/动效打磨、i18n、文档站、CI、协议与商标 | ① 两平台安装包签名可安装；② 装一个收费组件（离线 license）且未授权用户拿不到方法；③ 新人 10 分钟跑通首个应用；④ 协议文件与贡献流程齐备 |
-| **M7（后置）** | Linux、团队协作、托管能力 | 视社区反馈 |
+| **M5 组件体系（官方内置定型）** | chord 宿主接入、6 个标准插槽、`install_component` 工具、**bundled 插件加载器（`resources/plugins` 只读源）**、插件页 UI（列表 / 开关 / 来源标识）、L1 内置积木清单、L2 首发 3 个官方插件（AI 小助手 / Excel 导出 / 审批流）| ① 用一句话给应用装上 AI 小助手并可用；② 卸载后代码与 `AGENTS.md` 同步清理；③ 组件热重载不丢状态；④ **插件页能列出 3 个 bundled 插件并独立开关** |
+| **M6 平台化与开源** | **macOS + Windows 双平台安装包**、**组件 Hub 上线（首期仅官方独源，第三方上架延后到 M7）**、覆盖层更新（hub 版 > bundled 版，不重装软件即可给内置插件打补丁）、收费授权（可延至 M6 末，不阻塞发布）、视觉/动效打磨、i18n、文档站、CI、协议与商标 | ① 两平台安装包签名可安装；② **Hub 里能装一个官方插件，且能在不重装软件的情况下更新一个已内置插件**；③ 新人 10 分钟跑通首个应用；④ 协议文件与贡献流程齐备 |
+| **M7（后置）** | Linux、团队协作、托管能力（SaaS）、**第三方插件上架与审核** | 视社区反馈 |
 
 依赖关系：M2 依赖 M1 的 harness 与事件流；M3 依赖 M2 的源码定位；M4 依赖 M3 的预览 API；M5 依赖 M2 的应用装配；M6 依赖 M5 的组件协议。
 
-> **平台顺序的说明**：Windows 与 macOS 的技术差异集中在三处 —— ① `embedded-postgres` 二进制与路径（已确认有 windows-x64 包）；② 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；③ godolin 微 VM **在 Windows 无原生后端**（需 WSL2）。所以 M1 就要同时在这两个平台冒烟，不能留到 M6 才发现问题。
+> **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 
 ---
 
@@ -1218,11 +1282,13 @@ CMD ["node", "dist/server/main.js"]
 | LLM 成本失控 | 中 | 预算熔断 + 档位路由（简单任务用 fast）+ 用量面板 |
 | AGPL 影响商业采用 | 中 | Runtime SDK/模板 Apache-2.0；双许可；FAQ 解释 |
 | 多端路径差异（Windows）| 低 | 统一 `pathe`/`node:path`；CI 覆盖 Windows |
-| **`embedded-postgres` 仍是 beta 版本号**（18.6.0-beta.x）| 中 | 二进制本身是官方 PG 构建，风险在 wrapper API；用 `packages/db-provisioner` 隔离，并提供 `docker`/`external` 兜底；CI 锁版本 + 冒烟 |
+| **PGlite 仍在 0.x**（0.5.13，API 可能变）| 中 | `save-exact` 锁版本 + `DatabaseProvider` 接口隔离；最坏情况整体切到 `postgres` 档 —— 方言不变，**应用代码零改动** |
+| **PGlite 单写者串行 / 性能约原生 1/3~1/5** | 中 | `pool.max = 1~2` + Gateway 侧请求队列；超过阈值（表行数 / P95 延迟）时 UI 提示并提供一键迁移到真 PG |
+| `embedded-postgres` 逃生口仍是 beta（18.6.0-beta.x）| 低 | 已移出默认路径，仅用户显式开启时使用；`db-provisioner` 内隔离并 CI 冒烟 |
 | **Windows 无 gondolin 后端** | 中 | 见 §15.3 方案 B（独立子进程 + 权限清单），并明确文档化能力差异 |
 | **社区组件可访问用户应用数据** | **高** | L3 强制独立子进程 + `manifest.permissions` 逐条确认 + 无 `host.serve` 级能力；官方 L2 走签名 |
 | **收费组件被绕过** | 中 | 授权在服务端 `principal` 层，非前端开关；license 用 Ed25519 签名 |
-| PG 首次下载慢（embedded 模式，~30MB）| 低 | 安装包内置常用平台二进制（增量下载兜底）；首次引导显示进度 |
+| PG 迁移耗时（PGlite → 真 PG，数据量大时）| 低 | 后台任务 + 进度条；`pg_dump` 流式管道传参，不落临时文件 |
 | 组件插槽被滥用导致 UI 冲突 | 低 | 只开放 6 个标准插槽；同插槽多组件按 `order` 排序并限流 |
 
 ---
@@ -1234,10 +1300,10 @@ CMD ["node", "dist/server/main.js"]
 | 议题 | 决定 |
 |---|---|
 | 产品名 | **Tenon / 榫**（§1.5）|
-| 生成应用数据库 | **PostgreSQL 默认**，四档供给（§6.4）|
+| 生成应用数据库 | **PostgreSQL 方言**；两档供给：`pglite` 默认 + `postgres` 发布（§6.4，v1.2）|
 | 首发平台 | **macOS + Windows**（Linux 随 M5）|
 | 商业边界 | 认可 §16.2 那张表 |
-| 商业模式 | **个人免费**；组件市场分免费/收费（§21.5）|
+| 商业模式 | **个人免费**；L2 官方插件 M5 bundled → M6 Hub 独源 → M7 第三方上架（§21）|
 | 桌面框架 | Electron 39.x（已定）|
 | 发布方式 | Docker 产物优先（已定）|
 | LLM | BYOK 多提供商（已定）|
@@ -1245,10 +1311,10 @@ CMD ["node", "dist/server/main.js"]
 ### 19.2 仍待你确认（不阻塞 M1，但影响 M2 之后）
 
 1. **代码可见性节奏**：M1-M2 只给只读 + Diff，M3 再开放可编辑？还是从一开始就能直接改文件？（我的建议：M1 只读 + Diff，因为此时代码质量还在建立信任）
-2. **收费组件的结算方式**：① 自带 license 文件离线校验（无服务端，符合开源调性，但易被绕过）；② 官方市场 + 在线许可（可控，但引入服务端依赖）；③ 两者都支持（推荐）。你倾向哪种？
-3. **个人免费的具体边界**：是否对"个人商用"也免费（如个体户用 Tenon 做外包交付）？这会影响后续定价与授权文案。
-4. **插件市场的审核策略**：开放上架（快，但有安全风险，插件能访问用户代码）还是先官方精选 + 白名单（慢，但可控）？
-5. **Linux 支持的时间点**：M5 一起发，还是等 mac/win 稳定后单独发？
+2. **个人免费的具体边界**：是否对"个人商用"也免费（如个体户用 Tenon 做外包交付）？这会影响后续定价与授权文案。
+3. **Linux 支持的时间点**：M5 一起发，还是等 mac/win 稳定后单独发？
+
+> **v1.2 已闭环两项**：原「收费组件结算方式」与「插件市场审核策略」因"L2 先由官方独家维护"而自动消解 —— bundled / Hub 独源阶段既不存在第三方审核，也不需要 license 体系。二者分别延至 M6 末与 M7（见 §21.4）。
 
 ---
 
@@ -1364,7 +1430,7 @@ Agent 不手写接线代码，而是执行一个**标准动作**（内部工具 
 | 层 | 来源 | 信任 | 安装方式 | 例子 |
 |---|---|---|---|---|
 | **L1 内置积木** | 我们官方，随 Tenon 发布 | 完全信任 | 无需安装，Agent 直接调用 | 表格、表单、图表、登录、文件上传、权限 |
-| **L2 官方组件** | 我们官方市场 | 签名校验 | 一键装，自动更新 | AI 小助手、Excel 导出、审批流、地图 |
+| **L2 官方组件** | 我们官方（Phase 1 bundled 内置 → Phase 2 Hub 独源） | 签名校验 | 一键装 / 随包内置，自动更新 | AI 小助手、Excel 导出、审批流、地图 |
 | **L3 社区组件** | 第三方开发者 | 沙箱 + 权限清单 | 显式确认权限后安装 | 行业专属（餐饮菜单、教培排课）|
 
 L3 必须有真实隔离：**不能给社区插件 `host.serve` 级别的能力**，因为那等于给任意代码访问应用数据库。方案：
@@ -1372,7 +1438,46 @@ L3 必须有真实隔离：**不能给社区插件 `host.serve` 级别的能力*
 - 文件系统访问走 gondolin 微 VM 或受限 `NodeExecutionEnv`（Windows 见 §15.3）
 - `manifest.json` 的 `permissions` 声明（db:read / db:write / net:fetch / fs:app）在安装时逐条弹窗
 
+#### 关于 L2 的分发节奏（v1.2 定案，2026-10-31）
+
+**决策：暂不做开放市场，L2 全部由官方维护。** 分发分三阶段演进，但三个阶段**共用同一套 manifest 与同一个加载器**，只差一个 `source` 字段 —— 因此 Phase 1 → Phase 3 不需要重写任何东西。
+
+| 阶段 | 分发形态 | 目录 | 更新方式 |
+|---|---|---|---|
+| **Phase 1（M5）** | **bundled 内置**：3 个官方插件随安装包发布 | `<app>/resources/plugins/<id>/`（只读） | 跟随软件版本 |
+| **Phase 2（M6）** | **Hub 上线，仅官方独源**：官方插件可单独下载 / 更新 | `~/.tenon/plugins/<id>/<version>/`（可写） | 独立于软件版本 |
+| **Phase 3（M7+）** | 开放第三方上架（审核 + 签名 + 分成） | 同上 | 同上 |
+
+**加载器只有一条路径**，按优先级解析（**覆盖层机制**）：
+
+```
+解析顺序： hub 版（已装且 semver 满足 minTenonVersion） > bundled 版 > 不存在
+```
+
+这条机制带来一个实用能力：**内置插件也能热更新**。官方修了 AI 小助手的 bug，不必等整个 Tenon 发版 —— 推到 Hub 后用户点更新即可；卸载 hub 版则自动回落到 bundled 版，不会出现"应用缺组件"的悬空状态。M6 验收里"不重装软件就能更新内置插件"即指此。
+
+**manifest 字段现在就定死**（Phase 1 也照填，只是 `source` 恒为 `bundled`、`signature` 为 null）：
+
+```jsonc
+{
+  "id": "tenon.official.ai-assistant",
+  "version": "1.0.0",
+  "source": "bundled",                 // bundled | hub | local
+  "minTenonVersion": "1.0.0",
+  "signature": null,                    // hub 来源必须有（Ed25519）
+  "permissions": ["fs:app", "net:fetch:api.openai.com"],
+  "agentHints": "……",                  // 必填，安装时写入应用 AGENTS.md
+  "pricing": { "type": "free" }         // free | paid（Phase 3 才用）
+}
+```
+
+**为什么 M5 就要把 Plugin 页面做出来**（即使当时只有内置插件）：列表 / 开关 / 来源标识 / "官方 Hub 筹备中"占位。否则 M6 会同时面对"加载器改造 + UI 重构 + 更新机制"三件事，风险叠加在发布前。
+
+**这个决定顺带关掉两个待办**（§19.2 第 2、4 问）：市场审核策略 → 首期只有官方独源，不存在第三方审核问题，延至 M7；收费组件结算 → 官方内置阶段不需要 license 体系，延至 M6 末（不阻塞发布）。
+
 ### 21.5 免费 / 收费组件的商业模式
+
+> 以下描述的是 **Phase 3（开放第三方上架）** 的形态。Phase 1（bundled 内置）与 Phase 2（Hub 官方独源）阶段，官方插件全部免费或随软件授权，**不需要 license 体系**，见 §21.4 末的节奏表。
 
 | 维度 | 免费组件 | 收费组件 |
 |---|---|---|
@@ -1407,6 +1512,8 @@ L3 必须有真实隔离：**不能给社区插件 `host.serve` 级别的能力*
 | 8 个 Rust crates | ❌ 废弃 → TS packages | 同上 |
 | 自托管单二进制（rust-embed + Axum） | ❌ 废弃 → Docker 单容器 | 用户要求 Docker 部署；标准栈更易维护 |
 | 生成应用默认 SQLite | ❌ 废弃（v1.1）→ **PostgreSQL** | 需求升级为"高性能应用 + 通用组件 + AI 小助手"，SQLite 在多写并发/扩展生态（pgvector、LISTEN/NOTIFY）上是硬短板；且切库要重写迁移 |
+| 应用库四档供给（`embedded` 默认 / docker / external / lite） | ⚠️ 调整为**两档**（v1.2）→ `pglite` 默认 + `postgres` 发布 | 四档里有三档都在解决同一件事——"如何让一个原生 PostgreSQL 在用户机器上跑起来"，而这件事本身就是全部麻烦的来源。PGlite 是 PG 编译到 WASM，零安装且方言不变，把四档压成两档；`embedded` / `sqlite` 降为逃生口 |
+| 产品库用 `better-sqlite3` | ⚠️ 改为 **`node:sqlite`**（v1.2）| Electron 内置 Node 22 自带 `node:sqlite`，消除原生模块与 `@electron/rebuild`，使安装包内**无任何需按平台编译的依赖** |
 | `chord` 列为"可选，M5 再引入" | ❌ 废弃（v1.1）→ **基座，M5 主线** | 实际读源码后确认它就是插件生态的标准答案，晚引入等于先自研一遍再推翻 |
 | BYOK 多提供商 | ✅ 保留并强化 | pi-ai 直接覆盖 |
 | Git 版本管理 | ✅ 升级为一等公民 | 用户明确要求 |
@@ -1417,9 +1524,14 @@ L3 必须有真实隔离：**不能给社区插件 `host.serve` 级别的能力*
 1. **pi-durable 最小闭环**：`Harness.open` + `submit` + `watchEvents` 在真实应用目录跑通流式输出与 `resume()`
 2. **App Gateway 代理 HMR**：Vite HMR WebSocket 经自建网关可用（预览体验的命门）
 3. **源码定位插件**：JSX 上 `data-tenon-loc` 能准确对应 file:line（尤其经 Tailwind/shadcn 组合组件后）
-4. **★ PG 四档供给互通**（v1.1 新增）：同一份 TypeORM migration 能在 `lite` / `embedded` / `docker` 三种供给下跑通，且切换不改代码 —— 这是"开发态与生产一致"的唯一验证点
+4. **★ PG 两档供给互通**（v1.2 调整，原为"四档"）：同一份 TypeORM migration 能在 `pglite`（默认）与 `postgres`（Docker）下跑通，切换仅改连接串；从 PGlite `pg_dump` 迁移到 PG 数据零丢失。**另须专项验证 `PGlite + pg-gateway + TypeORM` 在 `pool.max=1~2` 下的稳定性与 P95 延迟** —— 这是本方案唯一的真实技术风险点。
 
-前三条任一不成立，方案需局部调整；第 4 条不成立，则"高性能应用"这个定位站不住。建议 M1 第一周全部做掉。
+前三条任一不成立，方案需局部调整；第 4 条不成立，则退回 `embedded` 默认档。
 
-> 已完成的前置验证（2026-10-31）：`embedded-postgres` 18.6 的 darwin-arm64 / windows-x64 / linux-arm64 平台包均存在；`@electric-sql/pglite` 0.5.13 + `pg-gateway` 0.3 可提供 TCP 协议；Electron 39.8.9 内置 Node 22.22.1 满足 pi 全家 `>=22.19` 要求。
+> 已完成的前置验证（2026-10-31）：
+> - **pi 全家零原生模块**（解包实测：无 `.node`/`.gyp`/`.dylib`/`.so`/`.dll`/`.wasm`，无平台 `optionalDependencies`）→ Windows 无需 node-gyp / WSL
+> - **Electron 内置 Node 自带 `node:sqlite`**（实测记录：Electron 37.10.3 / Node 22.21.1 提供 `node:sqlite` + SQLite 3.50.4）→ pi-durable 在 `ELECTRON_RUN_AS_NODE` 下可用；产品库可用内置模块，无需 `better-sqlite3`
+> - Electron 39.8.9 内置 Node 22.22.1 满足 pi 全家 `engines >=22.19`
+> - `@electric-sql/pglite` 0.5.13 + `pg-gateway` 0.3.0-beta.4 可提供 TCP 协议（**待补：TypeORM 连接池串行化压测**）
+> - `embedded-postgres` 18.6 的 darwin-arm64 / windows-x64 / linux-arm64 平台包均存在（现仅作逃生口）
 
