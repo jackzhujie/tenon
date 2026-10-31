@@ -8,7 +8,7 @@ import { rm } from 'node:fs/promises'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { App, AppStatus } from '@tenon/protocol'
-import { TenonError } from '@tenon/protocol'
+import { TenonError, isTenonError } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
 import { commitAll, headSha, initRepo, isRepo } from '../git.js'
 import { newId, slugify } from '../ids.js'
@@ -57,10 +57,29 @@ export interface CreateAppInput {
   description?: string
 }
 
+/**
+ * 铺模板的钩子。
+ *
+ * 为什么是钩子而不是 `core` 直接依赖 `@tenon/generator`：依赖方向是
+ * `server → core` 与 `server → generator`，两条边**平行**。让 core 依赖 generator
+ * 之后，generator 想拿 `TenonError` 就得反着依赖 core，立刻成环。
+ * 钩子的签名定义在这里（谁调用谁实现），core 只负责"在正确的时机调它"。
+ */
+export interface AppScaffoldContext {
+  readonly repoDir: string
+  readonly appId: string
+  readonly appName: string
+  readonly appSlug: string
+  readonly templateId: string
+}
+
+export type AppScaffoldHook = (ctx: AppScaffoldContext) => Promise<void>
+
 export class AppStore {
   constructor(
     private readonly db: TenonDatabase,
     private readonly home: TenonHome,
+    private readonly hooks: { scaffold?: AppScaffoldHook } = {},
   ) {}
 
   list(includeArchived = false): App[] {
@@ -119,11 +138,24 @@ export class AppStore {
         `# ${input.name}\n\n由 Tenon 创建的应用工作区。\n`,
         'utf8',
       )
+      // 模板必须在 initRepo 之前铺完：铺模板与首次提交是同一个动作
+      if (this.hooks.scaffold !== undefined) {
+        await this.hooks.scaffold({
+          repoDir: paths.repoDir,
+          appId: id,
+          appName: input.name,
+          appSlug: slug,
+          templateId: input.templateId,
+        })
+      }
       await initRepo(paths.repoDir)
       await commitAll(paths.repoDir, `chore: 初始化应用「${input.name}」`, { appId: id })
     } catch (err) {
       // 建盘失败 → 把库行删掉，别留一个指向空目录的应用
       this.db.run('DELETE FROM apps WHERE id = ?', id)
+      // 模板自己的错误（未知模板 / 变量缺失）要原样上抛：
+      // 统一包成 APP_HOME_MISSING 会让「模板名写错了」看起来像「磁盘坏了」
+      if (isTenonError(err)) throw err
       throw new TenonError('APP_HOME_MISSING', '创建应用目录失败', {
         appId: id,
         reason: err instanceof Error ? err.message : String(err),

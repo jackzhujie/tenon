@@ -1,20 +1,21 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-10-31（M1 主干第 1~6 步 + **工具层**落地，33 个测试 + 9 项端到端冒烟全绿）
+> 最后更新：2026-10-31（M1 主干第 1~6 步 + **工具层 + 生成器 + 预览网关**落地，62 个测试 + 9 项端到端冒烟 + 1 条真机 e2e 全绿）
 
 ---
 
 ## 0. 一句话现状
 
-**M0 逆向完成 → DESIGN v1.2.3 → 四个 spike 全过 → M1 主干前 6 步 + 工具层已落地（能跑、能写代码、有测试）。**
+**M0 逆向完成 → DESIGN v1.2.4 → 四个 spike 全过 → M1 主干第 1~7 步已落地（能跑、能写代码、能在 iframe 里看到应用）。**
 
 先跑这三条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:faux   # 不需要 API Key，用 faux 模型起服务（会打印 TENON_READY）
-pnpm test                       # 33 项单测 + 集成测试
+pnpm test                       # 62 项单测 + 集成测试
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
+pnpm e2e:preview                # 真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 改文件（要联网）
 ```
 
 - `packages/{protocol,core,agent,server}` 已建；`pnpm typecheck` 全绿（含四个 spike）
@@ -24,7 +25,9 @@ pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP +
 - SSE 增量 / `message.end` / `usage` / `app.status` 全链路打通；每轮结束自动 git 提交（无改动不产生空提交）
 - **Agent 能真的写代码了**：`read` / `write` / `edit` / `bash` 四个工具已接到 pi-durable 注册表上，
   写完的文件进得了这一轮的 commit（`packages/agent/src/tools/coding.ts`）
-- **还没做**：生成器与模板、预览网关（第 7 步）、Web 前端（第 8 步）、Electron 壳（第 9 步）
+- **能真的看到一个应用**：`app.create` 会用 `react-vite` 模板铺出可跑的工作区，`preview.start` 装依赖 + 起 Vite +
+  挂到 App Gateway 后面，iframe 打开的就是它（实测 4.3s 就绪，含依赖安装）
+- **还没做**：Web 前端（第 8 步）、Electron 壳（第 9 步）
 
 ---
 
@@ -64,7 +67,7 @@ pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP +
 | 文件 | 管什么 | 什么时候读 |
 |---|---|---|
 | **`docs/STATUS.md`**（本文件） | 现状、下一步、陷阱 | **每次开工先读** |
-| `docs/DESIGN.md` | **唯一事实来源**，v1.2.1，1500+ 行 | 写涉及架构的代码前，按需读对应章节 |
+| `docs/DESIGN.md` | **唯一事实来源**，v1.2.4，1500+ 行 | 写涉及架构的代码前，按需读对应章节 |
 | **`docs/SPIKES.md`** | 四个 spike 的实测数字与结论（含被推翻的假设）| 碰 DB / pi / 网关 / 定位插件前必读 |
 | `docs/ARCHITECTURE.md` | 一分钟速览 + 四条原则 | 给别人介绍时 |
 | `docs/PI-CHEATSHEET.md` | pi 全生态真实 API（读源码所得）| **写任何 pi 相关代码前必查**（比官方文档全）|
@@ -99,29 +102,34 @@ pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP +
 | 5 | SSE 对话链路（`chat.submit/stop/history`） | ✅ | `packages/agent/src/chat.ts` + `packages/server/src/sse.ts` |
 | 6 | Git 自动提交（isomorphic-git，trailer） | ✅ | `packages/core/src/git.ts` |
 | 6.5 | **工具层**：read/write/edit/bash 接进 pi-durable（cwd 钉在 `repo/`、越界拒写、环境洗净） | ✅ | `packages/agent/src/tools/coding.ts` |
-| 7 | **静态预览**：App Gateway 托管纯前端 React 应用，HMR 打通（M1 不碰数据库） | ⬜ 下一步 | 从 `spikes/gateway` 演进成 `packages/gateway` |
-| 8 | **Web 模式**：`pnpm dev:web` 全流程可用（前端 React 19 + Vite 7） | ⬜ | `apps/web` |
+| 6.6 | **生成器**：`templates/react-vite` 铺进 `repo/`，与首次 commit 同一个动作 | ✅ | `packages/generator/` |
+| 7 | **预览**：App Gateway + dev server 编排（`preview.start/stop/status` + `preview.status` 事件） | ✅ | `packages/gateway/` |
+| 8 | **Web 模式**：`pnpm dev:web` 全流程可用（前端 React 19 + Vite 7） | ⬜ 下一步 | `apps/web` |
 | 9 | **Electron 壳**：最后接入，打包冒烟（mac + win） | ⬜ | `apps/desktop`，spawn `server/src/bin.ts` 读 `TENON_READY` |
 
-第 7 步之前还缺**模板**：Agent 已有工具能自由写文件，但「一个能跑起来的 React 应用骨架」不应该每次靠模型从零拼 ——
-`packages/generator` 负责把模板铺进 `repo/`（见 §4.4 第 2 项）。
+**M1 的生成链路已经闭合**：`app.create` 铺模板 → Agent 用工具改代码 → `preview.start` 起 dev server → iframe 看结果。
+唯一缺的是**给人用的界面**（第 8 步）。`data-tenon-loc` 的编译期注入按计划留到 M3 ——
+它是编译期插件，对已存在的应用补上不产生任何返工，不急。
 
 ### 4.3 M1 验收（DoD）
 
 - [ ] `pnpm dev:web` 打开即可对话 —— server 侧已具备，缺 Web 前端（第 8 步）
-- [ ] 生成一个纯前端 Todo 应用，iframe 里热更新生效 —— 工具已就位，缺生成器模板与预览网关（第 7 步）
+- [x] 生成一个纯前端 Todo 应用，iframe 里热更新生效 —— 链路已通：模板铺得出、dev server 起得来、网关打得开、
+      改文件后 dev server 立刻重新转译（`pnpm e2e:preview` 逐条打印）。**"Todo" 本身要等 Web 前端能对话后由 Agent 写**
 - [x] 每轮对话产生一个 git commit —— `chat.ts` 每轮结束调 `commitAll`；**本轮没有文件改动时不产生空提交**。
       工具层接上后已能真的产出 commit（`tools.test.ts` 断言：建应用 1 个 + 写文件那轮 1 个）
 - [x] 杀进程重启后，对话与任务能续跑（`resume()`）—— `packages/server/test/chat.test.ts` 的「崩溃续跑」用例：生成中途关进程 → 重启 → 这一轮自己跑完（403ms）
 
-### 4.4 下一步具体做什么（第 7 步拆解）
+### 4.4 下一步具体做什么（第 8 步：`apps/web`）
 
-1. ~~**工具层**~~ ✅ 已完成：`packages/agent/src/tools/coding.ts`（adapter 见 DESIGN §4.3.1）
-2. **生成器**：`packages/generator` 模板渲染（`templates/`）+ `data-tenon-loc` 注入（照 `spikes/loc` 的双属性）。
-   M1 只要**一个**模板：`react-vite`（`index.html` + `vite.config.ts` + `src/main.tsx` + `src/App.tsx`），
-   建应用时铺进去，Agent 只在上面改
-3. **网关**：`packages/gateway` 从 `spikes/gateway` 演进，`preview.start/stop/status` 三个 RPC 落地，事件用 `preview.ready`
-4. **前端**：`apps/web` 先做「会话 + iframe 预览」两栏，SSE 客户端注意**先连后发**（DESIGN §4.5 第 4 条）
+1. ~~**工具层**~~ ✅ / ~~**生成器**~~ ✅（`packages/generator`，DESIGN §8.7）/ ~~**网关**~~ ✅（`packages/gateway`）
+2. **`apps/web`**（React 19 + Vite 7，只依赖 `@tenon/protocol`）：
+   - 左栏会话（`chat.history` + SSE 增量），右栏 iframe（`preview.ready` 的 url）
+   - 应用列表 / 新建（`app.create` → 自动 `preview.start`）/ 模板选择（`template.list`）
+   - `preview.status` 事件驱动「装依赖 → 起服务 → 就绪」三段进度，**不要白屏**
+   - SSE 客户端**先连后发**（DESIGN §4.5 第 4 条）；`since` 断线续传、`stream.reset` 时重拉 `chat.history`
+3. **`pnpm dev:web`**：并行起 server（`bin.ts` 打印 `TENON_READY`）+ web（从 `TENON_READY` 那行取 url/token）
+4. **Electron 壳**（第 9 步）：spawn `bin.ts`、读 `TENON_READY`、窗口加载 web 的构建产物
 
 ### 4.5 代码地图（只列已落地的）
 
@@ -141,6 +149,17 @@ packages/
 │   ├── src/chat.ts      #   submit/stop/history/plan + watchEvents → SSE（40ms 合帧）
 │   ├── src/tools/coding.ts  # read/write/edit/bash ↔ pi-durable 的 adapter（DESIGN §4.3.1）
 │   └── src/docs.ts      #   tenon.app / tenon.plan（defineDoc）
+├── generator/           # 模板铺进 repo（DESIGN §8.7）
+│   ├── src/scaffold.ts  #   scaffoldApp：渲染模板 → 写文件；已有 package.json 就拒绝
+│   ├── src/registry.ts  #   读 templates/<id>/template.json，递归收集文件
+│   ├── src/render.ts    #   只做 {{ident}} 替换；渲染后残留占位符直接抛错
+│   └── templates/react-vite/  # ★ 模板是真实文件（不是 TS 字符串常量）
+├── gateway/             # 预览编排（DESIGN §9.1）
+│   ├── src/proxy.ts     #   HTTP 转发 + upgrade 原样透传（两侧 socket 必须配对销毁）
+│   ├── src/preview.ts   #   PreviewManager：deps → 端口 → 网关 → dev server → 探活
+│   ├── src/deps.ts      #   pnpm install（--prefer-offline，全有超时，失败带最后 20 行）
+│   ├── src/vite.ts      #   spawn(process.execPath, [viteBin])：不依赖 PATH 里有 pnpm
+│   └── src/ports.ts     #   先定端口再 strictPort，绝不让 dev server 自己换端口
 └── server/              # 只做「挂到 HTTP 上」
     ├── src/app.ts       #   Fastify 装配 / RPC 路由 / SSE / 错误处理
     ├── src/auth.ts      #   Bearer（/api/health 免 Token）
@@ -149,7 +168,9 @@ packages/
     └── test/support.ts  #   集成测试夹具：boot / rpc / openSse（先连后发只此一份实现）
 ```
 
-依赖方向（DESIGN §3.2）**禁止反向**：`protocol ← core/agent/server`；`server → agent → core`。
+依赖方向（DESIGN §3.2）**禁止反向**：`protocol ← 全部`；`server → {core, agent, generator, gateway}`；
+`agent/gateway → core`；`generator → protocol`（只拿 `TenonError`）。
+`core` 不依赖 `generator`：铺模板走 `AppStore.create` 的 `scaffold` 钩子，由 `server` 注入（DESIGN §8.7）。
 
 ---
 
@@ -180,6 +201,12 @@ packages/
 | **`pi-coding-agent` 的工具签名 ≠ `pi-durable` 的** | 前者 `execute(toolCallId, params, signal, onUpdate, ctx) → AgentToolResult`，后者 `execute(args, api, context) → ToolExecutionResult`。必须过 adapter（`packages/agent/src/tools/coding.ts`），别试图直接塞进 registry |
 | **`edit` 的入参是 `edits: [{ oldText, newText }]`** | 不是 `old_string`/`new_string`。照 `pi-coding-agent` 的 schema 写，自己另造一份会静默变成"工具报错 → 模型重试 → 死循环" |
 | **`section()` 的 key 只能 `[a-z][a-z0-9_-]*`** | 写成 `tenon.workspace` 会让**每一轮 submit** 直接抛 `INTERNAL: Section key ... must match ...`。不是渲染问题，是整轮失败 |
+| **upgrade 透传之后两侧 socket 必须成对销毁** | 客户端断开时 `upstream.destroy()`，反之亦然。漏了不报错只会漏水：Vite 每次整页刷新重连一次 HMR，几百次后 dev server 撞 FD 上限。**测试里表现为 `server.close()` 永远等不到回调、卡在 afterEach** |
+| **`StartServerOptions.env` 是「覆盖对象」不是「完整环境」** | 直接拿它当子进程 env 会抹掉 `PATH`，`pnpm install` 以 `code=null` 失败、报错只说"退出码 null"。`PreviewManager.spawnEnv()` 先 `{...process.env, ...env}` 再 `scrubEnv` |
+| **模板的 `{{x}}` 绝不能漏进应用** | `renderTemplate` 渲染后残留占位符直接抛 `TEMPLATE_VAR_LEFT`；`template.json.variables` 声明过的变量缺失抛 `TEMPLATE_VAR_MISSING`。有测试逐文件扫描占位符并核对声明 |
+| **铺模板必须在 `initRepo` 之前** | 否则建应用会产生两个 commit（一条空提交 + 一条模板提交），历史看起来像改坏了 |
+| **`@vitejs/plugin-react` 6.x 的 peer 是 `vite@^8`** | 模板用 vite 7 就必须配 5.x。装错只会得到一条 `unmet peer` 警告，然后在启动时以看不懂的方式失败 |
+| **模板目录不是 workspace 包** | `packages/generator/templates/react-vite/package.json` 不能被 `pnpm install` 当成成员（glob 只到 `packages/*`）。发布时要 `extraResources` 带上整个 `templates/`，或用 `TENON_TEMPLATES_DIR` 指过去 |
 | **状态只写库不推事件，前端永远不知道这一轮结束** | `chat.ts` 的 `setStatus()` 现在同时落库 + 推 `app.status`；而且**先提交 git 再发 idle**，否则前端看到"空闲"时版本列表还是旧的 |
 | **submission 的 settle 回调可能晚于 `close()` 到达** | 那时 `tenon.db` 已关，写库抛 `database is not open` → unhandled rejection（表现为"33 项测试全过但有 2 个 error"）。`ChatService` 有 `closed` 门；写状态还要 try/catch |
 | **测试闸门不能等 `git.commit`** | 这一轮没有文件改动就不会产生提交，等它会一直挂到超时。等 `app.status: idle`（它在提交之后发）|
@@ -226,11 +253,12 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.3），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.4），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
-当前阶段：M1 主干。第 1~6 步 + 工具层已完成（packages/{protocol,core,agent,server}，33 个测试 + 9 项冒烟全绿）。
-接着做 STATUS.md §4.4：生成器（react-vite 模板）→ 预览网关 → Web 前端。`pnpm test` 与 `pnpm smoke` 要一直保持绿。
+当前阶段：M1 主干。第 1~7 步已完成（packages/{protocol,core,agent,generator,gateway,server}，62 个测试 + 9 项冒烟 + 1 条真机 e2e 全绿）。
+接着做 STATUS.md §4.4：`apps/web`（会话 + iframe 两栏）→ `pnpm dev:web` → Electron 壳。
+`pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路时再跑一次 `pnpm e2e:preview`。
 
 三条铁律不要违反：Electron 只做壳 / 生成应用不感知运行环境 / 实验性依赖锁版本 + adapter 包装。
 ```

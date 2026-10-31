@@ -8,6 +8,8 @@
 import type { CoreServices } from '@tenon/core'
 import { appPaths, files, gitops } from '@tenon/core'
 import type { AgentRuntime } from '@tenon/agent'
+import type { PreviewManager } from '@tenon/gateway'
+import { listTemplates } from '@tenon/generator'
 import type { RpcArgs, RpcMethod, RpcMethods, RpcOutput } from '@tenon/protocol'
 import { TenonError } from '@tenon/protocol'
 import type { SseBus } from './sse.js'
@@ -15,6 +17,7 @@ import type { SseBus } from './sse.js'
 export interface ServerDeps {
   core: CoreServices
   agent: AgentRuntime
+  preview: PreviewManager
   bus: SseBus
   version: string
 }
@@ -33,7 +36,7 @@ function requireChat(agent: AgentRuntime): NonNullable<AgentRuntime['chat']> {
 }
 
 export function createHandlers(deps: ServerDeps): HandlerMap {
-  const { core, agent, bus } = deps
+  const { core, agent, preview, bus } = deps
 
   return {
     health: async () => ({
@@ -78,6 +81,8 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     'app.delete': async (input) => {
       await agent.chat?.close()
       await agent.pool?.release(input.id)
+      // 预览必须先停：dev server 还在写 node_modules / .vite 时删目录会留下半截图
+      await preview.stop(input.id)
       await core.apps.delete(input.id, input.removeFiles)
       return { deleted: true }
     },
@@ -98,6 +103,29 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       const chat = requireChat(agent)
       return chat.history(input.appId, input.limit)
     },
+
+    'template.list': async () => {
+      const templates = await listTemplates()
+      return {
+        templates: templates.map((template) => ({
+          id: template.id,
+          label: template.label,
+          description: template.description,
+          entry: template.entry,
+          variables: [...template.variables],
+          notes: [...template.notes],
+        })),
+      }
+    },
+
+    'preview.start': async (input) => {
+      core.apps.require(input.appId)
+      return { preview: await preview.start(input.appId, { restart: input.restart }) }
+    },
+
+    'preview.stop': async (input) => ({ preview: await preview.stop(input.appId) }),
+
+    'preview.status': async (input) => ({ preview: preview.status(input.appId) }),
 
     'plan.get': async (input) => {
       const chat = requireChat(agent)

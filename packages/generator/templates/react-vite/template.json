@@ -1,0 +1,12 @@
+{
+  "id": "react-vite",
+  "label": "React + Vite（纯前端）",
+  "description": "零后端的单页应用骨架：React 19 + Vite 7 + TypeScript。M1 的默认模板。",
+  "entry": "index.html",
+  "variables": ["appId", "appName", "appSlug"],
+  "notes": [
+    "M1 的模板刻意保持最小：只有 react / react-dom / vite / typescript，首次 pnpm install 约十几秒。",
+    "Tailwind 4 + shadcn 随 M2 的组件体系一起进模板（现在引会让首装慢一倍，收益却要等组件库才兑现）。",
+    "data-tenon-loc / data-tenon-callsite 由编译期 Babel 插件注入（M3），不在源码里手写。"
+  ]
+}

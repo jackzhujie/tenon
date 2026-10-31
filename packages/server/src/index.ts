@@ -8,6 +8,8 @@ import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { openCore, type CoreServices } from '@tenon/core'
 import { createAgentRuntime, type AgentRuntime } from '@tenon/agent'
+import { PreviewManager, type PreviewManagerOptions } from '@tenon/gateway'
+import { scaffoldApp } from '@tenon/generator'
 import { buildServer, type TenonServer } from './app.js'
 import { SseBus } from './sse.js'
 
@@ -26,6 +28,11 @@ export interface StartServerOptions {
   logger?: boolean
   /** 测试用：库进内存，不碰真实 HOME */
   inMemoryDb?: boolean
+  /**
+   * 预览的可注入项。测试给一个 `launch`（stub 上游）+ `installDeps: false`
+   * 就能把编排逻辑验完，不需要真的装 React。
+   */
+  preview?: Pick<PreviewManagerOptions, 'launch' | 'installDeps' | 'readyTimeoutMs' | 'log'>
 }
 
 export interface RunningServer {
@@ -36,6 +43,7 @@ export interface RunningServer {
   readonly server: TenonServer
   readonly core: CoreServices
   readonly agent: AgentRuntime
+  readonly preview: PreviewManager
   close(): Promise<void>
 }
 
@@ -44,7 +52,21 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   const host = options.host ?? '127.0.0.1'
   const token = options.token ?? randomBytes(24).toString('hex')
 
-  const core = openCore({ env, ...(options.inMemoryDb === true ? { inMemoryDb: true } : {}) })
+  // 建应用时铺模板：钩子由 server 注入，core 不认识 @tenon/generator（依赖方向见 DESIGN §3.2）
+  const core = openCore({
+    env,
+    ...(options.inMemoryDb === true ? { inMemoryDb: true } : {}),
+    scaffold: async (ctx) => {
+      await scaffoldApp({
+        repoDir: ctx.repoDir,
+        appId: ctx.appId,
+        appName: ctx.appName,
+        appSlug: ctx.appSlug,
+        templateId: ctx.templateId,
+        env,
+      })
+    },
+  })
   const bus = new SseBus()
   const agent = createAgentRuntime({
     core,
@@ -53,9 +75,18 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       bus.publish(event)
     },
   })
+  const preview = new PreviewManager({
+    home: core.home,
+    env,
+    publish: (event) => {
+      bus.publish(event)
+    },
+    ...(options.preview ?? {}),
+  })
   const server = buildServer({
     core,
     agent,
+    preview,
     bus,
     token,
     ...(options.version === undefined ? {} : { version: options.version }),
@@ -75,10 +106,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     server,
     core,
     agent,
+    preview,
     async close() {
       if (closed) return
       closed = true
       await server.app.close()
+      // 先停预览：dev server 是我们 spawn 的，进程别留在外面
+      await preview.close()
       await agent.close()
       core.close()
     },

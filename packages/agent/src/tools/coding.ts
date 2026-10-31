@@ -18,6 +18,7 @@ import { resolve, sep } from 'node:path'
 import type { Extension, ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
 import { defineExtension, section } from '@earendil-works/pi-durable'
 import type { ToolDefinition as SourceToolDefinition } from '@earendil-works/pi-coding-agent'
+import { scrubEnv } from '@tenon/core'
 import {
   createBashToolDefinition,
   createEditToolDefinition,
@@ -26,6 +27,12 @@ import {
 } from '@earendil-works/pi-coding-agent'
 
 export const CODING_EXTENSION = 'tenon.coding'
+
+/**
+ * 洗环境变量（实现在 `@tenon/core` —— 预览拉起 dev server 用的是同一套规则）。
+ * 这里保留 re-export，别处仍在从本模块导入。
+ */
+export { scrubEnv }
 
 /** 一次工具结果最多回给模型多少 —— 超了 harness 会自己截断，这里给的是上限 */
 const FILE_OUTPUT_LIMITS = { maxBytes: 96 * 1024, maxLines: 4000, retain: 'head' } as const
@@ -45,22 +52,6 @@ export function isInside(root: string, candidate: string): boolean {
   const absolute = resolve(root, candidate)
   const prefix = root.endsWith(sep) ? root : `${root}${sep}`
   return absolute === root || absolute.startsWith(prefix)
-}
-
-/**
- * 洗环境变量。不洗干净的话，`bash` 起子进程时会把这些带进应用自己的进程里，
- * 而应用代码最终是要能被用户导出、分享的 —— 那是真实的泄漏面。
- */
-export function scrubEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const dropped = /(?:api[_-]?key|secret|token|password|passwd|credential|authorization)/i
-  const out: NodeJS.ProcessEnv = {}
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) continue
-    if (key.startsWith('TENON_')) continue
-    if (dropped.test(key)) continue
-    out[key] = value
-  }
-  return out
 }
 
 function textOf(content: SourceUpdate['content']): string {

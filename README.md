@@ -35,25 +35,30 @@
 |---|---|
 | [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、M1 任务清单、已知陷阱 |
 | [**四个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度的真实数字 |
-| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.2）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
+| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.4）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
 | [逆向工作手册](docs/REVERSE_ENGINEERING.md) | 内部研究用（不随开源发布） |
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.2**；四个技术 spike 全部跑通。**M1 主干第 1~6 步已落地**：四个核心包（`protocol` / `core` / `agent` / `server`）能起服务、能对话、能落库、能自动提交，28 个测试 + 9 项端到端冒烟全绿。
+M0 逆向研究完成；方案 **v1.2.4**；四个技术 spike 全部跑通。**M1 主干第 1~7 步已落地**：
+六个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `server`）能起服务、能对话、能落库、能自动提交，
+Agent 有 `read/write/edit/bash` 四个工具、能真的改代码；新建应用会用 `react-vite` 模板铺出可跑的工作区，
+`preview.start` 装依赖 + 起 Vite + 挂到 App Gateway 后面 —— **iframe 里打开的就是它**（实测 4.3s 就绪）。
+62 个测试 + 9 项端到端冒烟 + 1 条真机 e2e 全绿。
 
 想先跑起来看（**不需要任何 API Key**）：
 
 ```bash
 pnpm install
 pnpm dev:faux     # 起 server，打印 TENON_READY {url,port,token,home,model}
-pnpm test         # 28 项单测 / 集成测试
+pnpm test         # 62 项单测 / 集成测试
 pnpm smoke        # 9 项端到端（spawn 真进程，走 HTTP + SSE）
+pnpm e2e:preview  # 真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件
 ```
 
-**还没做的**：工具与生成器、预览网关、Web 前端、Electron 壳 —— 见 [STATUS.md §4.2/§4.4](docs/STATUS.md)。实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
+**还没做的**：Web 前端、Electron 壳 —— 见 [STATUS.md §4.2/§4.4](docs/STATUS.md)。实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License
 

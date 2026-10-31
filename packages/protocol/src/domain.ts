@@ -121,6 +121,51 @@ export const FileNode = z.object({
 })
 export type FileNode = z.infer<typeof FileNode>
 
+// ---------------------------------------------------------------- 预览
+
+/** 分维度就绪（DESIGN §9.2）：UI 按这三格显示进度，不要白屏 */
+export const Readiness = z.object({
+  /** 依赖是否齐（首次 `pnpm install`） */
+  deps: z.enum(['pending', 'ready', 'failed']),
+  /** 后端。M1 生成的是纯前端应用，没有后端时直接记 ready */
+  server: z.enum(['pending', 'ready', 'failed']),
+  /** dev server 首屏可访问 */
+  preview: z.enum(['pending', 'ready', 'failed']),
+})
+export type Readiness = z.infer<typeof Readiness>
+
+export const PreviewState = z.enum(['stopped', 'starting', 'ready', 'failed'])
+export type PreviewState = z.infer<typeof PreviewState>
+
+export const PreviewStatus = z.object({
+  appId: z.string(),
+  state: PreviewState,
+  /** iframe 该用的地址（网关地址）。未就绪时为 null */
+  url: z.string().nullable(),
+  gatewayPort: z.number().int().nullable(),
+  /** dev server 自己的端口（排障用，不要让前端拿它当 URL） */
+  upstreamPort: z.number().int().nullable(),
+  readiness: Readiness,
+  /** 失败原因（给用户看的一句话，不拼技术栈的堆栈） */
+  error: z.string().nullable(),
+  startedAt: z.number().nullable(),
+})
+export type PreviewStatus = z.infer<typeof PreviewStatus>
+
+// ---------------------------------------------------------------- 模板
+
+export const TemplateInfo = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string(),
+  /** 预览默认打开的相对路径（`index.html`） */
+  entry: z.string().nullable(),
+  variables: z.array(z.string()),
+  /** 模板作者留下的说明（为什么不引某依赖之类），前端可原样展示 */
+  notes: z.array(z.string()),
+})
+export type TemplateInfo = z.infer<typeof TemplateInfo>
+
 // ---------------------------------------------------------------- Git
 
 export const GitCommit = z.object({

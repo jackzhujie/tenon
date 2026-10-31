@@ -7,11 +7,13 @@
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
 ## 当前状态（2026-10-31 深夜）
-M0 逆向完成 → **DESIGN v1.2.3** → 四个 spike 全过 → **M1 主干第 1~6 步 + 工具层已落地**（`599ed98`、`6f08edb`）。
-已建 `packages/{protocol,core,agent,server}`：服务能起、能对话（SSE 流式）、能落库、能每轮自动 git 提交、崩溃后 `resume()` 续跑，
-**Agent 有 read/write/edit/bash 四个工具、写完的文件进得了这一轮的 commit**。
-`pnpm test` 33 项 + `pnpm smoke` 9 项全绿；`pnpm dev:faux` 不需要任何 API Key 就能起服务。
-**下一步**：generator（react-vite 模板）→ `packages/gateway`（预览）→ `apps/web`。
+M0 逆向完成 → **DESIGN v1.2.4** → 四个 spike 全过 → **M1 主干第 1~7 步已落地**（`599ed98`、`6f08edb`、最新一次）。
+六个包 `packages/{protocol,core,agent,generator,gateway,server}`：
+服务能起、能对话（SSE 流式）、能落库、能每轮自动 git 提交、崩溃后 `resume()` 续跑；
+**Agent 有 read/write/edit/bash 四个工具、写完的文件进得了这一轮的 commit**；
+**新建应用会用 `react-vite` 模板铺出可跑工作区，`preview.start` 装依赖 + 起 Vite + 挂网关，iframe 打开的就是它**。
+`pnpm test` 62 项 + `pnpm smoke` 9 项 + `pnpm e2e:preview` 12 项全绿；`pnpm dev:faux` 不需要任何 API Key。
+**下一步**：`apps/web`（会话 + iframe 两栏）→ `pnpm dev:web` → Electron 壳。
 **开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 下一步拆解 / §4.5 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`（唯一事实来源）。
 
 ## 三条铁律
@@ -43,6 +45,17 @@ M0 逆向完成 → **DESIGN v1.2.3** → 四个 spike 全过 → **M1 主干第
 - **submission settle 回调可能晚于 `close()`** → db 已关 → 必须 `closed` 门 + try/catch（否则"全绿但有 unhandled rejection"）
 - **集成测试闸门等 `app.status: idle`**，不能等 `git.commit`（无改动就没有提交）
 - 未做系统调用级沙箱：文件路径守卫 + bash cwd 钉死 + `scrubEnv` 洗密钥，够了就先用（完备版是 M7）
+
+## 生成器与预览硬约束（v1.2.4）
+- **模板是真实文件**（`packages/generator/templates/<id>/`），不是 TS 字符串常量；发布要 `extraResources` 或 `TENON_TEMPLATES_DIR`
+- **渲染只做 `{{ident}}`，残留占位符必须抛错**（否则界面出现字面 `{{appName}}`）；`template.json.variables` 由测试逐文件核对
+- **铺模板在 `initRepo` 之前** → 建应用只有一个 commit
+- **core 不依赖 generator**：走 `AppStore.create` 的 `scaffold` 钩子注入（否则 generator→core 成环）
+- **upgrade 透传后两侧 socket 必须成对销毁**：漏了只漏水不报错，Vite 每次整页刷权重连一次 HMR；症状是 `server.close()` 永不回调
+- **`StartServerOptions.env` 是覆盖对象**，当子进程 env 用会抹掉 `PATH` → `pnpm install` 以 `code=null` 失败
+- **先定端口再 `strictPort`**：让 dev server 自己换端口 = 网关指空气 + iframe 白屏无报错
+- **`@vitejs/plugin-react` 6.x 的 peer 是 `vite@^8`**：模板用 vite 7 必须配 5.x
+- **`preview.start` 立刻返回 `starting`**，进度靠 SSE `preview.status`，就绪发 `preview.ready`（别在 RPC 里等安装）
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程

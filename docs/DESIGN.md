@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.3
+# DESIGN.md — 详细方案设计 v1.2.4
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -817,6 +817,31 @@ tsc --noEmit  →  eslint  →  vitest run（若有）  →  build（client+serv
 
 任一失败：Agent 自动修复（最多 2 轮），仍失败则把错误摘要给用户并保留现场，**不提交**。
 
+### 8.7 模板与生成器（M1 落地：`packages/generator`）
+
+**模板是真实文件**（`packages/generator/templates/<id>/`），不是写在 TS 里的字符串常量：
+编辑器能给 `tsconfig.json` / `.tsx` 语法高亮，改模板就是改文件，diff 一眼看得懂。
+代价是发布时要带上这个目录（Electron `extraResources`），所以留了 `TENON_TEMPLATES_DIR` 覆盖。
+
+**渲染只做 `{{ident}}` 替换**，不上 Handlebars/EJS：
+
+- 只有一种占位符形状（标识符字符集），CSS 里的 `{{` 不会误伤
+- 渲染后**必须没有残留**——残留意味着模板加了变量而调用方没给值，用户会看到字面的 `{{appName}}` 出现在界面上。这条由 `renderTemplate` 直接抛错守住
+- 模板自己声明 `template.json.variables`，有测试逐文件扫描占位符并核对声明（新加变量忘了声明会被抓）
+
+**铺模板的时机**：`AppStore.create` 里，`.gitignore` 写完之后、`initRepo` **之前**。
+所以「建目录 + 铺模板 + 首次提交」是同一个 commit —— 不会出现"先一条空提交、再一条模板提交"这种让人以为改坏了的歷史。
+
+**core 不依赖 generator**：`AppStore.create` 收一个 `scaffold` 钩子（`AppScaffoldContext → Promise<void>`），
+由 `server` 注入 `scaffoldApp`。理由见 §3.2 的依赖方向：`server → core` 与 `server → generator` 是两条**平行**的边，
+让 core 依赖 generator 之后，generator 想用 `TenonError` 就得反着依赖 core，立刻成环。
+
+**M1 模板的最小化取舍**：`react-vite` 只带 react / react-dom / vite / typescript / `@vitejs/plugin-react`。
+Tailwind 4 + shadcn 推后到 M2 随组件体系一起进——现在引会让首次 `pnpm install` 慢一倍，收益却要等组件库才兑现。
+
+**`@vitejs/plugin-react` 必须选支持 vite 7 的版本**（5.x）。6.x 的 peer 是 `vite@^8`，
+装上去只会得到一条 `unmet peer` 警告，然后在启动时以看不懂的方式失败。
+
 ---
 
 ## 9. 预览与热更新（需求 6）
@@ -838,6 +863,11 @@ App Gateway  http://127.0.0.1:<gwPort>     ← iframe / 浏览器访问的唯一
 > **实测确认（v1.2.1，`docs/SPIKES.md` §3）**：改文件 → HMR `update` 经网关送达 **134ms**；上游 Vite 重启换端口后 `updateRoute()` 只改指向，iframe URL 不变且 HMR 能在同一网关端口重连。
 >
 > 实现两条要点：① upgrade 用**原样 TCP 透传**（自己重放 `req.rawHeaders`）比 http-proxy 稳，`Sec-WebSocket-Protocol: vite-hmr` 能完整保留；② 客户端必须在握手前挂好 `message` 监听，否则丢掉 Vite 的 `connected` 首帧。
+
+**★ v1.2.4 补一条（M1 实测）**：透传之后两条连接是**配对**的 —— 客户端断开时必须 `upstream.destroy()`，反之亦然。
+漏了不会报错，只会漏水：Vite 每次整页刷新都重连一次 HMR，上游 socket 一个都不回收，
+几百次之后 dev server 撞在 FD 上限上开始莫名拒绝连接。这个坑只有"真的去关一遍 stub 上游"才暴露
+（`server.close()` 永远等不到回调，测试直接卡在 afterEach）。
 
 Vite 侧配置：
 

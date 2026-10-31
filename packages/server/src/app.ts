@@ -6,6 +6,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
 import type { CoreServices } from '@tenon/core'
 import type { AgentRuntime } from '@tenon/agent'
+import type { PreviewManager } from '@tenon/gateway'
 import {
   TenonError,
   isRpcMethod,
@@ -26,6 +27,8 @@ const HEARTBEAT_MS = 15_000
 export interface BuildServerOptions {
   core: CoreServices
   agent: AgentRuntime
+  /** 预览编排。由调用方创建：它也要往同一条总线发事件 */
+  preview: PreviewManager
   /** 总线必须由调用方创建：agent 也要往同一条总线发事件 */
   bus: SseBus
   token: string
@@ -45,6 +48,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
   const deps: ServerDeps = {
     core: options.core,
     agent: options.agent,
+    preview: options.preview,
     bus,
     version: options.version ?? '0.0.0',
   }

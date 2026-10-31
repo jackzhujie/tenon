@@ -16,8 +16,10 @@ import {
   ModelTier,
   NormalizedMessage,
   PlanTask,
+  PreviewStatus,
   ProviderProfile,
   Release,
+  TemplateInfo,
 } from './domain.js'
 
 const Id = z.string().min(1)
@@ -95,7 +97,7 @@ export const rpcMethods = {
   'app.create': {
     input: z.object({
       name: z.string().min(1).max(64),
-      templateId: z.string().default('blank'),
+      templateId: z.string().default('react-vite'),
       styleId: z.string().nullable().default(null),
       /** 建库（pgdata）是 M2 的事；M1 只建目录 + git init */
       description: z.string().optional(),
@@ -129,6 +131,33 @@ export const rpcMethods = {
       /** 还有更早的消息时为游标，M1 先返回 null */
       nextCursor: z.string().nullable(),
     }),
+  },
+
+  'template.list': {
+    input: Empty,
+    output: z.object({ templates: z.array(TemplateInfo) }),
+  },
+
+  /**
+   * 起预览：**立刻返回**（`state: 'starting'`），不在这里等 `pnpm install`。
+   * 进度靠 SSE 的 `preview.status` 推；要同步等待的调用方轮询 `preview.status`
+   * 或 `waitReady()`（见 `@tenon/gateway`）。
+   */
+  'preview.start': {
+    input: z.object({
+      appId: Id,
+      /** 已经在跑时是否先停再起（改了 `package.json` 之后需要） */
+      restart: z.boolean().default(false),
+    }),
+    output: z.object({ preview: PreviewStatus }),
+  },
+  'preview.stop': {
+    input: z.object({ appId: Id }),
+    output: z.object({ preview: PreviewStatus }),
+  },
+  'preview.status': {
+    input: z.object({ appId: Id }),
+    output: z.object({ preview: PreviewStatus }),
   },
 
   'plan.get': {

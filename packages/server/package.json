@@ -14,6 +14,8 @@
   "dependencies": {
     "@tenon/agent": "workspace:*",
     "@tenon/core": "workspace:*",
+    "@tenon/gateway": "workspace:*",
+    "@tenon/generator": "workspace:*",
     "@tenon/protocol": "workspace:*",
     "fastify": "5.12.7",
     "zod": "4.6.7"

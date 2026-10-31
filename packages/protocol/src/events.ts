@@ -8,7 +8,7 @@
  * - 心跳用 SSE 注释行 `: ping`，不占用 `seq`，也不污染事件缓冲
  */
 import { z } from 'zod'
-import { NormalizedMessage, PlanTaskStatus, AppStatus } from './domain.js'
+import { NormalizedMessage, PlanTaskStatus, AppStatus, PreviewStatus, Readiness } from './domain.js'
 
 const Seq = z.number().int().nonnegative()
 
@@ -92,11 +92,21 @@ export const PreviewReadyEvent = z.object({
   seq: Seq,
   appId: z.string(),
   url: z.string(),
-  readiness: z.object({
-    deps: z.enum(['pending', 'ready', 'failed']),
-    server: z.enum(['pending', 'ready', 'failed']),
-    preview: z.enum(['pending', 'ready', 'failed']),
-  }),
+  readiness: Readiness,
+})
+
+/**
+ * 预览的分阶段进度（DESIGN §9.2）。
+ *
+ * 为什么还要一条 `preview.status`：`preview.ready` 只在就绪那一刻发一次，
+ * 而首次 `pnpm install` 可能要几十秒 —— 那段时间 UI 需要知道「在装依赖」而不是「卡住了」。
+ * 失败也走这条（`state: 'failed'` + `error`），不另开一种事件。
+ */
+export const PreviewStatusEvent = z.object({
+  type: z.literal('preview.status'),
+  seq: Seq,
+  appId: z.string(),
+  status: PreviewStatus,
 })
 
 export const ErrorEvent = z.object({
@@ -124,6 +134,7 @@ export const SseEvent = z.discriminatedUnion('type', [
   AppStatusEvent,
   GitCommitEvent,
   PreviewReadyEvent,
+  PreviewStatusEvent,
   ErrorEvent,
   StreamResetEvent,
 ])

@@ -1,0 +1,6 @@
+{
+  "id": "blank",
+  "label": "空白工作区",
+  "description": "只建目录与 Git，不铺任何文件。给测试和「我想自己从头来」的场景用。",
+  "variables": []
+}

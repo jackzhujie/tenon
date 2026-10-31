@@ -5,16 +5,23 @@
  * 所以它暴露 `connected` 让调用方等首帧。这段逻辑写错会表现为"偶尔漏掉开头的增量"，
  * 很难查 —— 只留一份实现，别在测试里各写各的。
  */
+import type { PreviewManagerOptions } from '@tenon/gateway'
 import type { SseEvent } from '@tenon/protocol'
 import { startServer, type RunningServer } from '../src/index.js'
 
 export const TEST_TOKEN = 'test-token'
 
-export function boot(dir: string, env: NodeJS.ProcessEnv = {}): Promise<RunningServer> {
+export interface BootOptions {
+  env?: NodeJS.ProcessEnv
+  preview?: Pick<PreviewManagerOptions, 'launch' | 'installDeps' | 'readyTimeoutMs'>
+}
+
+export function boot(dir: string, options: BootOptions = {}): Promise<RunningServer> {
   return startServer({
     port: 0,
     token: TEST_TOKEN,
-    env: { TENON_HOME: dir, TENON_FAUX: '1', ...env },
+    env: { TENON_HOME: dir, TENON_FAUX: '1', ...(options.env ?? {}) },
+    ...(options.preview === undefined ? {} : { preview: options.preview }),
   })
 }
 

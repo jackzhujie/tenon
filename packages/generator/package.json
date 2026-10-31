@@ -1,0 +1,14 @@
+{
+  "name": "@tenon/generator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "生成器：把 templates/* 渲染进应用仓库（M1 只有一个 react-vite 模板）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@tenon/protocol": "workspace:*"
+  }
+}
