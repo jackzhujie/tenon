@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.6
+# DESIGN.md — 详细方案设计 v1.2.7
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -174,8 +174,10 @@ M1 第 9 步把 §2.2 的三条原则落成 `apps/desktop`。四条当时没写�
    就绪前退出 → 报错并把 stderr 带出去；就绪后崩溃 → 退避重启并把**新地址**交回窗口；
    关窗即退出（单窗口产品留着进程 = 留一个占端口的 server）。
 
-已知限制（M2 处理）：预览装依赖走 `pnpm install`（`TENON_PNPM` 可覆盖）。**没有 pnpm 的机器上，桌面版能建应用、能对话，但预览起不来。**
-正式发布要么内置一个包管理器，要么改走 `npm` + 随包的 lockfile。
+~~已知限制（M2 处理）：预览装依赖走 `pnpm install`（`TENON_PNPM` 可覆盖）。**没有 pnpm 的机器上，桌面版能建应用、能对话，但预览起不来。**~~
+**v1.2.7 已解决**：安装包自带 pnpm —— `deps.ts` 的解析优先级是 `TENON_PNPM` → 随包的 `<Resources>/server/node_modules/pnpm/bin/pnpm.cjs` →
+node 同目录 → `PATH`。打包实测：`pnpm smoke:desktop:packaged` 全绿，且安装包内仍是**零原生模块**
+（pnpm 自带的 4 个平台 `reflink.*.node` 被 `build.mjs` 按扩展名过滤掉，删掉后 `pnpm install` 实测照常工作）。
 
 ### 2.3 为什么这样分
 | 备选 | 问题 |
@@ -645,6 +647,34 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 3. **迁移与快照。** TypeORM migration 是唯一 schema 事实来源。快照分两级：PGlite 用 `dumpDataDir()` 做整库归档（对应 `exports/<releaseId>/db.tar.gz`）；发布档用 `pg_dump --format=custom`（回滚时 `pg_restore`，对应妙搭 `resetArtifactVersion` 的 `dbRestore` 开关）。**跨档迁移**（PGlite → 真 PG）走 `pg_dump` 逻辑导出，因为方言一致所以可以直接导入。
 4. **Docker 导出产物自带 PostgreSQL。** `docker-compose.yml` 里 `db`（postgres:18-alpine + 健康检查 + 命名卷）+ `app`（NestJS 单容器，`depends_on: service_healthy`）。用户 `docker compose up -d` 即上线，不需要外部数据库。
 
+#### 落地形态（v1.2.7，M2 第 1 步实测）
+
+`packages/db-provisioner` 是这一节的唯一实现，接口只有五个动作：
+
+| 动作 | `pglite`（默认） | `postgres`（发布） |
+|---|---|---|
+| `start()` | 起 PGlite + 一条**全局串行队列** + `listen(0, 127.0.0.1)`（端口交给 OS，不猜） | **只探活**（`select version()`），不接管生命周期 |
+| `stop()` | 关实例，**保留数据目录** | 空操作（库不归我们管） |
+| `connectionString()` | `postgres://postgres:postgres@127.0.0.1:<port>/postgres` | 用户/平台给的那条 |
+| `poolMax()` | **恒为 1** | 默认 10 |
+| `dump()` / `restore()` | `dumpDataDir('gzip')` → `.tar.gz`；还原走 PGlite 自己的 `loadDataDir`（它内部解包） | `pg_dump --format=custom` / `pg_restore` |
+
+四条必须记住的事：
+
+1. **`pool.max` 只能通过 `DATABASE_POOL_MAX` 进到应用里。** 应用代码只认连接串，但连接池上限塞不进 URL。
+   这不是"环境判断"（代码里没有任何分支），是**容量参数**：PGlite 档恒 1，真 PG 档默认 10。
+   为了让"配了没生效"可观测，生成应用的 `/api/health` 要把**驱动实例上的真实值**回显出来
+   （`dataSource.driver.master.options.max`），e2e 直接断言它等于 1。
+2. **`stop()` 不删库、`start()` 幂等、还原后端口不变。** 停预览 = 关实例；再起来复用同一个 provider，
+   端口因此不变，上层缓存的 `DATABASE_URL` 不会失效（`DatabaseManager` 按 appId 缓存 provider，只 stop 不丢）。
+3. **数据库生命周期跟着预览走，不跟着进程走。** 30 个应用不该常驻 30 个 PGlite（每个 38MB + 100MB 内存）。
+4. **`pglite → postgres` 跨档迁移走逻辑导出**（`pg_dump` 自定义格式），不是数据目录拷贝 —— 方言一致是这条能成立的前提。
+
+> **★ 打包注意（v1.2.7）**：PGlite 不是纯 JS 包，`dist/` 里有 `pglite.wasm`（8.7MB）、`pglite.data`（6MB）
+> 和几十个扩展 `.tar.gz`，运行时按 `import.meta.url` 的相对位置读。桌面构建必须把它 **external**
+> 并把整个包拷到 `dist/server/node_modules/`；esbuild 打进单文件的后果是「应用起得来、对话正常，
+> 一建全栈应用就 ENOENT pglite.wasm」，而构建本身一声不响地成功。
+
 #### PGlite 的四个已知限制（必须在 `packages/db-provisioner` 里兜住）
 
 | 限制 | 影响 | 缓解 |
@@ -905,6 +935,16 @@ App Gateway  http://127.0.0.1:<gwPort>     ← iframe / 浏览器访问的唯一
 只有"iframe 里那份热更新"永远不来，表现为"改了代码要手动刷新"。所以断言要落在
 **「`url` 的端口 === `gatewayPort`」**上（`packages/gateway/test/preview.test.ts` + `scripts/e2e-preview.ts`
 各有一条），而不是"有个端口能打开就行"。
+
+**★ v1.2.7 补一条（M2 双进程实测）**：一个应用现在要**三个**端口 —— `vitePort` / `apiPort` / `gatewayPort`，
+仍然全部"先占再告诉"；`readiness` 从三格变四格（`deps / db / server / preview`）。
+
+- **要不要起后端，看 `package.json.tenon.api`**（兜底看 `api/main.ts` 是否存在）。猜错的表现是
+  「预览就绪、页面能开、所有 `/api` 请求 502」—— 比直接失败难查十倍。
+- **`/api/*` 命中后端，其余兜底给 Vite**（最长前缀匹配）。两者在同一个源上，所以前端永远用相对路径
+  `/api/xxx`：走网关、走 vite 的 proxy、将来走同域反代都是同一个地址，应用代码不需要知道自己在哪。
+- **后端的 dev 循环是两段**：`tsc --watch` 编译 + `node --watch` 跑产物，`groupLaunched()` 把它们
+  合成一个逻辑进程（任一半退出 = 整组失败），上层只看到"后端起没起来"。
 
 Vite 侧配置：
 
@@ -1397,6 +1437,13 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 | **M7（后置）** | Linux、团队协作、托管能力（SaaS）、**第三方插件上架与审核** | 视社区反馈 |
 
 依赖关系：M2 依赖 M1 的 harness 与事件流；M3 依赖 M2 的源码定位；M4 依赖 M3 的预览 API；M5 依赖 M2 的应用装配；M6 依赖 M5 的组件协议。
+
+> **M2 进度（v1.2.7，2026-10-31）**：第 1 步已落地 —— `packages/db-provisioner`（两档供给 + `poolMax()` 恒 1）、
+> `templates/nest-api`（NestJS 11 + TypeORM + PG 方言 + zod 共享层，迁移只写一份）、
+> `preview.start` 双进程（Vite + Nest，网关按 `/api` 最长前缀分流）、桌面版自带 pnpm。
+> **DoD ② 已满足**（同一份 migration 跑在 PGlite 与 postgres 两档上，切换只改 `DATABASE_URL`；
+> `pnpm e2e:fullstack` 实测 `poolMax===1` 从驱动实例读回、迁移数 ≥1、CRUD 经网关、重启数据还在）。
+> **仍欠：③ 跨档 `pg_dump` 迁移、④ Docker compose 产物、⑤ 日志/错误面板 + runtime SDK。**
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 

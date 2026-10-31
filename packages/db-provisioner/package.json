@@ -1,0 +1,22 @@
+{
+  "name": "@tenon/db-provisioner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "应用数据库供给：pglite（WASM 版 PG，默认）/ postgres（发布档）统一到一个 DatabaseProvider 接口",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.13",
+    "@tenon/core": "workspace:*",
+    "@tenon/protocol": "workspace:*",
+    "pg": "8.23.1",
+    "pg-gateway": "0.3.0-beta.4"
+  },
+  "devDependencies": {
+    "@types/pg": "8.15.6",
+    "typeorm": "1.1.2"
+  }
+}

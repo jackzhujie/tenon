@@ -123,11 +123,16 @@ export type FileNode = z.infer<typeof FileNode>
 
 // ---------------------------------------------------------------- 预览
 
-/** 分维度就绪（DESIGN §9.2）：UI 按这三格显示进度，不要白屏 */
+/** 分维度就绪（DESIGN §9.2）：UI 按这几格显示进度，不要白屏 */
 export const Readiness = z.object({
   /** 依赖是否齐（首次 `pnpm install`） */
   deps: z.enum(['pending', 'ready', 'failed']),
-  /** 后端。M1 生成的是纯前端应用，没有后端时直接记 ready */
+  /**
+   * 应用数据库。纯前端应用直接记 ready（"不需要"不是"没就绪"）。
+   * PGlite 冷启动 2.4s，这一格存在的意义就是让那 2.4 秒有话说。
+   */
+  db: z.enum(['pending', 'ready', 'failed']),
+  /** 后端（NestJS）。纯前端应用没有后端，直接记 ready */
   server: z.enum(['pending', 'ready', 'failed']),
   /** dev server 首屏可访问 */
   preview: z.enum(['pending', 'ready', 'failed']),
@@ -145,6 +150,8 @@ export const PreviewStatus = z.object({
   gatewayPort: z.number().int().nullable(),
   /** dev server 自己的端口（排障用，不要让前端拿它当 URL） */
   upstreamPort: z.number().int().nullable(),
+  /** 后端监听端口（纯前端应用为 null）。网关把 `/api/*` 转到这里 */
+  apiPort: z.number().int().nullable(),
   readiness: Readiness,
   /** 失败原因（给用户看的一句话，不拼技术栈的堆栈） */
   error: z.string().nullable(),

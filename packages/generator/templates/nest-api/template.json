@@ -1,0 +1,14 @@
+{
+  "id": "nest-api",
+  "label": "React + NestJS（全栈 · PostgreSQL）",
+  "description": "前端 React 19 + Vite 7，后端 NestJS 11 + TypeORM + PostgreSQL 方言。本地用 PGlite（WASM 版 PG）跑，导出到 Docker 只换一个连接串。",
+  "entry": "index.html",
+  "variables": ["appId", "appName", "appSlug"],
+  "notes": [
+    "后端入口写在 package.json 的 tenon.api 里（api/main.ts），Tenon 靠它判断这个应用要不要起后端。",
+    "应用只认一个 DATABASE_URL；DATABASE_POOL_MAX 是并发容量参数（平台给的，PGlite 档恒为 1），不是环境判断。",
+    "迁移放在 api/migrations/，文件名带时间戳，启动时自动跑；同一份迁移在 PGlite 和真 PG 上都能跑。",
+    "后端用 ts-node 跑（不用 nest build）：Nest 的依赖注入需要 emitDecoratorMetadata，esbuild/tsx 不产这个，用 tsx 会得到 'Cannot resolve dependency at index [0]'。",
+    "前端与后端共用 shared/schema.ts 的 zod 契约：后端用它校验入参，前端用它拿类型。"
+  ]
+}

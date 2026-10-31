@@ -19,6 +19,7 @@
  */
 import { build } from 'esbuild'
 import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -40,6 +41,25 @@ async function sizeOf(path) {
     else total += (await stat(child)).size
   }
   return total
+}
+
+/**
+ * PGlite 必须**外部化**，不能打进单文件。
+ *
+ * 它不是纯 JS 包：`dist/` 里有 `pglite.wasm`（8.7MB）、`pglite.data`（6MB）和几十个
+ * 扩展的 `.tar.gz`，运行时按 `import.meta.url` 的相对位置去读。esbuild 把 JS 打进
+ * `server.mjs` 之后这些路径全部失效 —— 症状是「应用起得来、对话正常，一建全栈应用就
+ * 报 ENOENT pglite.wasm」，而构建本身一声不响地成功。
+ *
+ * 做法：external + 把整个包原样拷到 `dist/server/node_modules/`，
+ * 让 Node 按正常的模块解析规则从 `server.mjs` 往上层找。
+ */
+const PGLITE_EXTERNAL = ['@electric-sql/pglite', '@electric-sql/pglite/*']
+
+function resolvePgliteDir() {
+  const req = createRequire(join(root, 'packages', 'db-provisioner', 'package.json'))
+  // 包没有导出 `./package.json`，所以从主入口往上退两级
+  return dirname(dirname(req.resolve('@electric-sql/pglite')))
 }
 
 /** 铁律 3：安装包里不许有需要按平台编译的东西 */
@@ -80,6 +100,30 @@ async function main() {
     outfile: join(dist, 'server', 'server.mjs'),
     logLevel: 'warning',
     banner: { js: BANNER },
+    external: PGLITE_EXTERNAL,
+  })
+
+  // 2b) PGlite 原样随包走（含 wasm / data / 扩展）
+  const pgliteSrc = resolvePgliteDir()
+  await cp(pgliteSrc, join(dist, 'server', 'node_modules', '@electric-sql', 'pglite'), {
+    recursive: true,
+    filter: (src) => !src.endsWith('.map') && !src.endsWith('.d.ts') && !src.endsWith('.d.cts'),
+  })
+
+  // 2c) pnpm 也随包走：用户机器上不该假设装了 pnpm
+  //
+  // 这是「双击装完却起不来预览」的根治办法。`deps.ts` 用 `import.meta.url` 相对定位
+  // 它（打包后正好是 `<Resources>/server/node_modules/pnpm/bin/pnpm.cjs`），
+  // 找到就用 node 跑，找不到才退回 PATH 里的 `pnpm`。
+  const reqDesktop = createRequire(join(here, 'package.json'))
+  // `resolve('pnpm')` 给的是 package.json 本身（它没有可解析的主入口）
+  const pnpmPkg = dirname(reqDesktop.resolve('pnpm'))
+  await cp(pnpmPkg, join(dist, 'server', 'node_modules', 'pnpm'), {
+    recursive: true,
+    // pnpm 自带 4 个平台的 `reflink.*.node`（copy-on-write 加速，可选依赖）。
+    // 删掉不影响功能（实测验过 `install` 正常），换来「安装包里零原生模块」这条不变量 ——
+    // 它比那点 clone 加速值钱得多，也让跨平台产物只有一份。
+    filter: (src) => !src.endsWith('.map') && !src.endsWith('.node'),
   })
 
   // 3) 模板（真实文件，渲染时逐个读）
@@ -108,6 +152,7 @@ async function main() {
     [
       `main.mjs      ${kib(mainSize)}`,
       `server.mjs    ${kib(serverSize)}`,
+      `pglite+pnpm   ${kib(await sizeOf(join(dist, 'server', 'node_modules')))}（外部化）/ pnpm ${kib(await sizeOf(join(dist, 'server', 'node_modules', 'pnpm')))}`,
       `templates     ${kib(await sizeOf(join(dist, 'templates')))}`,
       `web           ${kib(await sizeOf(join(dist, 'web')))}`,
       '原生模块      无 ✅',

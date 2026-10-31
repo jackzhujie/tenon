@@ -47,6 +47,7 @@ pgdata/
 exports/
 node_modules/
 dist/
+dist-server/
 .DS_Store
 `
 

@@ -34,7 +34,10 @@ export interface StartServerOptions {
    * 预览的可注入项。测试给一个 `launch`（stub 上游）+ `installDeps: false`
    * 就能把编排逻辑验完，不需要真的装 React。
    */
-  preview?: Pick<PreviewManagerOptions, 'launch' | 'installDeps' | 'readyTimeoutMs' | 'log'>
+  preview?: Pick<
+    PreviewManagerOptions,
+    'launch' | 'launchApi' | 'database' | 'installDeps' | 'readyTimeoutMs' | 'apiReadyTimeoutMs' | 'log'
+  >
 }
 
 export interface RunningServer {

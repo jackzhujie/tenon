@@ -18,5 +18,8 @@
     "esbuild": "0.28.2",
     "typescript": "5.9.3"
   },
-  "author": "Tenon"
+  "author": "Tenon",
+  "dependencies": {
+    "pnpm": "9.15.9"
+  }
 }

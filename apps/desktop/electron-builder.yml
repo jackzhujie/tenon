@@ -18,8 +18,21 @@ files:
   - package.json
 
 extraResources:
+  # ★ `filter: '**/*'` 不能省：electron-builder 默认把 `node_modules` 当依赖目录跳过，
+  # 于是 `dist/server/node_modules/{pglite,pnpm}` 不会进包 —— 表现是打包后 server 启动即退出
+  # （`Cannot find package '@electric-sql/pglite'`），而构建日志一切正常。
   - from: dist/server
     to: server
+    filter:
+      - '**/*'
+  # ★ node_modules 必须单独列一条，`from` 指到它里面。
+  # electron-builder 对相对路径里出现 `node_modules` 的文件一律跳过（怕重复打包依赖），
+  # 所以写在上面那条里永远拷不进去；从 `node_modules` 目录本身出发时，
+  # 内部的相对路径（`@electric-sql/pglite/dist/...`）不含这段，就不被过滤。
+  - from: dist/server/node_modules
+    to: server/node_modules
+    filter:
+      - '**/*'
   - from: dist/web
     to: web
   - from: dist/templates

@@ -167,8 +167,13 @@ try {
   console.log(`  就绪耗时 ${ms(installStart)}（含依赖安装）`)
   const url = ready.url as string
   console.log(`  网关地址 ${url}（dev server 在 :${ready.upstreamPort}）`)
-  check('readiness 三项都 ready', JSON.stringify(ready.readiness) ===
-    JSON.stringify({ deps: 'ready', server: 'ready', preview: 'ready' }))
+  check(
+    'readiness 四格都 ready（纯前端应用的 db/server 直接算 ready）',
+    JSON.stringify(ready.readiness) ===
+      JSON.stringify({ deps: 'ready', db: 'ready', server: 'ready', preview: 'ready' }),
+    JSON.stringify(ready.readiness),
+  )
+  check('纯前端应用没有后端端口（不该白起一个 Nest）', ready.apiPort === null, `apiPort=${String(ready.apiPort)}`)
   /*
    * 断言「告诉浏览器的端口」就是「真正在听的端口」。
    *

@@ -1,41 +1,54 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-10-31（**M1 全部 9 步落地**：88 个测试 + 9 项端到端冒烟 + 14 项预览 e2e + 8 项桌面冒烟全绿；`pnpm dev:web` 与打包后的 `Tenon.app` 都实测走通）
+> 最后更新：2026-10-31（**M1 全部 9 步 + M2 第 1 步落地**：105 个测试 + 9 项端到端冒烟 + 14 项预览 e2e +
+> 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通）
 
 ---
 
 ## 0. 一句话现状
 
-**M1 完成（第 1~9 步）：一条命令起界面，对话里改代码，右侧 iframe 当场热更新，并且已经能打成 `Tenon.app` 双击运行。**
+**生成的应用现在有后端了：一句话建出来的应用自带 NestJS + PostgreSQL（默认 PGlite 零安装），
+前端一个 `fetch('/api/health')` 就能打通，切换成真 PG 只改 `DATABASE_URL`，应用代码零改动。**
 
-先跑这三条验证它还活着：
+M1 已经全部落地（一条命令起界面、对话里改代码、iframe 当场热更新、能打成 `Tenon.app` 双击运行）；
+M2 第 1 步把「只有页面」变成「有库、有接口、能 CRUD」。
+
+先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 88 项单测 + 集成测试（约 55s）
+pnpm test                       # 105 项单测 + 集成测试（约 60s）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 14 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 改文件 → HMR（要联网）
+pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁移 → Vite+Nest 双进程 → CRUD 经网关 → 重启后数据还在
 pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界面、退出后不留孤儿进程
 ```
 
-- `packages/{protocol,core,agent,server}` 已建；`pnpm typecheck` 全绿（含四个 spike）
+- `packages/{protocol,core,agent,server,generator,gateway,db-provisioner}` 七个包已建；`pnpm typecheck` 全绿（14 个项目）
 - 服务真起来了：Fastify 5 / 随机端口绑 `127.0.0.1` / Bearer Token / `/api/health` / `TENON_READY` 握手行
 - `tenon.db`（`node:sqlite`）在建应用、写设置、存提供商密钥时真的落盘
 - 每应用一个 `.tenon/harness.sqlite`，进程重启后 `resume()` 把中断的一轮**跑完**（有测试）
 - SSE 增量 / `message.end` / `usage` / `app.status` 全链路打通；每轮结束自动 git 提交（无改动不产生空提交）
 - **Agent 能真的写代码了**：`read` / `write` / `edit` / `bash` 四个工具已接到 pi-durable 注册表上，
   写完的文件进得了这一轮的 commit（`packages/agent/src/tools/coding.ts`）
-- **能真的看到一个应用**：`app.create` 会用 `react-vite` 模板铺出可跑的工作区，`preview.start` 装依赖 + 起 Vite +
-  挂到 App Gateway 后面，iframe 打开的就是它（实测 4.3s 就绪，含依赖安装）
+- **能真的看到一个应用**：`app.create` 会用模板铺出可跑的工作区，`preview.start` 装依赖 + 起 dev server +
+  挂到 App Gateway 后面，iframe 打开的就是它
 - **有界面了**：`apps/web`（React 19 + Vite 7 + Tailwind 4）左栏会话 + 右栏 iframe，`pnpm dev:web` 一条命令起；
   浏览器里实测：建应用 → 自动起预览 → iframe 出现模板页 → 改 `repo/src/App.tsx` → **iframe 不刷新就变了**
 - **能装成桌面应用了**：`apps/desktop` 主进程只做生命周期（spawn server → 读 `TENON_READY` → 开窗口），
   页面由 server **同源托管**并在 index.html 里注入 Token（不走 preload、不走 `file://`）；
-  `pnpm pack:desktop` 出 `Tenon.app`，打包冒烟实测：窗口出界面 → 退出后子进程收干净
-- **M1 到此为止**：下一步是 M2（让生成的应用有后端：NestJS + PGlite + 迁移 + 单一 `DATABASE_URL`）
+  `pnpm pack:desktop` 出 `Tenon.app`（338MB，**零原生模块**），打包冒烟实测：窗口出界面 → 退出后子进程收干净
+- **★ M2 第 1 步（应用有后端了）**：
+  - `packages/db-provisioner`：`DatabaseProvider { start/stop/connectionString/dump/restore }`，
+    `pglite` 档（默认，零安装）与 `postgres` 档（发布，Docker/外部/云）同接口；**`poolMax()` 恒为 1**
+  - `templates/nest-api`：NestJS 11 + TypeORM + PG 方言 + zod 共享层；**迁移只写一份，两档同跑**
+  - `preview.start` 从 1 个进程变 2 个（Vite + Nest），网关按最长前缀分流：`/api/*` → Nest，其余 → Vite
+  - 生成应用只认 **`DATABASE_URL`**（+ `DATABASE_POOL_MAX` 这个容量参数），不判断任何运行环境
+  - 桌面版不再依赖系统 `pnpm`：安装包自带（`Resources/server/node_modules/pnpm`）
+- **M2 剩余**：runtime SDK、日志/错误面板、`pg_dump` 跨档迁移到 Docker PG、Docker compose 产物
 
 ---
 
@@ -75,7 +88,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 文件 | 管什么 | 什么时候读 |
 |---|---|---|
 | **`docs/STATUS.md`**（本文件） | 现状、下一步、陷阱 | **每次开工先读** |
-| `docs/DESIGN.md` | **唯一事实来源**，v1.2.4，1500+ 行 | 写涉及架构的代码前，按需读对应章节 |
+| `docs/DESIGN.md` | **唯一事实来源**，v1.2.7，1700+ 行 | 写涉及架构的代码前，按需读对应章节 |
 | **`docs/SPIKES.md`** | 四个 spike 的实测数字与结论（含被推翻的假设）| 碰 DB / pi / 网关 / 定位插件前必读 |
 | `docs/ARCHITECTURE.md` | 一分钟速览 + 四条原则 | 给别人介绍时 |
 | `docs/PI-CHEATSHEET.md` | pi 全生态真实 API（读源码所得）| **写任何 pi 相关代码前必查**（比官方文档全）|
@@ -86,7 +99,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 
 ---
 
-## 4. 下一步：M1 骨架与对话
+## 4. 进度与下一步
 
 ### 4.1 第一周：4 个 spike —— ✅ **已全部完成（2026-10-31）**
 
@@ -99,7 +112,9 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 
 详细数字、可复跑命令、被推翻的假设：**`docs/SPIKES.md`**。
 
-### 4.2 M1 主干（按依赖顺序）
+### 4.2 主干（按依赖顺序）
+
+**M1 骨架与对话**
 
 | # | 步骤 | 状态 | 落在哪 |
 |---|---|---|---|
@@ -119,6 +134,19 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 关掉窗口、双击 `Tenon.app` 再来一次，数据都在。
 `data-tenon-loc` 的编译期注入按计划留到 M3 —— 它是编译期插件，对已存在的应用补上不产生任何返工，不急。
 
+**M2 全栈生成**
+
+| # | 步骤 | 状态 | 落在哪 |
+|---|---|---|---|
+| 1 | **两档数据库供给**：`DatabaseProvider` 接口 + `pglite`/`postgres` 两档 + 按 appId 缓存 | ✅ | `packages/db-provisioner/src/{types,pglite,postgres,manager}.ts` |
+| 2 | **全栈模板**：NestJS 11 + TypeORM + PG 方言 + zod 共享层，迁移只写一份 | ✅ | `packages/generator/templates/nest-api/` |
+| 3 | **双进程预览**：Vite + Nest，网关按 `/api/*` 最长前缀分流，三端口先占后告诉 | ✅ | `packages/gateway/src/{api,child,preview}.ts` |
+| 4 | **全栈端到端**：建应用 → 起库 → 迁移 → 双进程就绪 → CRUD 经网关 → 重启数据还在 | ✅ | `scripts/e2e-fullstack.ts` |
+| 5 | 桌面版自带包管理器（不再依赖系统 `pnpm`） | ✅ | `packages/gateway/src/deps.ts` + `apps/desktop/{build.mjs,electron-builder.yml}` |
+| 6 | runtime SDK（生成应用侧的 `@tenon/runtime`）+ 日志/错误面板 | ⬜ 下一步 | 待建 `packages/runtime-sdk`、`apps/web/src/features/logs` |
+| 7 | 跨档迁移：`pg_dump` → Docker PG，数据零丢失 | ⬜ | `packages/db-provisioner` + 发布流程 |
+| 8 | Docker compose 产物（多阶段 + `postgres:18-alpine`） | ⬜ | 模板 `Dockerfile` / `compose.yml` |
+
 ### 4.3 M1 验收（DoD）
 
 - [x] `pnpm dev:web` 打开即可对话 —— 浏览器实测：建应用 → 发消息 → 流式回来 → 自动 git 提交 → 版本数 +1
@@ -128,27 +156,45 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 - [x] 每轮对话产生一个 git commit —— `chat.ts` 每轮结束调 `commitAll`；**本轮没有文件改动时不产生空提交**。
       工具层接上后已能真的产出 commit（`tools.test.ts` 断言：建应用 1 个 + 写文件那轮 1 个）
 - [x] 杀进程重启后，对话与任务能续跑（`resume()`）—— `packages/server/test/chat.test.ts` 的「崩溃续跑」用例：生成中途关进程 → 重启 → 这一轮自己跑完（403ms）
-- [x] 打包成桌面应用并双击可用 —— `pnpm pack:desktop` 出 `Tenon.app`（x64，289MB）；
+- [x] 打包成桌面应用并双击可用 —— `pnpm pack:desktop` 出 `Tenon.app`（x64，338MB）；
       `pnpm smoke:desktop:packaged` 八项全过：**窗口加载的是渲染器（标题「Tenon · 榫」）**、拿到了注入的 Token、
       不落错误页、退出后 server 真的停了（端口没人听）。安装包内**零原生模块**（`build.mjs` 扫 `dist/` 兜底）
 
-### 4.4 下一步具体做什么（M2 第 1 步：让生成的应用有后端）
+### 4.4 M2 第 1 步验收（DoD）—— ✅ 已完成
 
-M1 已完成。M2 的目标是「生成的应用不只是页面，而是有库、有接口、能 CRUD」，
-而**三档数据库供给已经在 spike 里验过**（`docs/SPIKES.md`），所以第一步不是调研，是接线：
+- [x] 生成的应用默认带库 —— `app.create` 建 `nest-api` 模板时 `DatabaseManager.acquire()` 起一个 PGlite，
+      数据目录落 `~/.tenon/apps/<id>/pgdata`（38MB），**零安装、无原生模块**
+- [x] **两档跑同一份迁移** —— `api/migrations/1767225600000-InitItems.ts` 只有一份；
+      `pnpm e2e:fullstack` 实测 `health.db.version === 'PostgreSQL 18.6'`、迁移数 ≥1
+- [x] `pool.max` 真的是 1 —— 从 Nest 侧驱动实例读回 `driver.master.options.max`，断言 `=== 1`。
+      不是"文档写了 1"，是**真的传到了 `pg.Pool`**
+- [x] 双进程经同一网关 —— `readiness` 四格（db/server/preview/api）全 ready，`apiPort` 非空，
+      `gatewayPort === url 的端口`；`GET /api/items` 走 Nest、`GET /不存在的路径` 不回落成前端 HTML
+- [x] 切换库只改连接串 —— 生成应用侧只出现 `DATABASE_URL` / `DATABASE_POOL_MAX`，
+      **模板里搜不到 `NODE_ENV` / `TENON_*`**（有测试逐文件断言）
+- [x] 重启不丢数据 —— 停预览 → 再起（1474ms，比首次 9711ms 快，pgdata 复用）→ 之前写的行还在
+- [x] 桌面版不再要系统 pnpm —— `deps.ts` 优先找 `<Resources>/server/node_modules/pnpm/bin/pnpm.cjs`，
+      打包后实测能起预览
 
-1. **`packages/db-provisioner`**：把 spike 的结论固化成接口 —— `DatabaseProvider { start(), stop(), connectionString(), dump(), restore() }`。
-   默认档 `pglite`（WASM 版 PG，零安装），发布档 `postgres`（Docker/外部/云）。
-   **`pool.max` 必须是 1**（v1.2.1 的硬约束，写进接口注释与测试）。
-2. **`templates/nest-api`**：NestJS 11 + TypeORM + PostgreSQL 方言 + zod 共享层。
-   迁移只写一份，`pglite` 与 `postgres` 跑同一份 —— 这是 M2 的验收核心（DESIGN §17）。
-3. **`preview.start` 加后端一半**：起的进程从 1 个变 2 个（Vite + Nest），网关按路径分流（`/api/*` → Nest）。
-   注意 v1.2.5 那条：**端口先定再告诉别人**，否则 HMR 与 API 都会指空气。
-4. **`DATABASE_URL` 是生成应用唯一认的环境变量**（铁律 2）。切换库只改它，代码零改动。
-5. 顺带欠账：桌面版预览依赖系统 `pnpm`（`TENON_PNPM` 可覆盖）。M2 要给安装包找一个自带包管理器的方案，
-   否则「双击装完却起不来预览」是必然投诉。
+### 4.5 下一步具体做什么（M2 第 2 步：让它可观测 + 可发布）
 
-### 4.5 代码地图（只列已落地的）
+第 1 步解决的是「能不能起来」。第 2 步解决的是「**起不来/出错了看不看得见**」和「**能不能搬去生产**」：
+
+1. **`packages/runtime-sdk`（生成应用侧）**：`templates/nest-api` 与前端各引一个薄壳，
+   把 `console`/未捕获异常/HTTP 5xx 规范化后推到 `POST /api/__tenon/log`。
+   **注意别踩铁律 2**：SDK 只认一个 `TENON_APP_ID` 之类的标识，不判断 desktop/web/cloud。
+2. **日志与错误面板**：`packages/server` 侧收拢上面那条链 + 两个子进程的 stdout（`spawnLogged` 已有 200 行环形缓冲），
+   经 SSE 推给 `apps/web`；界面加一个可折叠的底栏（现在只有 `PreviewPanel` 的四格进度）。
+   验收：在 `repo/src/App.tsx` 里 `throw` → 面板里出现这条错误和它的堆栈。
+3. **跨档迁移**：`DatabaseManager` 已有 `dump()`，但 `pglite → postgres` 的**逻辑导出**还没实测
+   （spike 只验了 PGlite 内部快照）。要做的是一条命令：`pglite` 档 `pg_dump --format=custom` →
+   `postgres` 档 `pg_restore`，然后用同一批 `GET /api/items` 断言数据零丢失。这是 DESIGN §17 的 DoD ③。
+4. **Docker compose 产物**：模板里加 `Dockerfile`（多阶段）+ `compose.yml`（自带 `postgres:18-alpine`），
+   构建并跑起来 —— DoD ④。这步同时验证"生成应用真的不感知运行环境"。
+
+> 顺序建议：先 1+2（没有它，3 和 4 出问题只能靠猜），再 3，最后 4。
+
+### 4.6 代码地图（只列已落地的）
 
 ```
 packages/
@@ -170,12 +216,26 @@ packages/
 │   ├── src/scaffold.ts  #   scaffoldApp：渲染模板 → 写文件；已有 package.json 就拒绝
 │   ├── src/registry.ts  #   读 templates/<id>/template.json，递归收集文件
 │   ├── src/render.ts    #   只做 {{ident}} 替换；渲染后残留占位符直接抛错
-│   └── templates/react-vite/  # ★ 模板是真实文件（不是 TS 字符串常量）
+│   └── templates/
+│       ├── react-vite/  #   纯前端（默认）：Vite + React 19，一条命令 dev
+│       ├── nest-api/    # ★ 全栈（M2）：Vite + NestJS 11 + TypeORM + zod 共享层
+│       │   ├── api/     #   main / app.module / db(dataSourceOptions) / migrations / items
+│       │   ├── shared/  #   schema.ts：zod 契约，前后端同一份
+│       │   └── tsconfig.server.json  # ★ 必须 CommonJS + emitDecoratorMetadata（Nest DI 要）
+│       └── blank/       #   空壳（entry=null，不自动起预览）
+├── db-provisioner/      # ★ 应用数据库供给（M2，DESIGN §6.4）
+│   ├── src/types.ts     #   DatabaseProvider 接口；文件头写明 poolMax 恒 1 与未就绪抛错
+│   ├── src/pglite.ts    #   PgliteProvider：pg-gateway 起真 PG 协议端 + dumpDataDir 快照
+│   ├── src/postgres.ts  #   PostgresProvider：只探活；dump/restore 走 pg_dump/pg_restore
+│   ├── src/manager.ts   #   DatabaseManager：按 appId 缓存（只 stop 不丢 → 端口不变）
+│   └── src/index.ts
 ├── gateway/             # 预览编排（DESIGN §9.1）
 │   ├── src/proxy.ts     #   HTTP 转发 + upgrade 原样透传（两侧 socket 必须配对销毁）
-│   ├── src/preview.ts   #   PreviewManager：deps → 端口 → 网关 → dev server → 探活
+│   ├── src/preview.ts   #   PreviewManager：deps → 端口 → 网关 → db → vite → api → 并行探活
 │   ├── src/deps.ts      #   pnpm install（--prefer-offline，全有超时，失败带最后 20 行）
 │   ├── src/vite.ts      #   spawn(process.execPath, [viteBin])：不依赖 PATH 里有 pnpm
+│   ├── src/api.ts       # ★ 后端半边：resolveApiEntry + tsc --watch → 等产出 → node --watch
+│   ├── src/child.ts     # ★ spawnLogged（200 行环形日志、SIGTERM→4s→SIGKILL）/ groupLaunched / nodeRunEnv
 │   └── src/ports.ts     #   先定端口再 strictPort，绝不让 dev server 自己换端口
 └── server/              # 只做「挂到 HTTP 上」
     ├── src/app.ts       #   Fastify 装配 / RPC 路由 / SSE / 错误处理
@@ -192,22 +252,23 @@ apps/web/                # 渲染器：server 的纯客户端（DESIGN §14.6）
 ├── src/lib/fences.ts    #   围栏切分（纯逻辑，独立可测：流式未闭合时的闪烁问题）
 ├── src/hooks/useWorkspace.ts  # ★ 事件 → 界面状态的唯一归约点（reducer 在这）
 ├── src/features/chat/   #   MessageList（乐观插入 + 粘底）/ Composer / ChatPanel
-├── src/features/preview/PreviewPanel.tsx  # iframe + 「装依赖→起服务→首屏」三段进度
+├── src/features/preview/PreviewPanel.tsx  # iframe + 四格进度（数据/服务/预览/api）
 └── src/features/apps/   #   AppMenu / NewAppDialog（默认选能跑的那个模板）
 
 apps/desktop/            # Electron 壳：只做生命周期（DESIGN §2.2.1）
 ├── src/main.ts          #   窗口 / 导航守卫 / 关窗即退出 / SMOKE 探针
 ├── src/supervisor.ts    #   spawn server（ELECTRON_RUN_AS_NODE）+ 解析 TENON_READY + 退避重启（不 import electron，可单测）
 ├── src/paths.ts         #   打包前后资源路径的唯一算法（dist/ ↔ Contents/Resources/ 同构）
-├── build.mjs            #   esbuild 打 server 单文件 + 拷模板/web + 扫原生模块（铁律 3 兜底）
+├── build.mjs            #   esbuild 打 server 单文件 + 拷模板/web/pglite/pnpm + 扫原生模块（铁律 3 兜底）
 ├── scripts/launch.mjs   #   清掉 ELECTRON_RUN_AS_NODE 再起 electron
-└── electron-builder.yml #   files: 主进程 / extraResources: server,web,templates
+└── electron-builder.yml #   files: 主进程 / extraResources: server,web,templates + server/node_modules
 
 scripts/
 ├── dev-web.ts           # 起 server → 读 TENON_READY → 把 url/token 注入 Vite
 ├── smoke.ts             # 端到端冒烟（真 spawn bin.ts）
 ├── smoke-desktop.ts     # 桌面冒烟：真起 Electron / Tenon.app，加载界面后退出并验证不留孤儿进程
-└── e2e-preview.ts       # 14 项真机断言（含 HMR 经网关的真实推送）
+├── e2e-preview.ts       # 14 项真机断言（含 HMR 经网关的真实推送）
+└── e2e-fullstack.ts     # ★ 全栈真机断言：库/迁移/双进程/CRUD 经网关/重启后数据还在
 ```
 
 依赖方向（DESIGN §3.2）**禁止反向**：`protocol ← 全部`；`server → {core, agent, generator, gateway}`；
@@ -266,6 +327,14 @@ scripts/
 | **静态托管要分"页面公开"与"接口公开"** | 页面与 assets 免 Token（否则窗口里只有 401 的 JSON），但 `/rpc/*`、`/events`、`/api/*` 必须照旧要 Token。别写成"除接口外全放行"——下一个新增接口会默认裸奔 |
 | **SPA 回落不能对 `/assets/*.js` 生效** | 回落成 HTML 时浏览器只报 `SyntaxError: Unexpected token '<'`，根本看不出是 404。`looksLikeFile()` 按扩展名区分 |
 | **`index.html` 不能被缓存** | 它是注入 Token 的那一份，缓存住 = 上一个进程的 token（必然 401）。`no-cache`；只有带哈希的 `/assets/` 给 `immutable` |
+| **Node ≥ 22.18 的原生 TypeScript 类型擦除会让 `ts-node/register` 彻底失效** | 症状：`node --require ts-node/register api/main.ts` 报 `ERR_UNKNOWN_FILE_EXTENSION` 或 `Cannot find module './app.module'`；即使 `require.extensions['.ts']` 确实注册了也没用 —— `.ts` 入口被 Node 自己的 ESM loader 抢走，CJS 的 require hook 不参与。**`node --no-experimental-strip-types` 也救不了**。全栈模板因此改用 `tsc --watch` 编译到 `dist-server/`，再用 `node --watch` 跑 `.js`（`packages/gateway/src/api.ts`）。顺带好处：Nest 的 DI 本来就需要 `emitDecoratorMetadata`，tsx/esbuild 不产出它 |
+| **`node --watch` 只监听"已经加载过"的文件** | 入口文件还不存在时，它打印 `Failed running 'dist-server/api/main.js'. Waiting for file changes` 然后**永不重启**（它没监听任何东西，包括那个目录）。所以 `launchApi` 必须 `await waitForFile(outputPath, compiler, 90_000)`，等首次编译产出再起 runner；超时要把 tsc 最后几行塞进错误里，否则只有一句"没起来" |
+| **子进程报错要带多行尾部，不能只取最后一行** | `node --watch` 会把真错误放在 `Failed running ...` 的**上一行**。`tailOf(launched, 6)` 而不是 `lastLine()` |
+| **PGlite 必须 esbuild external 并整包拷进安装包** | 它按 `import.meta.url` 相对读 `wasm/`、`data/`、`extensions/`，打进单文件后这些路径全失效（表现为起库即崩）。`build.mjs` 里 external 掉再原样拷到 `dist/server/node_modules/` |
+| **electron-builder 的 `extraResources` 会跳过相对路径含 `node_modules` 的文件** | 给 `from: dist/server` 写 `filter: ['**/*']` **也无效** —— 那一层目录直接被忽略，包能打出来、能启动，但 server 一跑就 `Cannot find module`/'server 在就绪前退出'。必须**单列一条** `from: dist/server/node_modules` → `to: server/node_modules` |
+| **pnpm 自带 4 个平台的 `reflink.*.node`** | 打包时会触发"dist 里出现需要按平台编译的模块"的兜底断言。删掉后 `pnpm install` 实测照常工作（那是可选加速模块），`build.mjs` 拷贝时按扩展名过滤 |
+| **`DATABASE_POOL_MAX` 是容量参数，不是环境判断** | 生成应用读它**只是**为了把 `extra.max` 传给驱动（默认 10），PGlite 档由 `db-provisioner` 注入 1。它**不许**被用来判断 desktop/docker/cloud —— 那是铁律 2 的红线。测试逐文件断言模板里搜不到 `NODE_ENV`/`TENON_*` |
+| **`readiness` 从三格变四格（`deps`/`db`/`server`/`preview`）** | 新增的 `db` 格要同步到前端 `PreviewPanel` 的 `STAGES` / 进度宽度 / 四段文案，否则那一格永远灰着。改 `Readiness` 形状时 `scripts/e2e-preview.ts` 与 `scripts/e2e-fullstack.ts` 的断言都要跟（纯前端应用四格仍全 ready：`deps/db/server/preview`）；后端是否起来看 `apiPort`（纯前端应用必须 `null`，不该白起一个 Nest） |
 
 ---
 
@@ -284,15 +353,16 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：8 个 packages/apps + 4 个 spikes（88 项）
+pnpm test                  # vitest：9 个 packages/apps + 4 个 spikes（105 项）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
+pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
 pnpm build:web             # 前端产物
-pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates}
+pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates} + server/node_modules
 pnpm pack:desktop          # electron-builder --dir → apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop         # 桌面冒烟（开发态）：真起 Electron，8 项断言
 pnpm smoke:desktop:packaged # 同上，但跑打包后的 Tenon.app
-pnpm typecheck             # 7 个 packages + 2 个 apps + 4 个 spikes + scripts（13 个项目）
+pnpm typecheck             # 7 个 packages + 2 个 apps + 4 个 spikes + scripts（14 个项目）
 ```
 
 spike 复跑入口（历史证据，仍在）：
@@ -306,10 +376,25 @@ pnpm spike:loc      # 定位插件精度
 
 服务端环境变量：`TENON_HOME`（数据目录，默认 `~/.tenon`；桌面版默认 `<userData>/home`）、
 `TENON_PORT`（0=随机）、`TENON_HOST`、`TENON_TOKEN`、`TENON_FAUX=1`（假模型）、`TENON_LOG=1`（pino）、
-`TENON_WEB_DIR`（给了就同源托管这份渲染器产物）、`TENON_TEMPLATES_DIR`（模板目录）、`TENON_PNPM`（装依赖用的包管理器）。
+`TENON_WEB_DIR`（给了就同源托管这份渲染器产物）、`TENON_TEMPLATES_DIR`（模板目录）、`TENON_PNPM`（装依赖用的包管理器）、
+`TENON_DB_MODE=postgres` + `TENON_DATABASE_URL`（把应用库从 PGlite 切到真 PG；不设就是 `pglite`）。
+
+注入给**生成应用**的只有两个：`DATABASE_URL`（唯一入口，铁律 2）与 `DATABASE_POOL_MAX`（容量参数，PGlite 档恒为 1）。
 
 > 桌面版冒烟在**受限环境**（容器 / 无 GPU / 从 IDE 里跑）需要 `--no-sandbox --disable-gpu`，
 > `scripts/smoke-desktop.ts` 已经代劳；产品本身不传这两个开关。
+
+> **本机 shell 注入了 `NODE_OPTIONS=--require=…/node-language-shim.cjs`**（宿主的文件系统代理 + 安全删除守卫）。
+> 它会让**写文件密集**的用例慢 10 倍以上：`packages/db-provisioner` 单独跑从 9.7s 变成 250s+，
+> 4 个 PGlite 用例全部撞 30s 超时（看着像代码坏了，其实是环境）。
+> 在本机跑测试/打包请用：
+>
+> ```bash
+> env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE pnpm test    # 约 1 分钟；不带的话可能 8 分钟起且随机超时
+> env -u NODE_OPTIONS pnpm pack:desktop                    # 否则 electron-builder 解压报 Brokered file token refused
+> ```
+>
+> 这不是产品问题：干净环境下 `pnpm test` 就是 ~60s / 105 项全绿。
 
 > `spikes/*/pgdata*`、`spikes/*/work/` 是运行产物，已 gitignore；`results/*.json` 保留入库作为证据。
 
@@ -321,12 +406,13 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.4），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.7），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
-当前阶段：M1 主干。第 1~7 步已完成（packages/{protocol,core,agent,generator,gateway,server}，62 个测试 + 9 项冒烟 + 1 条真机 e2e 全绿）。
-接着做 STATUS.md §4.4：`apps/web`（会话 + iframe 两栏）→ `pnpm dev:web` → Electron 壳。
-`pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路时再跑一次 `pnpm e2e:preview`。
+当前阶段：M2 全栈生成。第 1 步已完成（packages/db-provisioner + templates/nest-api + 双进程预览，
+105 个测试 + smoke 9 + e2e:preview 14 + e2e:fullstack + 桌面包全绿）。
+接着做 STATUS.md §4.5：runtime SDK + 日志/错误面板 → pg_dump 跨档迁移 → Docker compose 产物。
+`pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/后端跑 `pnpm e2e:fullstack`。
 
 三条铁律不要违反：Electron 只做壳 / 生成应用不感知运行环境 / 实验性依赖锁版本 + adapter 包装。
 ```

@@ -14,9 +14,13 @@ type StageState = Readiness['deps']
 
 const STAGE_LABEL: Record<keyof Readiness, string> = {
   deps: '依赖',
+  db: '数据',
   server: '服务',
   preview: '首屏',
 }
+
+/** 顺序就是起服务的顺序，进度条按它推进 */
+const STAGES: Array<keyof Readiness> = ['deps', 'db', 'server', 'preview']
 
 function stageDot(state: StageState): string {
   if (state === 'ready') return 'bg-ok'
@@ -25,10 +29,9 @@ function stageDot(state: StageState): string {
 }
 
 function StagePills({ readiness }: { readiness: Readiness }) {
-  const keys: Array<keyof Readiness> = ['deps', 'server', 'preview']
   return (
     <div className="flex items-center gap-2.5">
-      {keys.map((key) => (
+      {STAGES.map((key) => (
         <span key={key} className="flex items-center gap-1">
           <span className={cn('size-1.5 rounded-full', stageDot(readiness[key]))} />
           <span className="text-[10.5px] text-faint">{STAGE_LABEL[key]}</span>
@@ -36,6 +39,13 @@ function StagePills({ readiness }: { readiness: Readiness }) {
       ))}
     </div>
   )
+}
+
+const PROGRESS_WIDTH: Record<number, string> = {
+  0: 'w-[8%]',
+  1: 'w-1/3',
+  2: 'w-1/2',
+  3: 'w-2/3',
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
@@ -70,7 +80,21 @@ export function PreviewPanel({
 
   const state = preview?.state ?? 'stopped'
   const url = preview?.url ?? null
-  const readiness = preview?.readiness ?? { deps: 'pending', server: 'pending', preview: 'pending' }
+  const readiness = preview?.readiness ?? {
+    deps: 'pending',
+    db: 'pending',
+    server: 'pending',
+    preview: 'pending',
+  }
+  const reached = STAGES.filter((key) => readiness[key] === 'ready').length
+  const stageHint =
+    readiness.deps !== 'ready'
+      ? '首次启动会安装依赖，请稍等…'
+      : readiness.db !== 'ready'
+        ? '正在启动应用数据库（本地是 WASM 版 PostgreSQL）…'
+        : readiness.server !== 'ready'
+          ? '正在启动后端服务…'
+          : '等待首屏响应…'
 
   return (
     /* 同 ChatPanel：`flex-1` 少了，下面的 `relative flex-1` 会塌成 0 高，
@@ -152,23 +176,11 @@ export function PreviewPanel({
                 <div
                   className={cn(
                     'h-full rounded-full bg-brand transition-[width] duration-500',
-                    readiness.preview === 'ready'
-                      ? 'w-full'
-                      : readiness.server === 'ready'
-                        ? 'w-2/3'
-                        : readiness.deps === 'ready'
-                          ? 'w-1/3'
-                          : 'w-1/6',
+                    PROGRESS_WIDTH[reached] ?? 'w-full',
                   )}
                 />
               </div>
-              <p className="text-[11.5px] text-faint">
-                {readiness.deps !== 'ready'
-                  ? '首次启动会安装依赖，请稍等…'
-                  : readiness.server !== 'ready'
-                    ? '正在启动开发服务器…'
-                    : '等待首屏响应…'}
-              </p>
+              <p className="text-[11.5px] text-faint">{stageHint}</p>
             </div>
           </Centered>
         )}

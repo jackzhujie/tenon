@@ -44,6 +44,12 @@ export const ErrorCode = z.enum([
   'PREVIEW_START_FAILED',
   'PREVIEW_DEPS_FAILED',
 
+  'DB_START_FAILED',
+  'DB_NOT_READY',
+  'DB_DUMP_FAILED',
+  'DB_RESTORE_FAILED',
+  'DB_UNSUPPORTED',
+
   'EXPORT_FAILED',
 ])
 export type ErrorCode = z.infer<typeof ErrorCode>
@@ -82,6 +88,11 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['PREVIEW_NOT_RUNNING', 409],
   ['PREVIEW_START_FAILED', 500],
   ['PREVIEW_DEPS_FAILED', 500],
+  ['DB_START_FAILED', 500],
+  ['DB_NOT_READY', 409],
+  ['DB_DUMP_FAILED', 500],
+  ['DB_RESTORE_FAILED', 500],
+  ['DB_UNSUPPORTED', 501],
   ['EXPORT_FAILED', 500],
   ['INTERNAL', 500],
 ]

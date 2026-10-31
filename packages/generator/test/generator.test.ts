@@ -125,3 +125,69 @@ describe('铺模板', () => {
     await expect(readFile(join(repo, 'package.json'), 'utf8')).rejects.toThrow()
   })
 })
+
+/**
+ * 全栈模板（M2）。
+ *
+ * 这几条守的是**跨文件的一致性**，单看任何一个文件都没问题：
+ * - `package.json.tenon.api` 是运行时唯一事实来源（预览靠它决定起不起后端），
+ *   它指的文件必须真的在模板里
+ * - 后端启动必须走 ts-node（装饰器元数据），不能哪天被"优化"成 tsx
+ * - 应用代码只认 `DATABASE_URL`，不许出现环境分支
+ */
+describe('全栈模板 nest-api', () => {
+  it('声明的后端入口真的在模板里，迁移目录也在', async () => {
+    const files = await collectFiles('nest-api')
+    const manifest = JSON.parse(
+      await readFile(join(templatesRoot(), 'nest-api', 'package.json'), 'utf8'),
+    ) as { tenon?: { api?: string } }
+
+    expect(manifest.tenon?.api).toBe('api/main.ts')
+    expect(files).toContain('api/main.ts')
+    expect(files.some((file) => file.startsWith('api/migrations/'))).toBe(true)
+    expect(files).toContain('shared/schema.ts')
+  })
+
+  it('铺出来的应用自洽：变量替换干净、共享契约与迁移都在', async () => {
+    const result = await scaffoldApp({ ...VARS, repoDir: repo, templateId: 'nest-api' })
+    expect(result.entry).toBe('index.html')
+
+    for (const file of ['api/main.ts', 'api/db.ts', 'api/app.module.ts', 'shared/schema.ts']) {
+      const content = await readFile(join(repo, file), 'utf8')
+      expect(content, `${file} 里还有占位符`).not.toContain('{{')
+    }
+    const html = await readFile(join(repo, 'index.html'), 'utf8')
+    expect(html).toContain('<title>待办清单</title>')
+    expect(await readFile(join(repo, 'api/migrations/1767225600000-InitItems.ts'), 'utf8')).toContain(
+      'create table if not exists items',
+    )
+  })
+
+  it('后端用 tsc 编译产物（tsx/esbuild 不产装饰器元数据；ts-node 在 Node 22.18+ 已失效）', async () => {
+    await scaffoldApp({ ...VARS, repoDir: repo, templateId: 'nest-api' })
+    const pkg = JSON.parse(await readFile(join(repo, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>
+      tenon?: { apiOut?: string; apiTsconfig?: string }
+      devDependencies: Record<string, string>
+    }
+    expect(pkg.tenon?.apiOut).toBe('dist-server/api/main.js')
+    expect(pkg.tenon?.apiTsconfig).toBe('tsconfig.server.json')
+    expect(pkg.scripts['start:api']).toContain('dist-server/api/main.js')
+    // ts-node 不要再加回来：Node 22.18 起原生类型擦除会抢走 .ts 入口
+    expect(pkg.devDependencies['ts-node']).toBeUndefined()
+
+    const serverTsconfig = JSON.parse(
+      await readFile(join(repo, 'tsconfig.server.json'), 'utf8'),
+    ) as { compilerOptions: Record<string, unknown> }
+    expect(serverTsconfig.compilerOptions['outDir']).toBe('dist-server')
+    expect(serverTsconfig.compilerOptions['emitDecoratorMetadata']).toBe(true)
+  })
+
+  it('应用侧只认 DATABASE_URL，没有环境分支', async () => {
+    await scaffoldApp({ ...VARS, repoDir: repo, templateId: 'nest-api' })
+    const db = await readFile(join(repo, 'api/db.ts'), 'utf8')
+    expect(db).toContain("process.env['DATABASE_URL']")
+    expect(db).toContain("process.env['DATABASE_POOL_MAX']")
+    expect(db).not.toContain('NODE_ENV')
+  })
+})

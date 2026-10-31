@@ -25,6 +25,10 @@ importers:
         version: 5.0.5(@types/node@22.20.5)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.0))
 
   apps/desktop:
+    dependencies:
+      pnpm:
+        specifier: 9.15.9
+        version: 9.15.9
     devDependencies:
       '@types/node':
         specifier: 22.20.5
@@ -106,11 +110,39 @@ importers:
         specifier: 1.44.8
         version: 1.44.8
 
+  packages/db-provisioner:
+    dependencies:
+      '@electric-sql/pglite':
+        specifier: 0.5.13
+        version: 0.5.13
+      '@tenon/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tenon/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+      pg-gateway:
+        specifier: 0.3.0-beta.4
+        version: 0.3.0-beta.4
+    devDependencies:
+      '@types/pg':
+        specifier: 8.15.6
+        version: 8.15.6
+      typeorm:
+        specifier: 1.1.2
+        version: 1.1.2(pg@8.23.1)
+
   packages/gateway:
     dependencies:
       '@tenon/core':
         specifier: workspace:*
         version: link:../core
+      '@tenon/db-provisioner':
+        specifier: workspace:*
+        version: link:../db-provisioner
       '@tenon/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -2590,6 +2622,11 @@ packages:
   plist@3.1.0:
     resolution: {integrity: sha512-uysumyrvkUX0rX/dEVqt8gC3sTBzd4zoWfLeS29nb53imdaXVvLINYXTI2GNqzaMuvacNx4uJQ8+b3zXR0pkgQ==}
     engines: {node: '>=10.4.0'}
+
+  pnpm@9.15.9:
+    resolution: {integrity: sha512-aARhQYk8ZvrQHAeSMRKOmvuJ74fiaR1p5NQO7iKJiClf1GghgbrlW1hBjDolO95lpQXsfF+UA+zlzDzTfc8lMQ==}
+    engines: {node: '>=18.12'}
+    hasBin: true
 
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
@@ -5857,6 +5894,8 @@ snapshots:
       '@xmldom/xmldom': 0.8.15
       base64-js: 1.5.1
       xmlbuilder: 15.1.1
+
+  pnpm@9.15.9: {}
 
   possible-typed-array-names@1.1.0: {}
 
