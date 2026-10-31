@@ -7,16 +7,17 @@
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
 ## 当前状态（2026-10-31 深夜）
-**M1 全部 9 步完成** → DESIGN **v1.2.6**。六个包 + 两个 app（`apps/web` 渲染器、`apps/desktop` 壳）。
+**M1 全部 9 步 + M2 第 1 步完成** → DESIGN **v1.2.7**。七个包 + 两个 app（`apps/web` 渲染器、`apps/desktop` 壳）。
 服务能起、能对话（SSE 流式）、能落库、每轮自动 git 提交、崩溃后续跑；
 Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮的 commit；
-新建应用铺 `react-vite` 模板 → `preview.start` 装依赖 + 起 Vite + 挂网关 → iframe 打开就是它；
 `pnpm dev:web` 一条命令起界面，改 `repo/src/App.tsx` → iframe 当场变（HMR 经网关）；
-**`pnpm pack:desktop` 出 `Tenon.app`（289MB、零原生模块），打包冒烟 8 项全过**。
-`pnpm typecheck` 13 project + `pnpm test` 88 项 + `smoke` 9 + `e2e:preview` 14 + `smoke:desktop(:packaged)` 8 全绿。
-**下一步**：M2 第 1 步 —— `packages/db-provisioner`（pglite 默认 / postgres 发布，`pool.max=1`）+ `templates/nest-api`，
-`preview.start` 扩成 Vite + Nest 双进程按路径分流。欠账：桌面版预览依赖系统 pnpm。
-**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 下一步拆解 / §4.5 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`。
+**`pnpm pack:desktop` 出 `Tenon.app`（338MB、零原生模块、自带 pnpm），打包冒烟 8 项全过**。
+**M2-1：生成的应用有后端了** —— `packages/db-provisioner`（pglite 默认 / postgres 发布，`poolMax()` 恒 1）+
+`templates/nest-api`（NestJS 11 + TypeORM + PG 方言 + zod 共享层，**迁移只写一份两档同跑**）+
+`preview.start` 双进程（网关按 `/api` 最长前缀分流）；应用侧只认 `DATABASE_URL`（+ 容量参数 `DATABASE_POOL_MAX`）。
+`pnpm typecheck` 14 project + `pnpm test` 105 项 + `smoke` 9 + `e2e:preview` 14 + `e2e:fullstack` + `smoke:desktop(:packaged)` 8 全绿。
+**下一步**：M2 第 2 步 —— runtime SDK + 日志/错误面板 → `pg_dump` 跨档迁移到 Docker PG → Docker compose 产物。
+**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 M2-1 验收 / §4.5 下一步拆解 / §4.6 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`。
 
 ## 三条铁律
 1. **Electron 只做壳**，业务全在本地 HTTP Server（否则 Web 模式 / Agent 自调试 / SaaS 化全废）
@@ -78,6 +79,17 @@ Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮�
 - **SPA 回落不能对 `/assets/*.js` 生效**（回落成 HTML 只有 `SyntaxError`）；**index.html 必须 `no-cache`**（它携带 token）
 - **冒烟要在页面内断言 `window.__TENON__.token`**，不要在外部 fetch index.html（探针打印后进程就退出，是竞态）
 - 受限环境（容器/无 GPU）起 Chromium 要 `--no-sandbox --disable-gpu`，只给冒烟脚本
+
+## 全栈后端硬约束（v1.2.7，M2 第 1 步实测）
+- **Node ≥ 22.18 的原生 TS 类型擦除让 `ts-node/register` 彻底失效**：`.ts` 入口被 Node 自己的 ESM loader 抢走，`require.extensions['.ts']` 注册了也不参与，`--no-experimental-strip-types` 也救不了。→ 模板走 **`tsc --watch` 编译到 `dist-server/` + `node --watch` 跑 `.js`**（Nest DI 本来就要 `emitDecoratorMetadata`，tsx/esbuild 不产）
+- **`node --watch` 只监听"已经加载过"的文件**：入口还不存在时它打印 `Failed running … Waiting for file changes` 然后永不重启 → `launchApi` 必须 `await waitForFile(output, compiler, 90s)` 再起 runner
+- **子进程报错要带多行尾部**：`node --watch` 把真错误放在 `Failed running …` 的**上一行** → `tailOf(launched, 6)` 而不是 `lastLine()`
+- **PGlite 必须 esbuild external 并整包拷进安装包**：它按 `import.meta.url` 读 `wasm/`/`data/`/`extensions/`，打进单文件就起不来
+- **electron-builder 的 `extraResources` 会跳过相对路径含 `node_modules` 的文件**：`filter: ['**/*']` 也无效 → 必须单列 `from: dist/server/node_modules`
+- **pnpm 自带 4 个平台 `reflink.*.node`**：会触发"有原生模块"的兜底断言；删掉后 `pnpm install` 实测照常
+- **`DATABASE_POOL_MAX` 是容量参数不是环境判断**：只用于 `extra.max`（PGlite 档由 provisioner 注入 1）；不许用来判断 desktop/docker/cloud（铁律 2）
+- **`readiness` 是四格 `deps/db/server/preview`**（不是 `api`）；后端起没起看 `apiPort`，纯前端应用必须 `null`
+- **本机跑测试要 `env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE`**：注入的 `node-language-shim` 让写文件密集用例慢 10 倍 → PGlite 用例全撞 30s 超时（看着像代码坏了）
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程
