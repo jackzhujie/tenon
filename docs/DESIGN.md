@@ -1,25 +1,30 @@
-# DESIGN.md — 详细方案设计 v1.0
+# DESIGN.md — 详细方案设计 v1.1
 
-> 状态：待评审。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条新需求（2026-10-31）。
+> 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
 
 | # | 议题 | 结论 |
 |---|---|---|
+| 0 | 产品名 | **Tenon（榫）** —— 详见 §1.5 命名说明 |
 | 1 | 桌面框架 | **Electron 39.x**（内置 Node 22.22.1），放弃 Rust |
 | 2 | 业务进程形态 | 所有业务逻辑在**本地 HTTP 服务**里，Electron 只是壳 → 同一套代码可 Web 打开、可被 Agent 直接调试 |
-| 3 | Agent 运行时 | `@earendil-works/pi-durable` 1.4.x + `pi-ai` 0.8x +（可选）`chord` |
+| 3 | Agent 运行时 | `pi-durable` 1.4（Harness/任务图/子会话/压缩/重放）+ `pi-ai` 1.4（BYOK）+ `chord` 1.4（**插件宿主基座**）+ `pi-codemode`（代码沙箱）|
 | 4 | Agent 应用栈 | React 19 + shadcn/ui + Tailwind 4 + Vite 7 + TS ESM；Node 22 |
-| 5 | 生成应用栈 | 前端同上（+ React Router 7 + TanStack Query + zod）；后端 **NestJS 11 + TypeORM + SQLite** |
+| 5 | 生成应用栈 | 前端同上（+ React Router 7 + TanStack Query + zod）；后端 **NestJS 11 + TypeORM + PostgreSQL** |
+| 5b | 数据库供给 | 应用只认**一个 Postgres 连接串**；供给由平台决定：`embedded`（真 PG 二进制，默认）/ `docker` / `external` / 降级 `sqlite` —— 详见 §6.4 |
+| 5c | 组件与插件 | **chord 插件模型**：一 feature 一 contract + 每宿主一 facet；免费/收费组件走同一套安装协议 —— 详见 §21 |
 | 6 | 版本管理 | **Git**（isomorphic-git）：每轮改动自动 commit，发布时 push + tag；回滚 = revert + 可选 DB 快照还原 |
-| 7 | 发布 | 生成 **Docker 产物**（多阶段构建、单容器单端口）+ 可选静态导出 |
+| 7 | 发布 | 生成 **Docker 产物**（多阶段构建、单容器单端口，compose 内含 PostgreSQL）+ 可选静态导出 |
 | 8 | 预览 | 每应用一个 **App Gateway**（稳定端口）→ Vite dev server + Nest，HMR 走 WS 代理 |
 | 9 | 精调 | 注入式 inspector：点选元素 / 框选区域 → 源码定位（file:line + 组件栈）+ 截图 → 注入对话 |
-| 10 | 可观测 | 运行时探针（console/error/network/route）→ 事件管道 → 面板 + 错误入库 + 一键修复 |
-| 11 | 记忆 | 每个应用仓库内 `docs/AGENTS.md` + `.studio/memory/*` ，Agent 有读写纪律 |
-| 12 | 协议 | **AGPL-3.0-only**（Studio/Server）+ **Apache-2.0**（Runtime SDK / 模板 / 生成物骨架）+ 商业双许可 |
+| 10 | 可观测 | chord 复制态 + `pi-telemetry` 跨度/指标 + 运行时探针（console/error/network/route）→ 面板 + 错误入库 + 一键修复 |
+| 11 | 记忆 | 每个应用仓库内 `docs/AGENTS.md` + `.tenon/memory/*` ，Agent 有读写纪律 |
+| 12 | 协议 | **AGPL-3.0-only**（Tenon/Server）+ **Apache-2.0**（Runtime SDK / 模板 / 生成物骨架）+ 商业双许可 |
+| 13 | 首发平台 | **macOS（ARM64/x64）+ Windows（x64）**；Linux 作为次优先目标随 M5 补齐 |
+| 14 | 免费策略 | **个人免费**（含全部核心能力）；企业为协作/合规付费；**组件市场**区分免费与收费组件 |
 
 ---
 
@@ -36,7 +41,7 @@
 | 形态 | 云端 Web | **Electron 桌面 + 可 Web 打开（同构）** |
 | 生成本体 | 独立容器（VEFaaS） | 本地应用目录 + 独立 dev 进程 |
 | 前端栈 | React + Vite + Tailwind + shadcn | **完全一致**（全部开源件） |
-| 后端 | 飞书云 PostgreSQL | **NestJS + SQLite**（Docker 内可换 Postgres） |
+| 后端 | 飞书云 PostgreSQL | **NestJS + PostgreSQL**（同一方言，dev 与 prod 一致） |
 | Agent | 自研多 Agent（6 角色） | **pi-durable 多会话/子 Agent，复刻 6 角色划分** |
 | 版本 | 沙箱内 Git + checkpoint | **Git 一等公民**：commit ↔ 对话轮次 ↔ 回滚 |
 | 发布 | 飞书服务器 + 范围发布 | **Docker 镜像 / compose / 静态导出 / Git push** |
@@ -58,6 +63,24 @@
 | 业务人员 | 不写代码做工具 | 次要：默认路径不暴露代码，靠对话与精调 |
 | Agent 自身 | 能开浏览器调试、能读代码、能跑测试 | **一等公民**：Web 模式 + 全 RPC 可编程 |
 
+### 1.5 命名：Tenon（榫）
+
+**中文名「榫」，英文名 `Tenon`，全称"榫卯工坊"仅作副标题。** 代码代号 `tenon`，包作用域 `@tenon/*`。
+
+选择理由（不是随手起的名字，是本项目架构的隐喻）：
+
+| 榫卯的特征 | 本项目的对应 |
+|---|---|
+| 不用钉子，靠构件**咬合**承重 | 应用不靠"大而全的框架"，靠标准化的 **contract** 咬合（chord 模型）|
+| **榫头**（凸）插入**卯眼**（凹），尺寸必须精确匹配 | 插件是榫头、应用是卯眼；**contract schema 就是尺寸公差** |
+| 同一套工艺能造桌椅门窗，形制千变 | 同一套 runtime 能生成点餐系统、CRM、看板；差异在组件组合 |
+| 可拆卸重装，不损伤木料 | 插件可热插拔、可热重载，状态不丢（chord hot reload）|
+| 匠人手工放样，机器只做标准件 | **Agent 是匠人**（设计与搭接），**代码生成器是机床**（出标准件）|
+
+避讳检查：与「妙搭 / Miaoda / 飞书 / Lark / aPaaS」无任何语音、字形、语义关联；当前无同品类开源项目使用；商标可在中英文分别申请。
+
+> 备注：`tenon.io` 为国外小众无障碍检查 API，属不同类别（非开发者工具），风险可接受。若后期商标受阻，备选为 `Mortise`（卯）/ `Kiln`（窑）/ `Weft`（纬）。域名与 npm scope 在 M1 启动前一次性确认。
+
 ---
 
 ## 2. 总体架构
@@ -71,11 +94,11 @@ flowchart TB
     P["preload：注入 baseUrl + token<br/>暴露原生桥"]
   end
 
-  subgraph Web["Studio Web App（React 19 + shadcn）"]
+  subgraph Web["Tenon Web App（React 19 + shadcn）"]
     UI["会话流 · 预览台 · 计划 · 文件 · 日志 · 版本 · 设置"]
   end
 
-  subgraph Server["Studio Server（Node 22 + Fastify 5，本地 127.0.0.1）"]
+  subgraph Server["Tenon Server（Node 22 + Fastify 5，本地 127.0.0.1）"]
     RPC["RPC + SSE 事件总线"]
     HARNESS["Agent Runtime<br/>pi-durable Harness 池"]
     GEN["代码生成器 / 模板引擎"]
@@ -83,13 +106,14 @@ flowchart TB
     PREV["预览编排（App Gateway）"]
     OBS["可观测管道"]
     EXP["导出（Docker / 静态）"]
-    DB[("studio.db<br/>应用注册 / 设置 / 版本")]
+    DB[("tenon.db<br/>应用注册 / 设置 / 版本")]
   end
 
   subgraph App["生成的应用（每应用独立目录 + 独立进程）"]
     G1["App Gateway :41xxx"]
     V["Vite dev server（前端 + HMR）"]
-    N["NestJS（API + SQLite）"]
+    N["NestJS（API）"]
+    D["PostgreSQL（embedded / docker）"]
   end
 
   subgraph Pi["pi 生态"]
@@ -150,23 +174,25 @@ flowchart TB
 | 包管理 | pnpm workspaces | 10.x | `packageManager` 字段锁定 |
 | 语言 | TypeScript | 5.9+ | 全仓 ESM（`"type": "module"`） |
 | 桌面 | Electron + electron-vite + electron-builder | 39.x | electron-vite 提供三端 HMR |
-| Studio 服务 | Fastify | 5.x | `@fastify/websocket`、`@fastify/static`、`@fastify/cors`(仅 web 模式) |
-| Studio 前端 | React 19 + Vite 7 + Tailwind 4 + shadcn/ui | — | Radix、lucide、sonner、motion |
+| Tenon 服务 | Fastify | 5.x | `@fastify/websocket`、`@fastify/static`、`@fastify/cors`(仅 web 模式) |
+| Tenon 前端 | React 19 + Vite 7 + Tailwind 4 + shadcn/ui | — | Radix、lucide、sonner、motion |
 | 状态 | TanStack Query + Zustand + TanStack Virtual | — | 服务端状态与 UI 状态分离；长列表虚拟化 |
 | 代码展示 | Monaco Editor | — | 只读 + Diff（M2 起） |
-| Agent | `@earendil-works/pi-durable` / `pi-ai` | **精确锁定 1.4.x / 0.82.x** | `save-exact`；实验性 API，用 adapter 隔离 |
-| 契约 | zod | 4.x | 一份 schema 三处用：RPC 校验 / 前端类型 / 生成应用共享 |
+| Agent | `@earendil-works/pi-durable` / `pi-ai` | **精确锁定 1.4.x** | `save-exact`；用 adapter 包一层隔离升级 |
+| 插件宿主 | `@earendil-works/chord` | **精确锁定 1.4.x** | plugin facet、状态复制、principal 授权 |
+| 契约 | zod（我们）+ TypeBox（chord） | 4.x / 1.3.x | zod 用于 RPC；TypeBox 用于 chord contract（其运行时要求）|
 | Git | isomorphic-git | 1.x | 纯 JS 无原生依赖；检测到系统 git 时可切换 |
-| 数据库 | better-sqlite3 | 12.x | studio.db / harness.sqlite / app.db |
+| 产品库 | better-sqlite3 | 12.x | `tenon.db` / `harness.sqlite` / `telemetry.db`（单机注册表，零安装）|
+| 应用库 | **PostgreSQL 18**（typeorm + pg） | 18.x | `embedded-postgres`（默认）/ docker / external / pglite 降级 —— 见 §6.4 |
 | 日志 | pino | 9.x | 结构化、可被探针管道消费 |
 | 测试 | Vitest + Playwright | — | 单测 + Agent E2E |
 
 ### 3.2 仓库结构
 
 ```
-studio/
+tenon/
 ├── apps/
-│   ├── web/                      # Studio 渲染器（纯 Web 应用，React）
+│   ├── web/                      # Tenon 渲染器（纯 Web 应用，React）
 │   │   ├── src/
 │   │   │   ├── app/              # 路由与外壳
 │   │   │   ├── features/         # chat / preview / plan / files / logs / versions / settings
@@ -185,8 +211,15 @@ studio/
 │   ├── core/                     # 领域服务：应用注册、文件、Git、预览、导出
 │   ├── agent/                    # pi 集成：harness 池、扩展、工具、6 角色、模型档位
 │   ├── generator/                # 模板渲染 + 代码生成（AST 级补丁）
+│   ├── component-host/           # ★ chord 宿主：facet 加载、principal 解析、插槽装配
+│   ├── component-market/         # ★ 组件仓库客户端、manifest 校验、license 校验、本地缓存
+│   ├── db-provisioner/           # ★ PG 四档供给（embedded/docker/external/lite）
 │   ├── runtime-sdk/              # 注入生成应用的探针 / inspector / 数据客户端
 │   └── ui/                       # 共享设计系统（shadcn 之上）
+├── components/                   # ★ 官方组件源码（L2）
+│   ├── ai-assistant/             # contract + server + web + manifest
+│   ├── excel-export/
+│   └── approval-flow/
 ├── templates/
 │   └── fullstack-react-nest/     # 生成应用模板（可多套，按风格/场景）
 ├── docs/
@@ -212,13 +245,31 @@ studio/
 
 ## 4. Core Runtime：pi 生态集成
 
-### 4.1 角色分工
+> 本节结论基于**实际下载并阅读十一个包的类型定义与文档**（2026-10-31，版本号见下表），非推测。
 
-| 包 | 承担的职责 | 我们的用法 |
-|---|---|---|
-| `pi-ai` | 统一多提供商 LLM、流式事件、token/成本统计 | 把用户 BYOK 配置映射成 `Models` 集合；按档位选模型 |
-| `pi-durable` | 持久化 Harness：会话 / 任务 / 文档 / 提交、checkpoint、resume、压缩、子 Agent、事件流 | **整套 Agent 运行时**，我们只写扩展与工具 |
-| `chord`（可选） | 热重载插件宿主 | M5 插件市场再引入 |
+### 4.1 角色分工（全量 11 个包）
+
+| 包 | 版本 | 承担的职责 | 我们的用法 |
+|---|---|---|---|
+| `pi-ai` | 1.4.0 | 统一多提供商 LLM、流式事件、token/成本统计、模型发现 | 把用户 BYOK 配置映射成 `Models`；按三档位路由模型 |
+| `pi-durable` | 1.4.0 | 持久化 Harness：会话/任务/文档/提交、checkpoint、resume、压缩、子 Agent、任务图、用量 | **整套 Agent 运行时**，我们只写扩展与工具 |
+| `chord` | 1.4.0 | 跨进程对象宿主机：contract（TypeBox）、state 复制、principal 权限、**热重载**、插件 facet | **插件与组件生态的基座**；也承载应用运行时的可观测状态 |
+| `pi-codemode` | 1.4.0 | QuickJS-WASM 沙箱，唯一能力是调用注入的工具 | 给 Agent 一个「算数据/批处理」的代码执行环境（不碰 FS） |
+| `pi-telemetry` | 1.4.0 | 与厂商无关的遥测契约 + 本地 trace/metrics API | 全链路追踪（对话 → 工具 → 生成 → 预览）|
+| `pi-mcp` | 1.4.0 | 独立 MCP 客户端 | 让用户挂自己的 MCP 服务（数据库、内部系统）|
+| `pi-coding-agent` | 1.4.0 | 现成的 read/bash/edit/write/glob/grep 工具与 session 管理 | **直接复用其工具实现**，不重复造 |
+| `pi-agent-core` | 1.4.0 | 通用 agent + transport 抽象 + 状态机 | 需要脱离 Harness 的轻量 agent（如后台索引器）|
+| `pi-protocol` / `pi-client` | 1.1.0 | 传输无关的 CBOR framed 协议 + 客户端 | 远程/多端场景（Web 协作、远程预览）|
+| `gondolin` | 0.14.0 | Alpine Linux 微 VM（QEMU/krun）+ TS 实现的网络栈与虚拟 FS | **可选高档隔离**，见 §15.3 的平台差异说明 |
+| `pi-tui` / `pi-server` | — | 终端 UI / 实验性服务端 | 仅参考实现，不直接依赖 |
+
+四条**已验证**的关键约束：
+
+1. `pi-durable` storage 支持 SQLite / JSONL / **IndexedDB** / Memory / Cloudflare DO —— IndexedDB 意味着**浏览器里就能跑完整 Harness**，这是 Web 模式的技术依据，不是设想。
+2. `harness.taskGraph()` / `watchTaskGraph()` 直接把所有活任务（含子会话）作为**一个 Chord 可复制状态**吐出 —— 需求 8「捕获应用状态并展示」的现成数据源。
+3. 子 Agent 用 `tx.createConversation({ ownership: { kind:'task', taskId } })` + `scanConversations({ ownerTaskId })` 幂等复用，工具标 `replay:'safe'` 后崩溃重跑会命中同一个子会话与提交 —— 这解决了"崩溃重放"在子 Agent 场景的重复创建问题。
+4. `chord` 的 **principal（owner/guest 得到不同对象、不同方法）** 天然就是收费组件的授权模型：未购买 = guest，方法集裁剪，而非"前端藏按钮"。
+
 
 ### 4.2 模型接入（BYOK）
 
@@ -248,13 +299,13 @@ export function buildModels(profiles: ProviderProfile[]): Models {
 
 每档可指定「提供商 + modelId + 参数」，**未配置的档位回退到 `comprehensive`**，全空则引导进入设置向导。
 
-**成本与预算**：`harness.usage()` 给出按模型/工具聚合的用量，落 `studio.usage` 文档；设置里可配「每应用每日 token/金额上限」，超限时在 `submit` 前拦截并提示。
+**成本与预算**：`harness.usage()` 给出按模型/工具聚合的用量，落 `tenon.usage` 文档；设置里可配「每应用每日 token/金额上限」，超限时在 `submit` 前拦截并提示。
 
 ### 4.3 持久化 Harness（每应用一个）
 
 ```ts
 // packages/agent/src/pool.ts（示意）
-const storage = await openNodeSqliteStorage(join(appDir, '.studio/harness.sqlite'))
+const storage = await openNodeSqliteStorage(join(appDir, '.tenon/harness.sqlite'))
 const harness = await Harness.open(storage, {
   models: buildModels(profiles),
   registry,                                  // 工具 + 扩展
@@ -284,8 +335,8 @@ await harness.resume()          // ★ 每个进程启动必须调用：续跑�
 | 暂存队列（上限 10、`immediateExecute` 插队） | `whenBusy: 'follow-up' \| 'steer' \| 'reject'` | `steer` = 插话引导（插队），`follow-up` = 排队；上限 10 由 UI 层约束 |
 | `StopChat` | `harness.abortTask(id)` / 会话 abort（封装在 adapter） | 停止后保留已产出内容与工具结果 |
 | `GetStreamingStatus` | `watchEvents` 的 snapshot | 断线重连时先回放快照再续流 |
-| Spec（`init_spec.json`/`spec.md`） | `defineDoc('studio.spec')` | 结构化状态，原子提交 |
-| 开发计划任务清单（`pro_sub_task`） | `defineDoc('studio.plan')` + 子 Agent 的 Task 图 | 计划是文档，执行是任务 |
+| Spec（`init_spec.json`/`spec.md`） | `defineDoc('tenon.spec')` | 结构化状态，原子提交 |
+| 开发计划任务清单（`pro_sub_task`） | `defineDoc('tenon.plan')` + 子 Agent 的 Task 图 | 计划是文档，执行是任务 |
 | Checkpoint / `resetArtifactVersion` | `harness` fork + Git commit + DB 快照 | 见 §12 |
 | 6 个内置 Agent | 主会话 + 5 个子会话（`tx.createConversation`） | 见 §5 |
 | `cotGroup` 思维链分组 | `thinking_start/delta/end` 事件 | 前端折叠渲染 |
@@ -376,7 +427,7 @@ pi-durable 的 `section()` 组合系统提示，**按变更频率分层**，最�
 | 层 | 内容 | 变化 |
 |---|---|---|
 | L0 静态 | 产品职责、工具契约、代码规范、禁止事项 | 极少 |
-| L1 项目 | `docs/AGENTS.md`（架构、约定、坑）、`studio.spec`、`studio.plan` | 每轮可能变 |
+| L1 项目 | `docs/AGENTS.md`（架构、约定、坑）、`tenon.spec`、`tenon.plan` | 每轮可能变 |
 | L2 会话 | 用户偏好（风格预设、语言、组件库）、最近选择元素 | 每次会话 |
 | L3 动态 | 环境信息（cwd、端口、依赖版本）、当前错误摘要 | 每次任务 |
 
@@ -389,11 +440,11 @@ pi-durable 的 `section()` 组合系统提示，**按变更频率分层**，最�
 ```
 docs/
 ├── AGENTS.md          # ★ 项目的"长期记忆"：架构、域模型、约定、坑、运行方式
-├── decisions/         # ADR：0001-使用-sqlite.md …
+├── decisions/         # ADR：0001-选择-postgresql.md、0002-组件装配 …
 └── spec/
     ├── spec.md        # 功能规格（人读）
     └── plan.md        # 开发计划与进度（人读镜像）
-.studio/
+.tenon/
 ├── spec.json          # 结构化规格（defineDoc 快照导出）
 ├── plan.json          # 任务清单镜像
 ├── memory/
@@ -416,22 +467,26 @@ docs/
 ### 6.1 文件布局
 
 ```
-~/.studio/                          # 可用 STUDIO_HOME 覆盖
-├── studio.db                       # 产品库：应用注册、设置、发布记录
+~/.tenon/                           # 可用 TENON_HOME 覆盖
+├── tenon.db                        # 产品库：应用注册、设置、发布记录（SQLite，与业务 DB 无关）
 ├── apps/
 │   └── <appId>/
 │       ├── repo/                   # ★ Git 工作区（生成应用全部代码与文档）
-│       ├── .studio/
-│       │   ├── harness.sqlite      # pi-durable 状态
+│       ├── .tenon/
+│       │   ├── harness.sqlite      # pi-durable 状态（会话/任务/文档）
 │       │   ├── runtime/*.jsonl     # 运行时事件（按天轮转，保留 7 天）
+│       │   ├── telemetry.db        # pi-telemetry 跨度与指标（chord/telemetry-sqlite）
 │       │   └── cache/              # 依赖缓存、截图、构建产物
+│       ├── pgdata/                 # ★ embedded Postgres 数据目录（供给方式 = embedded 时）
 │       └── exports/<releaseId>/    # Docker 上下文 / 静态包
 └── models.json.enc                 # 加密的提供商配置（Electron 走 safeStorage）
 ```
 
-> 为什么「每应用一个 harness.sqlite」：隔离故障与体积，删除应用=删目录；跨应用共享的只有 `studio.db`。
+> 为什么产品库用 SQLite、应用库用 PostgreSQL：**两者不是一件事**。产品库是单机注册表（低并发、强一致、要零安装），SQLite 最合适；应用库是**用户业务数据**，要支持并发写、复杂查询、迁移与生产一致性，必须是 PostgreSQL。妙搭同样如此（产品侧与生成应用侧分离）。
+> 为什么「每应用一个 harness.sqlite」：隔离故障与体积，删除应用=删目录；跨应用共享的只有 `tenon.db`。
 
-### 6.2 studio.db
+
+### 6.2 tenon.db
 
 ```sql
 CREATE TABLE apps (
@@ -463,14 +518,34 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 
 | Document | scope | 内容 | history |
 |---|---|---|---|
-| `studio.app` | conversation(root) | 名称、描述、风格预设、路由清单、技术选型 | latest |
-| `studio.spec` | root | 功能规格（模块/实体/接口/验收标准） | rewindable |
-| `studio.plan` | root | 任务列表：id/title/status/owner(子会话)/commit | rewindable |
-| `studio.selection` | root | 最近一次点选/框选的上下文（供 UI 与 Agent 共用） | latest |
-| `studio.usage` | root | token/成本累计、预算 | latest |
-| `studio.preview` | root | 端口、readiness、最近错误摘要 | latest |
+| `tenon.app` | conversation(root) | 名称、描述、风格预设、路由清单、技术选型 | latest |
+| `tenon.spec` | root | 功能规格（模块/实体/接口/验收标准） | rewindable |
+| `tenon.plan` | root | 任务列表：id/title/status/owner(子会话)/commit | rewindable |
+| `tenon.selection` | root | 最近一次点选/框选的上下文（供 UI 与 Agent 共用） | latest |
+| `tenon.usage` | root | token/成本累计、预算 | latest |
+| `tenon.preview` | root | 端口、readiness、最近错误摘要 | latest |
 
 `rewindable` 的意义：任意历史时刻的规格与计划都可读回（对应妙搭的 spec 版本）。
+
+### 6.4 数据库供给策略（PostgreSQL 是默认，不是可选项）
+
+**设计原则：应用代码只认一个 `DATABASE_URL`。** 生成的 NestJS 代码里没有任何"我跑在桌面还是 Docker"的判断，供给方式完全由平台层决定。这一条是硬约束 —— 一旦应用代码开始关心运行环境，导出就必然破。
+
+| 供给模式 | 何时使用 | 实现 | 性能 | 依赖 |
+|---|---|---|---|---|
+| **`embedded`**（默认）| 桌面本地开发 | `embedded-postgres` 18.6，下载官方 PG 二进制，在应用专属端口（13000+hash）拉起，数据落 `pgdata/` | **= 真 PG** | 无（首次自动下载 ~30MB）|
+| `docker` | 用户已装 Docker，或需要与生产完全一致 | `docker run postgres:18-alpine`，命名卷持久化 | = 真 PG | Docker |
+| `external` | 企业接入已有 PG / RDS | 直接使用用户提供的连接串，只做连通性与版本校验 | 取决于服务端 | 用户自备 |
+| `lite`（降级）| 一句话生成的小应用、演示、CI | `@electric-sql/pglite` 0.5 + `pg-gateway`，把 WASM PG 暴露成 TCP 端口 | 中等（单连接，并发受限）| 无（3.7MB gzipped）|
+
+四条实现要点：
+
+1. **对应用永远是真 PG 协议。** 即使 `lite` 模式也通过 `pg-gateway` 暴露 TCP，TypeORM 走标准 `pg` driver。所以「lite 演示 → 升级到 embedded/docker」**不需要改一行代码、不需要改 migration**，只换端口。
+2. **端口与生命周期归 App Gateway 管**（见 §9）。Gateway 在应用启动时按 manifest 拉起 DB → 等 `pg_isready` → 注入连接串 → 起 Nest。DB 崩溃由 Gateway 重启并上报状态，前端能在 readiness 面板看到 `db: down`。
+3. **迁移与快照。** TypeORM migration 是唯一 schema 事实来源；每次发布前 `pg_dump --format=custom` 存快照到 `exports/<releaseId>/db.dump`，回滚时可 `pg_restore`（对应妙搭 `resetArtifactVersion` 的 `dbRestore` 开关）。`lite` 模式用 `pg_dump` 的 SQL 纯文本替代（PGlite 不支持 custom 格式）。
+4. **Docker 导出产物自带 PostgreSQL。** `docker-compose.yml` 里 `db`（postgres:18-alpine + 健康检查 + 命名卷）+ `app`（NestJS 单容器，`depends_on: service_healthy`）。用户 `docker compose up -d` 即上线，不需要外部数据库。
+
+> **为什么之前写 SQLite 是错的**：需求里明确要"高性能应用 + 通用组件 + 未来 AI 小助手"，这些都指向真 PG（并发写、`pgvector`、行级锁、`LISTEN/NOTIFY`）。SQLite 在多写并发与扩展生态上是硬短板，且切库要重写 migration —— 早期省一天，后期赔一周。已改，旧方案见附录 A。
 
 ---
 
@@ -537,7 +612,7 @@ data: {"seq":1060,"appId":"...","url":"http://127.0.0.1:41001","readiness":{"dep
 
 - **断线重连**：客户端带 `since` 续传；`since` 过旧则下发 `stream.reset` + `chat.history` 全量
 - **背压**：`message.delta` 在服务端按 40ms 合并，避免逐 token 刷屏
-- **WebSocket 仅用于预览 HMR**（Vite 自己的通道），Studio 自身不用 WS，减少一层复杂度
+- **WebSocket 仅用于预览 HMR**（Vite 自己的通道），Tenon 自身不用 WS，减少一层复杂度
 
 ### 7.4 统一响应与错误
 
@@ -559,7 +634,7 @@ data: {"seq":1060,"appId":"...","url":"http://127.0.0.1:41001","readiness":{"dep
 | 层 | 选型 |
 |---|---|
 | 前端 | React 19、Vite 7、TypeScript、Tailwind 4、shadcn/ui（Radix）、React Router 7、TanStack Query、zod、sonner、lucide-react、dayjs |
-| 后端 | **NestJS 11**、TypeORM 0.3、better-sqlite3（可选 Postgres）、nestjs-zod、class-transformer |
+| 后端 | **NestJS 11**、TypeORM 0.3、**PostgreSQL 18（pg driver）**、nestjs-zod、class-transformer |
 | 共享 | `src/shared/schemas/*`（zod），前后端同一份 |
 | 质量 | ESLint + Prettier、Vitest、`tsc --noEmit`、可选 Playwright |
 | 部署 | Docker（多阶段、单容器、单端口） |
@@ -613,7 +688,7 @@ repo/
 │   │           └── entities/dish.entity.ts
 │   └── shared/
 │       └── schemas/              # zod：Dish、Order…（前后端共用）
-└── .studio/                      # 生成器元数据（部分 gitignore）
+└── .tenon/                      # 生成器元数据（部分 gitignore）
 ```
 
 ### 8.3 后端约定（保证生成代码"像人写的"）
@@ -662,7 +737,7 @@ tsc --noEmit  →  eslint  →  vitest run（若有）  →  build（client+serv
 App Gateway  http://127.0.0.1:<gwPort>     ← iframe / 浏览器访问的唯一入口
   ├─ /            → Vite dev server (:vitePort)
   ├─ /api/*       → NestJS (:apiPort)
-  ├─ /__studio/*  → 探针事件接收（dev only）
+  ├─ /__tenon/*  → 探针事件接收（dev only）
   └─ upgrade /    → HMR WebSocket 代理（Sec-WebSocket-Protocol: vite-hmr）
 ```
 
@@ -710,10 +785,10 @@ UI 在未 ready 时显示分阶段进度（照搬妙搭「分维度 ready」的�
 
 ### 10.1 注入的 inspector
 
-Vite 插件 `studio-inspector-plugin`（仅 dev 生效）做两件事：
+Vite 插件 `tenon-inspector-plugin`（仅 dev 生效）做两件事：
 
-1. **源码定位**：Babel 转换时给每个 JSX host 元素加 `data-studio-loc="src/components/DishCard.tsx:42:7"`，并记录组件栈
-2. **注入客户端**：`transformIndexHtml` 插入 `@studio/runtime-sdk/inspector`
+1. **源码定位**：Babel 转换时给每个 JSX host 元素加 `data-tenon-loc="src/components/DishCard.tsx:42:7"`，并记录组件栈
+2. **注入客户端**：`transformIndexHtml` 插入 `@tenon/runtime-sdk/inspector`
 
 交互（对齐主流设计工具习惯）：
 
@@ -743,7 +818,7 @@ interface SelectionContext {
 }
 ```
 
-传输：`postMessage` 到父窗口，**校验 `event.origin` 与一次性 token**；父窗口确认后写入 `studio.selection` 文档。
+传输：`postMessage` 到父窗口，**校验 `event.origin` 与一次性 token**；父窗口确认后写入 `tenon.selection` 文档。
 
 ### 10.3 进入对话
 
@@ -786,12 +861,12 @@ Composer 顶部出现可删除的上下文 chip：
 ### 11.2 管道
 
 ```
-SDK（浏览器） --batch 500ms--> POST /__studio/events --> Gateway --> 事件总线
+SDK（浏览器） --batch 500ms--> POST /__tenon/events --> Gateway --> 事件总线
 Nest stdout ---line--> LogTailer --parse--> 事件总线
                                                    │
                     ┌──────────────────────────────┼───────────────────────┐
                     ▼                              ▼                       ▼
-          .studio/runtime/*.jsonl           UI 面板（实时）           errorGroups 聚合
+          .tenon/runtime/*.jsonl           UI 面板（实时）           errorGroups 聚合
           （按天轮转，保留 7 天）          （环形缓冲 2000 条）      （指纹去重 + 计数）
 ```
 
@@ -828,25 +903,25 @@ Nest stdout ---line--> LogTailer --parse--> 事件总线
 
 | 概念 | 实现 |
 |---|---|
-| 工作区 | 每应用一个 git 仓库 `~/.studio/apps/<id>/repo` |
+| 工作区 | 每应用一个 git 仓库 `~/.tenon/apps/<id>/repo` |
 | 提交粒度 | **一次 Agent 回合 = 一次 commit**（有实际改动才提交） |
-| commit 元数据 | trailer 记录来源：`Studio-Conversation`、`Studio-Submission`、`Studio-Task`、`Studio-Model` |
+| commit 元数据 | trailer 记录来源：`Tenon-Conversation`、`Tenon-Submission`、`Tenon-Task`、`Tenon-Model` |
 | 分支 | `main` 为开发线；`release/<version>` 由发布创建（只读） |
 | 发布 | `git tag v<yyyy.MM.dd>-<n>` + `git push origin main --tags` |
 | 回滚 | 代码：`git revert <sha>`（生成可追溯的反向提交）；数据：可选 DB 快照还原 |
-| 备份 | 未配置远端时，push 到本地裸库 `~/.studio/backups/<id>.git` |
+| 备份 | 未配置远端时，push 到本地裸库 `~/.tenon/backups/<id>.git` |
 
 ### 12.2 自动提交流程
 
 ```
 submission.done
-  → 计算变更（git status --porcelain，忽略 .studio/、node_modules、*.sqlite）
+  → 计算变更（git status --porcelain，忽略 .tenon/、node_modules、*.sqlite）
   → 质量门禁（§8.6）
   → 生成 message：Conventional Commits，scope 取主要改动目录
       feat(dishes): 新增菜品管理 CRUD
       fix(ui): DishCard 价格字号
       chore(deps): 升级 zod
-  → commit（author = Studio Agent <agent@local>，trailer 写入会话/任务/模型）
+  → commit（author = Tenon Agent <agent@local>，trailer 写入会话/任务/模型）
   → 记录 plan 任务 ↔ commit 映射，推送 UI 版本时间线
 ```
 
@@ -856,7 +931,7 @@ submission.done
 
 代码能回滚，schema 也能回滚（下迁移），但**数据**不一定。策略：
 
-- 每个执行过迁移的 commit → 用 `VACUUM INTO` 生成 DB 快照 `snapshots/<sha>.db`（SQLite 快照很小，按需保留最近 20 个 + 所有 release）
+- 每个执行过迁移的 commit → 用 `pg_dump --format=custom` 生成 DB 快照 `snapshots/<sha>.dump`（保留最近 20 个 + 所有 release）
 - 回滚时可选 `dbRestore: true` → 还原快照（**默认关闭**，UI 明确提示"会丢失此后数据"）
 - 发布时必存快照 → 对应 release 可"回滚到上线版本（含数据）"
 
@@ -919,7 +994,7 @@ CMD ["node", "dist/server/main.js"]
 
 - Nest 用 `ServeStaticModule` 托管 `dist/client`，**只有一个端口**（反代友好）
 - 启动时自动跑迁移（`migrationsRun: true`），DB 落在 `/data` 卷
-- `docker-compose.yml` 提供 SQLite 默认档 + Postgres profile（`--profile pg`）
+- `docker-compose.yml` **默认即含 PostgreSQL**（`db` 服务 + 命名卷 + `service_healthy` 依赖）；`lite` 档仅在本地预览使用，不进生产产物
 - 镜像大小目标 < 250MB（alpine + prod 依赖裁剪）
 
 ### 13.3 发布流程（UI）
@@ -1022,6 +1097,29 @@ CMD ["node", "dist/server/main.js"]
 | 遥测 | **默认关闭**，首次启动明确询问；仅匿名使用统计，可随时关闭 |
 | 数据 | 全部本地；无云端依赖；卸载=删目录 |
 
+### 15.3 沙箱隔离的**平台差异**（重要，别到最后才发现）
+
+`gondolin` 微 VM 是可选的高档隔离，但它的可用性**按平台不同**：
+
+| 平台 | gondolin 后端 | 状态 | 我们的策略 |
+|---|---|---|---|
+| macOS 14+（ARM64）| QEMU（`brew install qemu`）或 krun | ✅ 官方验证最强 | 检测到 QEMU 则启用，否则降级 |
+| macOS（x64）| QEMU | ⚠️ 可用但未重点验证 | 降级 |
+| **Windows x64** | **无原生后端** | ❌ | **不使用 gondolin**，走方案 B（见下） |
+| Linux x64 | QEMU / krun | ✅ | 可用 |
+| Linux ARM64 | krun | ✅ | 可用 |
+
+**方案 B（Windows 与无 QEMU 场景）—— 分级隔离，够用即可：**
+
+1. **L1/L2 内置与官方组件**：不隔离（它们是我们的代码，等价于运行时的一部分）
+2. **L3 社区组件**：独立 Node 子进程 + `NodeExecutionEnv` 受限 cwd + 网络白名单（`net:fetch` 声明的域名）—— **不是 VM 沙箱，但阻断了 FS 越界与任意网络访问**
+3. **Agent 执行的命令**：`beforeTool` 审批门 + 命令白名单，高危操作必须用户确认
+4. **生成应用的构建/运行**：就是本机普通进程 —— 因为**这是用户自己要求生成的代码**，信任模型不同于"执行互联网上下载的任意代码"
+
+**为什么这个降级是可接受的**：妙搭用容器的根本原因是 **多租户 SaaS**（不同客户的应用互相不可信）。Tenon 是**本地单租户**，用户的 Agent 生成的应用与用户自己在终端里 `npm run dev` 的信任级别相同。真正的风险边界在 **L3 社区组件**，那一层我们已经用独立进程 + 权限清单兜住了。
+
+> 如果将来做云端托管（M7+），那里必须用 gondolin 或容器 —— 因为那时才变成多租户。
+
 ---
 
 ## 16. 开源协议与商业化
@@ -1044,13 +1142,21 @@ CMD ["node", "dist/server/main.js"]
 |---|---|---|
 | 单机搭建、全栈生成、Git、Docker 导出 | ✅ | ✅ |
 | 6 Agent 全量、精调、可观测 | ✅ | ✅ |
+| **PostgreSQL 全档供给（含 embedded）** | ✅ | ✅ |
+| **安装免费组件（L1/L2/L3）** | ✅ | ✅ |
 | 团队协作（多人同应用、评论、审批） | ❌ | ✅ |
 | 企业 SSO / RBAC / 审计日志 | ❌ | ✅ |
-| 私有模板市场 / 组织级技能库 | ❌ | ✅ |
+| 私有组件市场 / 组织级组件库 | ❌ | ✅ |
 | 云端同步、远程预览、托管部署 | ❌ | ✅ |
 | 优先级支持 / SLA | ❌ | ✅ |
 
 原则：**个人与小团队永远够用**；企业为"组织与合规"付费，而非为"能不能用"付费。
+
+三条补充说明（v1.1 新增）：
+
+1. **收费组件不绑定版本**。社区版用户也能买、也能装收费组件 —— 组件收入与版本授权解耦，否则会出现"想买组件必须先买企业版"的荒谬组合，反而抑制生态。
+2. **个人免费的口径**是"个人身份使用"（含个人承接的外包交付），**不包括**"作为公司内部平台给多人用" —— 后者需要商业授权。这条要在 LICENSE FAQ 里写清楚，避免歧义。
+3. **不做功能阉割式免费**。所有核心能力（生成、Agent、Git、部署）在社区版完整可用；差异只在"组织能力"与"规模"。
 
 ### 16.3 备选（若你不接受 AGPL）
 
@@ -1075,12 +1181,16 @@ CMD ["node", "dist/server/main.js"]
 | 阶段 | 目标 | 验收（DoD） |
 |---|---|---|
 | **M1 骨架与对话** | monorepo、server、harness 池、SSE、应用注册、Git 自动提交、静态 React 应用预览、Web 模式 | ① `pnpm dev:web` 打开可对话；② 生成一个纯前端 Todo 应用并在 iframe 热更新；③ 每轮产生 commit；④ 杀进程重启后对话续跑 |
-| **M2 全栈生成** | Nest 模板、zod 共享、TypeORM/迁移、CRUD 生成、runtime SDK、日志/错误面板 | ① 生成带 CRUD + 数据库的全栈应用；② Docker 构建成功并跑起来；③ 前端异常出现在错误面板 |
-| **M3 精调与版本** | inspector、框选、截图、Diff 视图、回滚（含 DB 快照）、发布 push | ① 点选元素改样式并自验；② 框选区域批量改；③ 回滚到任意 commit，代码与数据一致 |
-| **M4 多 Agent 与可观测增强** | 6 角色子 Agent、E2E 自验收、Reviewer、用量/预算、状态面板 | ① E2E 子 Agent 能发现并修复一个注入的 bug；② 用量按档位可查；③ 超预算拦截 |
-| **M5 打磨与开源** | 视觉/动效打磨、i18n、引导、文档站、CI（三平台）、协议与商标、首个 release | ① 三平台安装包；② 新人 10 分钟跑通首个应用；③ 协议文件与贡献流程齐备 |
+| **M2 全栈生成** | Nest 模板、zod 共享、TypeORM/迁移、**PostgreSQL 四档供给**、CRUD 生成、runtime SDK、日志/错误面板 | ① 生成带 CRUD + 真 PG 的全栈应用；② `lite` 与 `embedded` 两种模式跑同一份 migration；③ Docker compose（含 db）构建并跑起来；④ 前端异常出现在错误面板 |
+| **M3 精调与版本** | inspector、框选、截图、Diff 视图、回滚（含 `pg_dump`/`pg_restore`）、发布 push | ① 点选元素改样式并自验；② 框选区域批量改；③ 回滚到任意 commit，代码与数据一致 |
+| **M4 多 Agent 与可观测增强** | 6 角色子 Agent、E2E 自验收、Reviewer、用量/预算、`taskGraph` 状态面板 | ① E2E 子 Agent 能发现并修复一个注入的 bug；② 任务图实时反映子会话；③ 超预算拦截 |
+| **M5 组件体系（内部定型）** | chord 宿主接入、6 个标准插槽、`install_component` 工具、L1 内置积木清单、L2 首发 3 个官方组件（AI 小助手 / Excel 导出 / 审批流）| ① 用一句话给应用装上 AI 小助手并可用；② 卸载后代码与 `AGENTS.md` 同步清理；③ 组件热重载不丢状态 |
+| **M6 平台化与开源** | **macOS + Windows 双平台安装包**、组件市场（免费/收费 + license 校验）、视觉/动效打磨、i18n、文档站、CI、协议与商标 | ① 两平台安装包签名可安装；② 装一个收费组件（离线 license）且未授权用户拿不到方法；③ 新人 10 分钟跑通首个应用；④ 协议文件与贡献流程齐备 |
+| **M7（后置）** | Linux、团队协作、托管能力 | 视社区反馈 |
 
-依赖：M2 依赖 M1 的 harness 与事件流；M3 依赖 M2 的源码定位；M4 依赖 M3 的预览 API。
+依赖关系：M2 依赖 M1 的 harness 与事件流；M3 依赖 M2 的源码定位；M4 依赖 M3 的预览 API；M5 依赖 M2 的应用装配；M6 依赖 M5 的组件协议。
+
+> **平台顺序的说明**：Windows 与 macOS 的技术差异集中在三处 —— ① `embedded-postgres` 二进制与路径（已确认有 windows-x64 包）；② 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；③ godolin 微 VM **在 Windows 无原生后端**（需 WSL2）。所以 M1 就要同时在这两个平台冒烟，不能留到 M6 才发现问题。
 
 ---
 
@@ -1096,18 +1206,38 @@ CMD ["node", "dist/server/main.js"]
 | Docker 环境不可用 | 中 | 默认导出上下文 + 命令，不强制本机构建 |
 | LLM 成本失控 | 中 | 预算熔断 + 档位路由（简单任务用 fast）+ 用量面板 |
 | AGPL 影响商业采用 | 中 | Runtime SDK/模板 Apache-2.0；双许可；FAQ 解释 |
-| 多端路径差异（Windows） | 低 | 统一 `pathe`/`node:path`；CI 覆盖 Windows |
+| 多端路径差异（Windows）| 低 | 统一 `pathe`/`node:path`；CI 覆盖 Windows |
+| **`embedded-postgres` 仍是 beta 版本号**（18.6.0-beta.x）| 中 | 二进制本身是官方 PG 构建，风险在 wrapper API；用 `packages/db-provisioner` 隔离，并提供 `docker`/`external` 兜底；CI 锁版本 + 冒烟 |
+| **Windows 无 gondolin 后端** | 中 | 见 §15.3 方案 B（独立子进程 + 权限清单），并明确文档化能力差异 |
+| **社区组件可访问用户应用数据** | **高** | L3 强制独立子进程 + `manifest.permissions` 逐条确认 + 无 `host.serve` 级能力；官方 L2 走签名 |
+| **收费组件被绕过** | 中 | 授权在服务端 `principal` 层，非前端开关；license 用 Ed25519 签名 |
+| PG 首次下载慢（embedded 模式，~30MB）| 低 | 安装包内置常用平台二进制（增量下载兜底）；首次引导显示进度 |
+| 组件插槽被滥用导致 UI 冲突 | 低 | 只开放 6 个标准插槽；同插槽多组件按 `order` 排序并限流 |
 
 ---
 
-## 19. 待确认问题（需要你拍板）
+## 19. 决策记录与待确认问题
 
-1. **产品名**：必须避开「妙搭 / Miaoda / 飞书」。候选：`Workbench`（太通用）、`Forge`、`小作坊 / Workshop`、`Dockit`、`造物台`、`Loom`。你偏好中文名还是英文名？
-2. **生成应用默认数据库**：SQLite（简单、零运维）为主，Postgres 只作为 compose profile？还是反过来？
-3. **首发平台**：macOS 优先（你在 mac 上开发），Windows 同期跟上还是后置？
-4. **是否要多人协作**：pi-durable 天然支持多端同会话，但产品层（权限/评论/冲突提示）成本不小。M5 前只做单人？
-5. **商业版边界**：上表（§16.2）你认可吗？尤其是"团队协作"放商业版这条。
-6. **代码可见性**：M1-M2 是否给用户只读代码（Monaco 只读 + Diff），M3 再开放可编辑？还是从一开始就允许直接改文件？
+### 19.1 已拍板（2026-10-31 v1.1）
+
+| 议题 | 决定 |
+|---|---|
+| 产品名 | **Tenon / 榫**（§1.5）|
+| 生成应用数据库 | **PostgreSQL 默认**，四档供给（§6.4）|
+| 首发平台 | **macOS + Windows**（Linux 随 M5）|
+| 商业边界 | 认可 §16.2 那张表 |
+| 商业模式 | **个人免费**；组件市场分免费/收费（§21.5）|
+| 桌面框架 | Electron 39.x（已定）|
+| 发布方式 | Docker 产物优先（已定）|
+| LLM | BYOK 多提供商（已定）|
+
+### 19.2 仍待你确认（不阻塞 M1，但影响 M2 之后）
+
+1. **代码可见性节奏**：M1-M2 只给只读 + Diff，M3 再开放可编辑？还是从一开始就能直接改文件？（我的建议：M1 只读 + Diff，因为此时代码质量还在建立信任）
+2. **收费组件的结算方式**：① 自带 license 文件离线校验（无服务端，符合开源调性，但易被绕过）；② 官方市场 + 在线许可（可控，但引入服务端依赖）；③ 两者都支持（推荐）。你倾向哪种？
+3. **个人免费的具体边界**：是否对"个人商用"也免费（如个体户用 Tenon 做外包交付）？这会影响后续定价与授权文案。
+4. **插件市场的审核策略**：开放上架（快，但有安全风险，插件能访问用户代码）还是先官方精选 + 白名单（慢，但可控）？
+5. **Linux 支持的时间点**：M5 一起发，还是等 mac/win 稳定后单独发？
 
 ---
 
@@ -1120,11 +1250,141 @@ CMD ["node", "dist/server/main.js"]
 3. **方案分支对比**：`conversation.fork` + 两条 commit 线，UI 上并排看两个实现
 4. **数据种子与演示数据**：新应用自动准备示例数据，预览不空
 5. **OpenAPI 自动文档**：生成应用自带 `/api/docs`，同时供前端类型生成
-6. **模板/技能市场**：垂直模板（CRM、工单、进销存）+ 可复用技能（导出 Excel、发通知）
-7. **自动化触发器**：定时/Webhook（妙搭有，我们 M5 后可做，本地 cron + 端点）
-8. **多环境**：dev / staging / prod 三套端口与数据库，一键切换与回滚
-9. **成本可视化**：按应用/按 Agent/按天，让"用 AI 开发"的成本可预期
-10. **离线模式**：Ollama / vLLM（pi-ai 已支持 OpenAI 兼容），无网也能改代码
+6. **自动化触发器**：定时/Webhook（妙搭有，我们 M5 后可做，本地 cron + 端点）
+7. **多环境**：dev / staging / prod 三套端口与数据库，一键切换与回滚
+8. **成本可视化**：按应用/按 Agent/按天，让"用 AI 开发"的成本可预期
+9. **离线模式**：Ollama / vLLM（pi-ai 已支持 OpenAI 兼容），无网也能改代码
+10. **pgvector 记忆检索**：应用级记忆从"文件全文"升级为"向量召回"（既然已经是真 PG，pgvector 是白送的）
+
+---
+
+## 21. 插件与组件生态（需求 5 深化）
+
+这是"应用里加 AI 小助手、组件分免费/收费"的落地设计。**结论先说：不要自研插件框架，直接用 chord。**
+
+### 21.1 为什么是 chord，而不是自己定一套
+
+| 自研插件框架要解决的问题 | chord 是否已解决 |
+|---|---|
+| 插件跨进程（server / worker / 浏览器 tab）| ✅ 对象在地址上，引用跨进程可用 |
+| 状态同步到 UI | ✅ 状态是可观察 JSON，远程订阅者拿快照 + 增量 |
+| 热重载（改插件代码不重启应用）| ✅ 在飞的工作用旧代码跑完，状态保留，不兼容变更在安全点迁移 |
+| 运行时权限（谁能调用什么）| ✅ `principal`（owner/guest）拿到**不同的对象与不同方法** |
+| 契约版本兼容 | ✅ contract 带 `version`，声明式校验（TypeBox）|
+| 宿主与插件的调用开销 | ✅ 同进程走 memoryLink，跨进程走 IPC/WebSocket，同一套代码 |
+
+自研的代价是"再造一个 chord"（chord 本身 2.3MB 源码 + 完整 spec），收益为零。**我们只在它之上定义"应用级组件规范"与"市场协议"。**
+
+### 21.2 组织方式：一个组件 = 一个插件 = 一份 contract
+
+```text
+plugins/ai-assistant/          # 一个组件
+├── contract.ts                # ★ 唯一对外契约：对象、状态、方法、版本
+├── server.ts                  # 宿主 facet：后端实现（调 LLM、读写 DB）
+├── web.tsx                    # 宿主 facet：前端 UI（悬浮球、侧栏、气泡）
+├── worker.ts                  # 可选：后台任务 facet（索引、定时）
+├── manifest.json              # 元数据：名称、图标、定价、权限声明、依赖
+└── README.md                  # 给 Agent 读的用法说明（进 AGENTS.md 索引）
+```
+
+```ts
+// plugins/ai-assistant/contract.ts —— 这就是"卯眼"的尺寸公差
+import { Type } from 'typebox'
+import { hostNamed, method, remote } from '@earendil-works/chord'
+
+export const AiAssistant = remote('tenon.assistant', {
+  version: 1,
+  input: Type.Object({ appId: Type.String() }),
+  host: hostNamed('server'),
+  variants: {
+    // ★ 两种 principal 看到两种对象：未授权只能看，授权后可调用
+    guest: {
+      state: { status: Type.String(), quotaUsed: Type.Number() },
+      methods: { peek: method(Type.Object({})) },
+    },
+    licensed: {
+      state: { status: Type.String(), quotaUsed: Type.Number(), history: Type.Array(Type.Object({ role: Type.String(), text: Type.String() })) },
+      methods: {
+        ask: method(Type.Object({ text: Type.String() })),
+        summarize: method(Type.Object({ scope: Type.String() })),
+      },
+    },
+  },
+})
+```
+
+**关键点：收费不是"前端藏按钮"，是服务端根本不下发方法。** 未购买的用户即使改了前端代码，`ask` 也不存在。这是 chord `principal` 白送的安全性，比任何前端开关都可靠。
+
+### 21.3 组件如何被"插进应用"
+
+Agent 不手写接线代码，而是执行一个**标准动作**（内部工具 `install_component`）：
+
+1. 读 `manifest.json` → 检查依赖、权限、宿主兼容性
+2. 写一份**装配声明**到应用仓库 `app.components.json`：
+
+```json
+{
+  "components": [
+    { "id": "tenon.assistant", "version": "^1.2.0", "license": "free",
+      "mount": [{ "host": "web", "slot": "app.shell.overlay", "order": 100 },
+                { "host": "server", "slot": "app.api", "prefix": "/_c/assistant" }] },
+    { "id": "tenon.excel-export", "version": "^0.9.0", "license": "paid:tenon.excel-export",
+      "mount": [{ "host": "server", "slot": "app.api", "prefix": "/_c/excel" }] }
+  ]
+}
+```
+
+3. 由**壳生成器**在应用启动时按声明加载 facet（`host.load([...])`），生成 `src/components.generated.ts`
+4. 若有插槽 UI，在 App Shell 的固定插槽渲染（`app.shell.overlay` / `app.sidebar.bottom` / `app.page.header`）
+
+**插槽（slot）是稀缺资源，必须标准化。** 我建议 V1 只定义 6 个插槽，不要开放任意位置：
+
+| 插槽 | 位置 | 典型组件 |
+|---|---|---|
+| `app.shell.overlay` | 全屏浮层（悬浮球、全局 AI） | AI 小助手 |
+| `app.shell.sidebar.bottom` | 侧边栏底部 | 帮助、反馈 |
+| `app.page.header` | 页面标题右侧 | 导出、打印、分享 |
+| `app.page.toolbar` | 表格/列表工具栏 | 批量操作、字段设置 |
+| `app.detail.panel` | 详情页侧栏 | 关联数据、评论 |
+| `app.api` | 后端路由前缀 | 所有后端能力 |
+
+### 21.4 三层组件体系（区分来源与信任级别）
+
+| 层 | 来源 | 信任 | 安装方式 | 例子 |
+|---|---|---|---|---|
+| **L1 内置积木** | 我们官方，随 Tenon 发布 | 完全信任 | 无需安装，Agent 直接调用 | 表格、表单、图表、登录、文件上传、权限 |
+| **L2 官方组件** | 我们官方市场 | 签名校验 | 一键装，自动更新 | AI 小助手、Excel 导出、审批流、地图 |
+| **L3 社区组件** | 第三方开发者 | 沙箱 + 权限清单 | 显式确认权限后安装 | 行业专属（餐饮菜单、教培排课）|
+
+L3 必须有真实隔离：**不能给社区插件 `host.serve` 级别的能力**，因为那等于给任意代码访问应用数据库。方案：
+- L3 插件跑在**独立子进程**（`chord/node` 的 `createHostManager`），只通过 contract 暴露的 RPC 通信
+- 文件系统访问走 gondolin 微 VM 或受限 `NodeExecutionEnv`（Windows 见 §15.3）
+- `manifest.json` 的 `permissions` 声明（db:read / db:write / net:fetch / fs:app）在安装时逐条弹窗
+
+### 21.5 免费 / 收费组件的商业模式
+
+| 维度 | 免费组件 | 收费组件 |
+|---|---|---|
+| 分发 | 官方市场，公开可下载 | 官方市场，需购买后下载 |
+| 授权 | 无需 license | `license.json`（签名，绑定用户/组织 ID），离线可校验 |
+| 运行时 | `guest` + `licensed` 都给 | 只有有效 license 才拿到 `licensed` 这个 variant |
+| 更新 | 自动 | 自动（license 有效期内）|
+| 计价 | 免费 | 一次性买断 / 年订阅 / 按用量（AI 类）|
+
+**推荐的双轨结算**（对应 §19.2 第 2 问，我倾向 ③）：
+- **离线优先**：license 文件用 Ed25519 签名，公钥内置在 Tenon 里，`offline` 校验。企业内网也能用
+- **在线增强**：登录官方账号可自动同步已购组件、跨设备、订阅续费；未联网时降级为"只读已装组件"
+- **分成**：社区开发者 7:3（开发者 7），官方组件不分成
+
+**为什么个人免费能成立**：个人免费带来生态规模，组件销售与企业版带来收入。这与 VS Code / JetBrains 的路径一致 —— 免费 IDE 不赚钱，插件市场和企业授权赚钱。
+
+### 21.6 与 Agent 的协同（组件要"可被理解"）
+
+组件不是装完就完事，**Agent 必须知道它存在、能干什么、怎么用**，否则改两次代码就把组件绕过或改坏了。三个机制：
+
+1. `manifest.json` 必须含 `agentHints`（自然语言说明 + 用法示例），安装时自动写入应用的 `docs/AGENTS.md` 的「已装组件」小节
+2. 卸载/更新组件时，`AGENTS.md` 同步更新（由 `install_component` / `remove_component` 工具负责）
+3. 系统提示里注入**当前已装组件清单**（只注入 id + 一句话能力，不注入全文，避免撑爆上下文）
 
 ---
 
@@ -1135,15 +1395,20 @@ CMD ["node", "dist/server/main.js"]
 | Tauri 2 + Rust 核心 | ❌ 废弃 → Electron + Node | 用户要求用 pi 生态（TS）；且 Rust 侧无法复用 pi |
 | 8 个 Rust crates | ❌ 废弃 → TS packages | 同上 |
 | 自托管单二进制（rust-embed + Axum） | ❌ 废弃 → Docker 单容器 | 用户要求 Docker 部署；标准栈更易维护 |
-| SQLite 数据层 | ✅ 保留 | 仍然正确 |
+| 生成应用默认 SQLite | ❌ 废弃（v1.1）→ **PostgreSQL** | 需求升级为"高性能应用 + 通用组件 + AI 小助手"，SQLite 在多写并发/扩展生态（pgvector、LISTEN/NOTIFY）上是硬短板；且切库要重写迁移 |
+| `chord` 列为"可选，M5 再引入" | ❌ 废弃（v1.1）→ **基座，M5 主线** | 实际读源码后确认它就是插件生态的标准答案，晚引入等于先自研一遍再推翻 |
 | BYOK 多提供商 | ✅ 保留并强化 | pi-ai 直接覆盖 |
 | Git 版本管理 | ✅ 升级为一等公民 | 用户明确要求 |
 | Apache-2.0 | ⚠️ 调整 | 改为 AGPL + Apache 双轨（商业护城河） |
 
-## 附录 B：验证清单（写代码前先验证的三件事）
+## 附录 B：验证清单（写代码前先验证的四件事）
 
-1. **pi-durable 最小闭环**：`Harness.open` + `submit` + `watchEvents` 能在一个真实应用目录上跑通流式输出与 `resume()`
-2. **App Gateway 代理 HMR**：Vite HMR WebSocket 经自建网关可用（这是预览体验的命门）
-3. **源码定位插件**：JSX 上 `data-studio-loc` 能准确对应 file:line（尤其经 Tailwind/shadcn 组合组件后）
+1. **pi-durable 最小闭环**：`Harness.open` + `submit` + `watchEvents` 在真实应用目录跑通流式输出与 `resume()`
+2. **App Gateway 代理 HMR**：Vite HMR WebSocket 经自建网关可用（预览体验的命门）
+3. **源码定位插件**：JSX 上 `data-tenon-loc` 能准确对应 file:line（尤其经 Tailwind/shadcn 组合组件后）
+4. **★ PG 四档供给互通**（v1.1 新增）：同一份 TypeORM migration 能在 `lite` / `embedded` / `docker` 三种供给下跑通，且切换不改代码 —— 这是"开发态与生产一致"的唯一验证点
 
-这三件事任一不成立，方案需要局部调整 —— 建议 M1 第一周就做掉。
+前三条任一不成立，方案需局部调整；第 4 条不成立，则"高性能应用"这个定位站不住。建议 M1 第一周全部做掉。
+
+> 已完成的前置验证（2026-10-31）：`embedded-postgres` 18.6 的 darwin-arm64 / windows-x64 / linux-arm64 平台包均存在；`@electric-sql/pglite` 0.5.13 + `pg-gateway` 0.3 可提供 TCP 协议；Electron 39.8.9 内置 Node 22.22.1 满足 pi 全家 `>=22.19` 要求。
+
