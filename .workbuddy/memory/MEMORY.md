@@ -6,8 +6,8 @@
 隐喻：榫卯不用钉子靠构件咬合 = 应用由标准组件咬合，Agent 只做设计与搭接。
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
-## 当前状态（2026-10-31 深夜）
-**M1 全部 9 步 + M2 第 1 步完成** → DESIGN **v1.2.7**。七个包 + 两个 app（`apps/web` 渲染器、`apps/desktop` 壳）。
+## 当前状态（2026-11-01）
+**M1 全部 9 步 + M2 第 1、2 步完成** → DESIGN **v1.2.8**。七个包 + 两个 app（`apps/web` 渲染器、`apps/desktop` 壳）。
 服务能起、能对话（SSE 流式）、能落库、每轮自动 git 提交、崩溃后续跑；
 Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮的 commit；
 `pnpm dev:web` 一条命令起界面，改 `repo/src/App.tsx` → iframe 当场变（HMR 经网关）；
@@ -15,9 +15,13 @@ Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮�
 **M2-1：生成的应用有后端了** —— `packages/db-provisioner`（pglite 默认 / postgres 发布，`poolMax()` 恒 1）+
 `templates/nest-api`（NestJS 11 + TypeORM + PG 方言 + zod 共享层，**迁移只写一份两档同跑**）+
 `preview.start` 双进程（网关按 `/api` 最长前缀分流）；应用侧只认 `DATABASE_URL`（+ 容量参数 `DATABASE_POOL_MAX`）。
-`pnpm typecheck` 14 project + `pnpm test` 105 项 + `smoke` 9 + `e2e:preview` 14 + `e2e:fullstack` + `smoke:desktop(:packaged)` 8 全绿。
-**下一步**：M2 第 2 步 —— runtime SDK + 日志/错误面板 → `pg_dump` 跨档迁移到 Docker PG → Docker compose 产物。
-**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 M2-1 验收 / §4.5 下一步拆解 / §4.6 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`。
+**M2-2：可观测了** —— `gateway/src/logs.ts` 的 `LogStore` 三来源汇流（子进程行钩子 / 页面经
+`POST /__tenon/log` 网关拦截不上传 / 平台节点），`app.log` SSE + `logs.list|clear` RPC，
+模板零依赖上报（`tenon-log.ts` + `tenon-boundary.tsx`），`apps/web` 有 `LogPanel` 底栏；
+日志跟应用走不跟预览跑（停预览缓冲还在）。
+`pnpm typecheck` 14 project + `pnpm test` 128 项 + `smoke` 9 + `e2e:preview` 14 + `e2e:fullstack`（含日志断言）+ `smoke:desktop(:packaged)` 8 全绿。
+**下一步**：M2 第 3 步 —— runtime SDK（收编 `tenon-log` 成 `@tenon/runtime`）→ `pg_dump` 跨档迁移到 Docker PG → Docker compose 产物。
+**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.5 M2-2 验收 / §4.6 下一步拆解 / §4.7 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`。
 
 ## 三条铁律
 1. **Electron 只做壳**，业务全在本地 HTTP Server（否则 Web 模式 / Agent 自调试 / SaaS 化全废）
@@ -90,6 +94,15 @@ Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮�
 - **`DATABASE_POOL_MAX` 是容量参数不是环境判断**：只用于 `extra.max`（PGlite 档由 provisioner 注入 1）；不许用来判断 desktop/docker/cloud（铁律 2）
 - **`readiness` 是四格 `deps/db/server/preview`**（不是 `api`）；后端起没起看 `apiPort`，纯前端应用必须 `null`
 - **本机跑测试要 `env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE`**：注入的 `node-language-shim` 让写文件密集用例慢 10 倍 → PGlite 用例全撞 30s 超时（看着像代码坏了）
+
+## 日志链路硬约束（v1.2.8，M2 第 2 步实测）
+- **`POST /__tenon/log` 必须在网关层路由分发之前拦下**，回 204、不转发上游（它是平台通道不是应用 API；转发只会 404 + 污染应用 4xx 统计）
+- **子进程输出先 `stripAnsi` 再去重**：Vite/Nest 的颜色码（`\u001B[32m`）会让同句去重失效、界面满屏 `[2m`
+- **`LogStore` 合并后照样推 SSE**：去重是 `repeat++` 且 id 不变，前端按 id upsert 才是"一条 ×N"；把重复那条吞掉 = 计数永远停在 1
+- **日志跟应用走不跟预览跑**：停预览缓冲还在（用户回看刚才的报错是主场景）；`app.delete` 才 `forget()`
+- **tsc 编译报错归 `api` 来源**（它同样意味着"后端起不来"），别单独开 `tsc` 来源
+- **页面上报不带任何平台凭证**：同源相对路径 + `keepalive` 就够；往上报里塞 `window.__TENON__.token` 是把平台凭证引进生成应用（违反铁律 2 方向）
+- **SSE 新增事件三处要同步**：`events.ts` 的 union、`event-names.ts`（穷尽闸门）、前端 reducer 的 case（TS exhaustive 只盖有 discriminated union 的地方）
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程
