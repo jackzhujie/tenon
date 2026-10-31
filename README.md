@@ -17,7 +17,7 @@
 - 🎯 **精调**：点选页面元素或框选区域 → 源码级定位 → 一句话改 UI / 修 Bug
 - 🔍 **可观测**：运行时日志、异常聚合、应用状态（任务图）、用量面板，错误一键交给 Agent 修复
 - 🌿 **Git 一等公民**：一轮对话一次 commit，发布 push + tag，任意回滚（可含数据快照）
-- 🐘 **生产级数据层**：生成的应用默认 PostgreSQL（真 PG，非模拟），本地免安装、Docker 一键上线，切换不改一行代码
+- 🐘 **生产级数据层**：生成的应用统一用 **PostgreSQL 方言**；本地默认 PGlite（WASM 版 PG，零安装、零原生依赖），发布切真 PG，**切换不改一行代码**
 - 📦 **Docker 部署**：生成标准 NestJS + React 全栈应用，导出多阶段构建的 Docker 产物，compose 自带数据库
 - 🧠 **应用自带记忆**：`docs/AGENTS.md` + ADR + learnings，Agent 越用越懂这个项目
 
@@ -33,15 +33,17 @@
 
 | 文档 | 内容 |
 |---|---|
-| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
+| [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、M1 任务清单、已知陷阱 |
+| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
 | [逆向工作手册](docs/REVERSE_ENGINEERING.md) | 内部研究用（不随开源发布） |
 
 ## 状态
 
-M0 逆向研究完成；详细方案 v1.1 定稿（数据库、组件生态、平台、命名已定）。下一步进入 M1 骨架实施。
-路线图见 [DESIGN.md §17](docs/DESIGN.md)。
+M0 逆向研究完成；详细方案 **v1.2** 定稿（数据库两档化、插件分发三阶段、Electron 与 SaaS 正交）。**代码尚未开始**。
+
+下一步进入 **M1 骨架与对话** —— 任务清单、第一周的 4 个 spike、验收标准与已知陷阱见 [STATUS.md](docs/STATUS.md)；路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License
 
