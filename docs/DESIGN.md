@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2
+# DESIGN.md — 详细方案设计 v1.2.1
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -598,10 +598,15 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 
 | 限制 | 影响 | 缓解 |
 |---|---|---|
-| **单连接串行** | TypeORM 默认连接池 10，连 `pg-gateway`（0.3.0-beta.4）会串行化，高并发请求可能超时 | `pool.max = 1~2`；NestJS 侧单例连接；Gateway 做请求队列 |
+| **单连接串行** | TypeORM 默认连接池 10，连 `pg-gateway`（0.3.0-beta.4）会串行化，高并发请求可能超时 | **`pool.max = 1`（硬约束，不是调优建议）**；NestJS 侧单例连接；Gateway 做全局请求队列 |
 | **性能约为原生 1/3~1/5** | 数据量大或复杂聚合会明显变慢 | 只做开发/预览/单用户；超阈值时 UI 提示"升级到 PostgreSQL"并给一键迁移 |
 | **扩展受限** | PostGIS 等需外部依赖的扩展不可用 | 常用扩展可通过 `@electric-sql/pglite/vector` 等子入口加载（**pgvector 可用**，AI 小助手的向量检索不受影响）|
 | **0.x 版本** | API 可能变 | 与 pi 全家同样策略：`save-exact` 锁版本 + 适配器隔离，业务代码只见 `DatabaseProvider` 接口 |
+| **单 backend 会话（实测新增）** | `pool.max>1` 时两条连接的开事务落在**同一个 backend** 上，一条 `ROLLBACK` 会把另一条已写入未提交的行一起抹掉 —— 是**静默数据损坏**，不是性能问题 | `pool.max` 写死为 1 并在代码里注释原因；要并行只能靠网关队列，不能靠加连接 |
+
+> **`pool.max` 实测依据（v1.2.1，见 `docs/SPIKES.md` §1）**：pool=1 时 20 并发事务 P95 = 74.8ms 且语义正确；pool=2 时同一测试出现"A 事务两行只剩一行"。而 pool=2 对写的 P95 只从 23.5ms 降到 19.0ms（**19%**），收益远不足以承担数据风险。故 `pglite` 档 `pool.max` **恒为 1**。
+>
+> **另一个实测结论**：`LISTEN/NOTIFY` 在 PGlite + pg-gateway 下**收不到通知**（实测 0 条）—— `onMessage` 是一问一答，PGlite 的异步 `NotificationResponse` 没有回推通道。所以「后端改动推前端」只能走网关 SSE，不要指望 PG 通知。
 
 > **为什么不用纯 SQLite**（用户 2026-10-31 提出，已评估并否决）：技术上完全可行（Electron 内置 Node 自带 `node:sqlite`，零依赖零体积，已实测确认）。但有两个长期代价：① **方言分裂** —— 本地 SQLite 而 SaaS 云端必须 PG，`jsonb`/数组/`timestamptz`/全文检索全不同，TypeORM 只能退化兼容，最终以"本地跑通、上云炸"的形式爆雷；② **AI 生成质量** —— SQLite 是动态类型，类型写错运行时静默通过，而 PG 会直接报错，对"生成代码"场景，严格性就是质量。PGlite 同时拿到了 SQLite 的零安装与 PG 的方言，是这两个约束的交集。
 
@@ -803,6 +808,10 @@ App Gateway  http://127.0.0.1:<gwPort>     ← iframe / 浏览器访问的唯一
 
 理由：**端口稳定**（iframe 不因重启换 URL）、**单源**（无 CORS）、**HMR 可用**（自己代理 upgrade）、**便于内网穿透/远程预览**。
 
+> **实测确认（v1.2.1，`docs/SPIKES.md` §3）**：改文件 → HMR `update` 经网关送达 **134ms**；上游 Vite 重启换端口后 `updateRoute()` 只改指向，iframe URL 不变且 HMR 能在同一网关端口重连。
+>
+> 实现两条要点：① upgrade 用**原样 TCP 透传**（自己重放 `req.rawHeaders`）比 http-proxy 稳，`Sec-WebSocket-Protocol: vite-hmr` 能完整保留；② 客户端必须在握手前挂好 `message` 监听，否则丢掉 Vite 的 `connected` 首帧。
+
 Vite 侧配置：
 
 ```ts
@@ -847,8 +856,16 @@ UI 在未 ready 时显示分阶段进度（照搬妙搭「分维度 ready」的�
 
 Vite 插件 `tenon-inspector-plugin`（仅 dev 生效）做两件事：
 
-1. **源码定位**：Babel 转换时给每个 JSX host 元素加 `data-tenon-loc="src/components/DishCard.tsx:42:7"`，并记录组件栈
+1. **源码定位**（v1.2.1 实测修正，见 `docs/SPIKES.md` §4）：Babel 转换时按标签类型注入**两个**属性
+   - 原生标签（`div`/`button`/`span`…）→ `data-tenon-loc="src/components/DishCard.tsx:42:7"`
+   - 组合组件（`<Button>`/`<Card>`…）→ `data-tenon-callsite="src/pages/products.tsx:13:9"`，靠组件的 `{...props}` 透传到 DOM
+
+   为什么必须是两个：只标 `loc` 时，点 shadcn 的 `<Button>` 会定位到 `components/ui/button.tsx` 的实现，而用户想改的是"我在这一页用了它"。选中的节点同时带两个属性时，**`callsite` 优先**，`loc` 作为 `secondary`（实现位置）一并带给 Agent。
 2. **注入客户端**：`transformIndexHtml` 插入 `@tenon/runtime-sdk/inspector`
+
+解析规则（`packages/runtime-sdk`）：元素有 `callsite` → `kind:'usage'`；只有 `loc` → 若命中组件库目录（默认 `src/components/ui/`）标 `kind:'component-impl'`（UI 提示"改动影响全局"），否则 `kind:'element'`；都没有则向上查找。
+
+**代价与约束**：这套机制依赖"组件透传 props"。生成器产出的组合组件必须写 `{...props}`（进 `packages/generator` 模板与质量门禁），否则用户点它只能落到实现文件。
 
 交互（对齐主流设计工具习惯）：
 
@@ -865,7 +882,10 @@ Vite 插件 `tenon-inspector-plugin`（仅 dev 生效）做两件事：
 ```ts
 interface SelectionContext {
   kind: 'element' | 'region' | 'error'
-  loc?: { file: string; line: number; column: number; component?: string; stack?: string[] }
+  /** kind: usage=用户写的那行；element=页面里的原生标签；component-impl=组件库实现内部 */
+  loc?: { file: string; line: number; column: number; kind?: 'usage' | 'element' | 'component-impl'; component?: string; stack?: string[] }
+  /** callsite 命中时的组件实现位置，一起给 Agent，便于判断改动影响面 */
+  impl?: { file: string; line: number; column: number }
   selector?: string
   route: string
   rect: { x: number; y: number; width: number; height: number }
@@ -1521,17 +1541,18 @@ L3 必须有真实隔离：**不能给社区插件 `host.serve` 级别的能力*
 
 ## 附录 B：验证清单（写代码前先验证的四件事）
 
-1. **pi-durable 最小闭环**：`Harness.open` + `submit` + `watchEvents` 在真实应用目录跑通流式输出与 `resume()`
-2. **App Gateway 代理 HMR**：Vite HMR WebSocket 经自建网关可用（预览体验的命门）
-3. **源码定位插件**：JSX 上 `data-tenon-loc` 能准确对应 file:line（尤其经 Tailwind/shadcn 组合组件后）
-4. **★ PG 两档供给互通**（v1.2 调整，原为"四档"）：同一份 TypeORM migration 能在 `pglite`（默认）与 `postgres`（Docker）下跑通，切换仅改连接串；从 PGlite `pg_dump` 迁移到 PG 数据零丢失。**另须专项验证 `PGlite + pg-gateway + TypeORM` 在 `pool.max=1~2` 下的稳定性与 P95 延迟** —— 这是本方案唯一的真实技术风险点。
+> **2026-10-31 全部完成 ✅** 详细数据见 `docs/SPIKES.md`，可复跑（`pnpm spike:db|agent|gateway|loc`）。
 
-前三条任一不成立，方案需局部调整；第 4 条不成立，则退回 `embedded` 默认档。
+1. **pi-durable 最小闭环** ✅ 10/10：`Harness.open` + `submit` + `viewState` 流式 + `requestId` 幂等 + 自定义文档 + `taskGraph`；**流式中途 SIGKILL 后 `resume()` 把同一提交从 `placed` 跑到 `done`**（DoD 第 4 条兑现）
+2. **App Gateway 代理 HMR** ✅ 8/8：HMR update 134ms；上游换端口网关 URL 不变
+3. **源码定位插件** ✅ 7/7：改为 `data-tenon-loc`（原生）+ `data-tenon-callsite`（组合组件）双属性，9/9 定位可回溯
+4. **★ PG 两档供给互通** ⚠️ **有条件通过**：PGlite 侧全部跑通（迁移/事务/jsonb/窗口函数/递归 CTE 等 8 项方言特性），但**发现 `pool.max>1` 会导致并发事务互相回滚** → `pool.max` 定为 **1**。`pglite → 真 PG` 的数据迁移（`pg_dump` 逻辑导出）尚未实测，列入 M2。
+
 
 > 已完成的前置验证（2026-10-31）：
 > - **pi 全家零原生模块**（解包实测：无 `.node`/`.gyp`/`.dylib`/`.so`/`.dll`/`.wasm`，无平台 `optionalDependencies`）→ Windows 无需 node-gyp / WSL
 > - **Electron 内置 Node 自带 `node:sqlite`**（实测记录：Electron 37.10.3 / Node 22.21.1 提供 `node:sqlite` + SQLite 3.50.4）→ pi-durable 在 `ELECTRON_RUN_AS_NODE` 下可用；产品库可用内置模块，无需 `better-sqlite3`
 > - Electron 39.8.9 内置 Node 22.22.1 满足 pi 全家 `engines >=22.19`
-> - `@electric-sql/pglite` 0.5.13 + `pg-gateway` 0.3.0-beta.4 可提供 TCP 协议（**待补：TypeORM 连接池串行化压测**）
+> - `@electric-sql/pglite` 0.5.13 + `pg-gateway` 0.3.0-beta.4 提供 TCP 协议，**TypeORM 压测已完成**（2026-10-31）：20 并发 P95 14→24ms、零超时；但 `pool.max>1` 会致并发事务互串 → `pool.max=1`。详见 `docs/SPIKES.md`
 > - `embedded-postgres` 18.6 的 darwin-arm64 / windows-x64 / linux-arm64 平台包均存在（现仅作逃生口）
 

@@ -1,0 +1,17 @@
+{
+  "name": "@tenon/spike-gateway",
+  "private": true,
+  "type": "module",
+  "description": "Spike 2：App Gateway 代理 Vite HMR WebSocket（iframe 不直连 dev server）",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "vite": "7.3.7",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1",
+    "tsx": "4.23.15"
+  }
+}

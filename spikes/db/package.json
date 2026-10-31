@@ -1,0 +1,19 @@
+{
+  "name": "@tenon/spike-db",
+  "private": true,
+  "type": "module",
+  "description": "Spike 4：PGlite + pg-gateway + TypeORM 稳定性与延迟压测",
+  "scripts": {
+    "start": "tsx src/stress.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.13",
+    "pg": "8.23.1",
+    "pg-gateway": "0.3.0-beta.4",
+    "typeorm": "1.1.2"
+  },
+  "devDependencies": {
+    "@types/pg": "8.15.6",
+    "tsx": "4.23.15"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "generatedAt": "2026-10-31T05:39:47.740Z",
+  "node": "v22.22.2",
+  "dbPath": "/Users/mac/project/miaoda/spikes/agent/work/session.sqlite",
+  "facts": [
+    {
+      "name": "Harness.open + root",
+      "ok": true,
+      "detail": "node:sqlite storage 打开 9ms，root 会话 id=1"
+    },
+    {
+      "name": "提交 → 等待 → 落库",
+      "ok": true,
+      "detail": "status=done 用 95ms；view 订阅收到 4 次 revision；答案长度 59 字"
+    },
+    {
+      "name": "流式（pi.live 增量）",
+      "ok": true,
+      "detail": "revision 序列（ms/entries）：0:0 → 6:1 → 17:1 → 95:2"
+    },
+    {
+      "name": "requestId 幂等（同一 Submission）",
+      "ok": true,
+      "detail": "第一次 id=8，重放 id=8 → 命中同一提交"
+    },
+    {
+      "name": "自定义文档提交 + 快照",
+      "ok": true,
+      "detail": "3ms，snapshot={\"name\":\"商品管理\",\"styleId\":\"notion\",\"routes\":[\"/products\"]}"
+    },
+    {
+      "name": "taskGraph 跑动中可采样",
+      "ok": true,
+      "detail": "节点 1 个：pi.generation/running；background 标记可用=true"
+    },
+    {
+      "name": "重开 + resume + 按 id 取回提交",
+      "ok": true,
+      "detail": "重开 6ms；root id 一致=true；transcript 4 条；提交状态=done"
+    },
+    {
+      "name": "文档跨重启存活",
+      "ok": true,
+      "detail": "snapshot={\"name\":\"商品管理\",\"styleId\":\"notion\",\"routes\":[\"/products\"]}"
+    },
+    {
+      "name": "子进程流式中途被 SIGKILL",
+      "ok": true,
+      "detail": "exit={\"code\":null,\"signal\":\"SIGKILL\"}；子进程输出：(Use `node --trace-warnings ...` to show where the warning was created) / SUBMISSION_ID=8"
+    },
+    {
+      "name": "重启后续跑同一提交",
+      "ok": true,
+      "detail": "崩溃前状态=placed；resume 后 status=done；耗时 48ms"
+    }
+  ]
+}

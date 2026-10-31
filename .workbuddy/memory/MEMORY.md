@@ -6,14 +6,23 @@
 隐喻：榫卯不用钉子靠构件咬合 = 应用由标准组件咬合，Agent 只做设计与搭接。
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
-## 当前状态（2026-10-31）
-M0 逆向完成 → 方案 **DESIGN v1.2 定稿** → **未开始写代码**，仓库只有 `docs/`。
-**开工入口：`docs/STATUS.md`**（现状/下一步/陷阱/新会话提示词）。`docs/DESIGN.md` 是唯一事实来源。
+## 当前状态（2026-10-31 晚）
+M0 逆向完成 → **DESIGN v1.2.1** → **M1 第一周四个 spike 全部跑通** → 正在做 M1 主干（`packages/` 尚未建）。
+仓库已有 pnpm workspace 骨架 + `spikes/{db,agent,gateway,loc}`（可 `pnpm spike:*` 复跑）。
+**开工入口：`docs/STATUS.md`**；实测数字：**`docs/SPIKES.md`**；方案：`docs/DESIGN.md`（唯一事实来源）。
 
 ## 三条铁律
 1. **Electron 只做壳**，业务全在本地 HTTP Server（否则 Web 模式 / Agent 自调试 / SaaS 化全废）
 2. **生成的应用永不感知运行环境**，只认一个 `DATABASE_URL`
 3. **pi 全家与 PGlite 是实验性 API** → `save-exact` 锁版本 + adapter 包一层
+
+## spike 撞出来的硬约束（v1.2.1，违反会静默坏数据）
+- **`pglite` 档 TypeORM `pool.max` 必须 = 1**：PGlite 只有一个 backend 会话，`pool>1` 时两条连接的事务串到一个 backend，一条 `ROLLBACK` 会抹掉另一条已写入的行（实测丢行）。pool=2 只有 19% p95 收益，不值得
+- **LISTEN/NOTIFY 不可用**（实测 0 条通知）→ 后端推前端只走网关 SSE
+- **`harness.resume()` 每个进程启动必调**，否则崩溃中断的任务不继续
+- **源码定位双属性**：原生标签 `data-tenon-loc`、组合组件 `data-tenon-callsite`（需组件透传 `{...props}`）；点击时 callsite 优先
+- 成本：PGlite 冷启动 2.4s、每应用 pgdata 38MB、dumpDataDir 约 4.5MB/0.7s
+- 无 API Key 也能开发：`pi-ai` 的 `providers/faux`（`fauxProvider()` + `fauxAssistantMessage()`）
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程

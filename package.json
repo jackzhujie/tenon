@@ -1,0 +1,25 @@
+{
+  "name": "tenon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tenon（榫）— 本地优先、可自托管的对话式 AI 全栈应用搭建平台",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "spike:db": "pnpm --filter @tenon/spike-db start",
+    "spike:agent": "pnpm --filter @tenon/spike-agent start",
+    "spike:gateway": "pnpm --filter @tenon/spike-gateway start",
+    "spike:loc": "pnpm --filter @tenon/spike-loc start",
+    "typecheck": "tsc --noEmit -p spikes/db && tsc --noEmit -p spikes/agent && tsc --noEmit -p spikes/gateway && tsc --noEmit -p spikes/loc",
+    "clean": "rm -rf node_modules **/node_modules",
+    "spike:db:probe": "pnpm --filter @tenon/spike-db exec tsx src/probe.ts"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "@types/node": "22.20.5"
+  }
+}

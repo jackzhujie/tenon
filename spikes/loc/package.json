@@ -1,0 +1,23 @@
+{
+  "name": "@tenon/spike-loc",
+  "private": true,
+  "type": "module",
+  "description": "Spike 3：data-tenon-loc 在 JSX（含 Tailwind/shadcn 组合组件）上的定位精度",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@babel/core": "8.0.10",
+    "@babel/preset-react": "8.0.1",
+    "@babel/preset-typescript": "8.0.7",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tsx": "4.23.15",
+    "esbuild": "0.28.2",
+    "linkedom": "0.18.14"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@tenon/spike-agent",
+  "private": true,
+  "type": "module",
+  "description": "Spike 1：pi-durable 最小闭环（Harness.open / submit / 事件流 / resume）",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "inspect": "tsx src/inspect-api.ts"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15"
+  }
+}
