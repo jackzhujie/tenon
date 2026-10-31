@@ -7,10 +7,11 @@
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
 ## 当前状态（2026-10-31 深夜）
-M0 逆向完成 → **DESIGN v1.2.2** → 四个 spike 全过 → **M1 主干第 1~6 步已落地**（提交 `599ed98`）。
-已建 `packages/{protocol,core,agent,server}`：服务能起、能对话（SSE 流式）、能落库、能每轮自动 git 提交、崩溃后 `resume()` 续跑。
-`pnpm test` 28 项 + `pnpm smoke` 9 项全绿；`pnpm dev:faux` 不需要任何 API Key 就能起服务。
-**下一步**：工具层（read/write/edit/bash）→ generator → `packages/gateway`（预览）→ `apps/web`。
+M0 逆向完成 → **DESIGN v1.2.3** → 四个 spike 全过 → **M1 主干第 1~6 步 + 工具层已落地**（`599ed98`、`6f08edb`）。
+已建 `packages/{protocol,core,agent,server}`：服务能起、能对话（SSE 流式）、能落库、能每轮自动 git 提交、崩溃后 `resume()` 续跑，
+**Agent 有 read/write/edit/bash 四个工具、写完的文件进得了这一轮的 commit**。
+`pnpm test` 33 项 + `pnpm smoke` 9 项全绿；`pnpm dev:faux` 不需要任何 API Key 就能起服务。
+**下一步**：generator（react-vite 模板）→ `packages/gateway`（预览）→ `apps/web`。
 **开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 下一步拆解 / §4.5 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`（唯一事实来源）。
 
 ## 三条铁律
@@ -33,6 +34,15 @@ M0 逆向完成 → **DESIGN v1.2.2** → 四个 spike 全过 → **M1 主干第
 - **SSE 必须"先连上再提交"**（建连即写 `: connected`），与 Vite HMR 首帧同一个坑
 - **`defineDoc<T>` 的 T 必须用 `type` alias**（interface 拿不到隐式索引签名，`JsonObject` 约束会挂）
 - **BYOK 密钥不能进 `process.env`**（生成应用子进程会继承）→ `createProvider` + `@earendil-works/pi-ai/api/openai-completions` 的 `stream/streamSimple` 现场拼 provider
+
+## 工具层硬约束（v1.2.3）
+- **`pi-coding-agent` 的工具签名 ≠ `pi-durable` 的**：`execute(toolCallId, params, signal, onUpdate, ctx)→AgentToolResult` vs `execute(args, api, context)→ToolExecutionResult` → 必须过 adapter（`packages/agent/src/tools/coding.ts`）
+- **`edit` 入参是 `edits:[{oldText,newText}]`**（不是 old_string/new_string）
+- **`section()` 的 key 只允许 `/^[a-z][a-z0-9_-]*$/`**，点号会让每轮 submit 抛 `INTERNAL`
+- **状态变化必须同时落库 + 推 `app.status`**，否则前端不知道这一轮结束；且**先 commit 再发 idle**
+- **submission settle 回调可能晚于 `close()`** → db 已关 → 必须 `closed` 门 + try/catch（否则"全绿但有 unhandled rejection"）
+- **集成测试闸门等 `app.status: idle`**，不能等 `git.commit`（无改动就没有提交）
+- 未做系统调用级沙箱：文件路径守卫 + bash cwd 钉死 + `scrubEnv` 洗密钥，够了就先用（完备版是 M7）
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程
