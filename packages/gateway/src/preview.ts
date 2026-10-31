@@ -14,15 +14,26 @@
  * 4. **数据库只给全栈应用起。** 纯前端应用连 `db` 这一格都不该 pending。
  * 5. **任何失败都要走 `state: 'failed'` 并带上原因**（含对应子进程的最后几行输出）。
  *    无提示的"没起来"是这类编排代码最常见的坏味道。
+ * 6. **日志跟着应用走，不跟着预览跑**。三个来源（子进程 stdout/stderr、页面主动上报、
+ *    平台自己的判断）都汇进 `LogStore`，预览停掉之后缓冲还在 —— 用户回看报错是主要场景。
  */
 import { existsSync } from 'node:fs'
 import { appPaths, scrubEnv, type TenonHome } from '@tenon/core'
 import { DatabaseManager, type DatabaseProvider } from '@tenon/db-provisioner'
-import type { PreviewState, PreviewStatus, Readiness, SseEventInput } from '@tenon/protocol'
+import type {
+  LogEntry,
+  LogLevel,
+  LogSource,
+  PreviewState,
+  PreviewStatus,
+  Readiness,
+  SseEventInput,
+} from '@tenon/protocol'
 import { isTenonError, TenonError } from '@tenon/protocol'
 import { launchApi, resolveApiEntry, type ApiLauncher } from './api.js'
 import type { Launched } from './child.js'
 import { ensureDeps } from './deps.js'
+import { classifyLine, inputFromError, LogStore, parseClientLog, type LogInput } from './logs.js'
 import { findFreePorts } from './ports.js'
 import { startGateway, type Gateway } from './proxy.js'
 import { launchVite, type Launcher } from './vite.js'
@@ -166,6 +177,7 @@ export class PreviewManager {
   private readonly launch: Launcher
   private readonly launchApi: ApiLauncher
   private readonly databases: PreviewDatabase
+  private readonly store = new LogStore()
   private closed = false
 
   constructor(private readonly options: PreviewManagerOptions) {
@@ -213,6 +225,27 @@ export class PreviewManager {
     }
   }
 
+  /**
+   * 读最近的运行日志。
+   *
+   * 有它才能"切回一个早就跑着的应用还能看到刚才那条报错"——SSE 只推连上之后的事。
+   */
+  logs(
+    appId: string,
+    options: { limit?: number; sources?: LogSource[]; minLevel?: LogLevel } = {},
+  ): LogEntry[] {
+    return this.store.list(appId, options)
+  }
+
+  clearLogs(appId: string): number {
+    return this.store.clear(appId)
+  }
+
+  /** 删应用时连缓冲一起丢，别留下已删应用的日志 */
+  forget(appId: string): void {
+    this.store.drop(appId)
+  }
+
   /** 立刻返回 `starting`；真正的就绪通过 `preview.status` / `waitReady()` 观察 */
   async start(appId: string, options: { restart?: boolean } = {}): Promise<PreviewStatus> {
     if (this.closed) throw new TenonError('PREVIEW_NOT_RUNNING', '服务正在关闭，不能再起预览')
@@ -231,6 +264,7 @@ export class PreviewManager {
     const run = new PreviewRun(appId)
     run.startedAt = Date.now()
     this.runs.set(appId, run)
+    this.pushLog(appId, { source: 'tenon', level: 'info', message: '开始启动预览' })
     this.emit(run)
     void this.execute(run)
     return this.status(appId)
@@ -290,6 +324,11 @@ export class PreviewManager {
         if (run.cancelled) return
         if (result.installed) {
           this.options.log?.(`[tenon] 依赖装好了（${result.durationMs}ms）`)
+          this.pushLog(run.appId, {
+            source: 'tenon',
+            level: 'info',
+            message: `依赖已安装（${result.durationMs}ms）`,
+          })
         }
       }
       run.readiness.deps = 'ready'
@@ -311,6 +350,12 @@ export class PreviewManager {
               })
         }
         if (run.cancelled) return
+        const dbUrl = new URL(run.database.connectionString())
+        this.pushLog(run.appId, {
+          source: 'db',
+          level: 'info',
+          message: `应用数据库就绪 ${dbUrl.host}`,
+        })
       }
       run.readiness.db = 'ready'
       run.readiness.server = apiEntry === null ? 'ready' : 'pending'
@@ -346,7 +391,15 @@ export class PreviewManager {
               // 最长前缀优先：`/api/x` 命中这里而不是兜底的 `/`
               { prefix: '/api', port: apiPort },
             ]
-      const gateway = await startGateway({ routes, port: gatewayPort })
+      const gateway = await startGateway({
+        routes,
+        port: gatewayPort,
+        // 页面主动上报的异常：它归平台，不归任何上游（见 proxy.ts 的 LOG_PATH 注释）
+        onClientLog: (payload) => {
+          const input = parseClientLog(payload)
+          if (input !== null) this.pushLog(run.appId, input)
+        },
+      })
       run.gateway = gateway
       run.url = gateway.url
       if (run.cancelled) {
@@ -361,6 +414,13 @@ export class PreviewManager {
         gatewayPort,
         ...(apiPort === undefined ? {} : { apiPort }),
         env,
+        onLine: (line, stream) => {
+          this.pushLog(run.appId, {
+            source: 'vite',
+            level: classifyLine(line, stream),
+            message: line,
+          })
+        },
       })
       run.vite = vite
       vite.onExit((info) => {
@@ -368,6 +428,12 @@ export class PreviewManager {
         run.state = 'failed'
         run.readiness.preview = 'failed'
         run.error = `dev server 退出了（code=${info.code ?? 'null'} signal=${info.signal ?? '-'}）`
+        this.pushLog(run.appId, {
+          source: 'vite',
+          level: 'error',
+          message: run.error,
+          detail: tailOf(run.vite, 12),
+        })
         this.emit(run)
         void this.teardown(run)
       })
@@ -384,6 +450,13 @@ export class PreviewManager {
           databaseUrl: database.connectionString(),
           poolMax: database.poolMax(),
           env,
+          onLine: (line, stream) => {
+            this.pushLog(run.appId, {
+              source: 'api',
+              level: classifyLine(line, stream),
+              message: line,
+            })
+          },
         })
         run.api = api
         api.onExit((info) => {
@@ -391,6 +464,12 @@ export class PreviewManager {
           run.state = 'failed'
           run.readiness.server = 'failed'
           run.error = `后端退出了（code=${info.code ?? 'null'} signal=${info.signal ?? '-'}）`
+          this.pushLog(run.appId, {
+            source: 'api',
+            level: 'error',
+            message: run.error,
+            detail: tailOf(run.api, 12),
+          })
           this.emit(run)
           void this.teardown(run)
         })
@@ -412,6 +491,11 @@ export class PreviewManager {
       this.options.log?.(
         `[tenon] 预览就绪 ${gateway.url}（应用 ${run.appId}${run.apiPort === null ? '' : `，后端 :${run.apiPort}`}）`,
       )
+      this.pushLog(run.appId, {
+        source: 'tenon',
+        level: 'info',
+        message: `预览就绪 ${gateway.url}${run.apiPort === null ? '' : `（后端 :${run.apiPort}）`}`,
+      })
     } catch (err) {
       if (run.cancelled) return
       await this.fail(run, err)
@@ -462,6 +546,7 @@ export class PreviewManager {
     } else if (stage === 'server') run.readiness.server = 'failed'
     else run.readiness.preview = 'failed'
     this.options.log?.(`[tenon] 预览失败（应用 ${run.appId}）：${run.error}`)
+    this.pushLog(run.appId, inputFromError(stage === 'db' ? 'db' : stage === 'server' ? 'api' : 'tenon', err, '预览失败：'))
     this.emit(run)
     await this.teardown(run)
   }
@@ -488,6 +573,17 @@ export class PreviewManager {
 
     if (run.state === 'ready' || run.state === 'starting') run.state = 'stopped'
     run.url = null
+  }
+
+  /**
+   * 记一条日志并推给前端。
+   *
+   * `LogStore` 负责去重（同一句在 1 秒内合并成 `repeat`），但**合并后的那条照样推** ——
+   * id 不变，前端按 id upsert，界面上就是一条 `×N`，不会跳行也不会刷屏。
+   */
+  private pushLog(appId: string, input: LogInput): void {
+    const entry = this.store.add(appId, input)
+    this.options.publish?.({ type: 'app.log', appId, entry })
   }
 
   private emit(run: PreviewRun, ready = false): void {

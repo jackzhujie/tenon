@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Header } from './Header.js'
 import { ChatPanel } from '../features/chat/ChatPanel.js'
 import { PreviewPanel } from '../features/preview/PreviewPanel.js'
+import { LogPanel } from '../features/logs/LogPanel.js'
 import { NewAppDialog } from '../features/apps/NewAppDialog.js'
 import { useWorkspace } from '../hooks/useWorkspace.js'
 import { cn } from '../lib/cn.js'
@@ -91,6 +92,14 @@ export function App() {
             onStart={(restart) => void workspace.startPreview(restart)}
             onToggleFullscreen={() => setFullscreen((value) => !value)}
           />
+          {/* 日志在预览下方：它解释的正是"上面这块为什么不动" */}
+          {state.activeAppId !== null && (
+            <LogPanel
+              appId={state.activeAppId}
+              logs={state.logs}
+              onClear={() => void workspace.clearLogs()}
+            />
+          )}
         </section>
       </main>
 

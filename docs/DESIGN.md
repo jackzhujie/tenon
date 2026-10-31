@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.7
+# DESIGN.md — 详细方案设计 v1.2.8
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -955,6 +955,25 @@ server: {
 }
 ```
 
+**★ v1.2.8 补一节（运行日志链路，M2 第 2 步落地）**：网关同时是**日志的汇流点**，
+`packages/gateway/src/logs.ts` 的 `LogStore` 按应用隔离（`Map<appId, entries[]>`，上限截断）。
+
+- **三个来源**：① 子进程 stdout/stderr（`vite` / `api`，经 `spawnLogged` 的 `onLine` 钩子；
+  **tsc 编译报错也归 `api`** —— 它同样意味着"后端起不来"）；② 页面主动上报（`web`：
+  `window.onerror` / `unhandledrejection` / ErrorBoundary → 同源 `POST /__tenon/log`，
+  网关在路由分发**之前**拦下这条路径，回 204，**不转发上游**）；③ 平台自己的关键节点
+  （`tenon` / `db`：启动、依赖装好、库就绪、预览就绪、失败原因 + 子进程尾部输出）。
+- **事件与 RPC**：增量走 SSE `app.log`（带完整 `LogEntry`）；首拉/清空走 `logs.list` / `logs.clear`。
+  **日志跟应用走不跟预览跑** —— 停预览缓冲还在（用户切回来还能看到刚才那条报错），
+  `app.delete` 才连缓冲一起丢。
+- **去重语义**：同一句 message 在 1 秒内重复 → 合并成 `repeat++` 且 **id 不变**；
+  合并后的那条**照样推**（`pushLog = store.add + 无条件 publish`），前端按 id upsert
+  → 界面上是"一条 ×N"，不跳行、不刷屏。子进程输出必须先 `stripAnsi` 再进这条链
+  （Vite 的颜色码会让去重失效、界面全是 `[2m`）。
+- **模板侧零依赖**：`tenon-log.ts`（原生事件 + fetch keepalive）与 `tenon-boundary.tsx`
+  在 `react-vite` 与 `nest-api` 里各存一份（模板自包含原则）；M2-3 收编成 `@tenon/runtime`。
+  上报**不带任何平台凭证** —— 走同源相对路径，网关本身不校验 Token。
+
 ### 9.2 生命周期与就绪状态
 
 ```ts
@@ -1438,12 +1457,16 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 
 依赖关系：M2 依赖 M1 的 harness 与事件流；M3 依赖 M2 的源码定位；M4 依赖 M3 的预览 API；M5 依赖 M2 的应用装配；M6 依赖 M5 的组件协议。
 
-> **M2 进度（v1.2.7，2026-10-31）**：第 1 步已落地 —— `packages/db-provisioner`（两档供给 + `poolMax()` 恒 1）、
+> **M2 进度（v1.2.8，2026-11-01）**：第 1 步已落地 —— `packages/db-provisioner`（两档供给 + `poolMax()` 恒 1）、
 > `templates/nest-api`（NestJS 11 + TypeORM + PG 方言 + zod 共享层，迁移只写一份）、
 > `preview.start` 双进程（Vite + Nest，网关按 `/api` 最长前缀分流）、桌面版自带 pnpm。
 > **DoD ② 已满足**（同一份 migration 跑在 PGlite 与 postgres 两档上，切换只改 `DATABASE_URL`；
 > `pnpm e2e:fullstack` 实测 `poolMax===1` 从驱动实例读回、迁移数 ≥1、CRUD 经网关、重启数据还在）。
-> **仍欠：③ 跨档 `pg_dump` 迁移、④ Docker compose 产物、⑤ 日志/错误面板 + runtime SDK。**
+> 第 2 步已落地（**DoD ⑤ 的面板半边**）：`packages/gateway/src/logs.ts` 的 `LogStore`
+> （三来源汇流：子进程 stdout/stderr、页面经 `/__tenon/log` 同源上报、平台关键节点）+
+> `app.log` SSE 事件 + `logs.list`/`logs.clear` RPC + 模板侧零依赖上报（`tenon-log.ts` / `tenon-boundary.tsx`）+
+> `apps/web` 的 `LogPanel`（折叠底栏 / 来源筛选 / 错误高亮）。
+> **仍欠：③ 跨档 `pg_dump` 迁移、④ Docker compose 产物、⑤ 的 runtime SDK 半边（收编 `tenon-log` 成 `@tenon/runtime`）。**
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 

@@ -9,7 +9,7 @@ import { createServer, type Server } from 'node:http'
 import { connect } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
-import { startGateway, type Gateway } from '../src/proxy.js'
+import { startGateway, LOG_PATH, type Gateway } from '../src/proxy.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -192,5 +192,79 @@ describe('App Gateway', () => {
 
   it('没有路由就直接报错（兜底路由是必须的）', async () => {
     await expect(startGateway({ routes: [] })).rejects.toThrow(/至少要有一条路由/)
+  })
+
+  /*
+   * 日志上报端点。三个断言各对应一个容易做错的地方：
+   * 转发给上游（会 404，用户只看到"日志没上来"）、解析不出体（静默丢日志）、
+   * 吞掉超大请求体（内存被一个坏 SDK 打满）。
+   */
+  it('日志上报被网关自己吃掉：204、不转发上游、体交给回调', async () => {
+    const upstream = await stubHttp('前端')
+    const received: unknown[] = []
+    const gateway = await startGateway({
+      routes: [{ prefix: '/', port: upstream.port }],
+      onClientLog: (payload) => received.push(payload),
+    })
+    cleanups.push(() => gateway.close())
+
+    const response = await fetch(`${gateway.url}${LOG_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'boom', source: 'web' }),
+    })
+    expect(response.status).toBe(204)
+    expect(received).toEqual([{ message: 'boom', source: 'web' }])
+    // ★ 关键：上游一次都没被打到。打到 Vite 上就是 404，日志从此消失
+    expect(upstream.seen).toEqual([])
+  })
+
+  it('同一条路径的 GET 不当事：那是页面请求，照常转发', async () => {
+    const upstream = await stubHttp('前端')
+    const received: unknown[] = []
+    const gateway = await startGateway({
+      routes: [{ prefix: '/', port: upstream.port }],
+      onClientLog: (payload) => received.push(payload),
+    })
+    cleanups.push(() => gateway.close())
+
+    expect(await (await fetch(`${gateway.url}${LOG_PATH}`)).text()).toBe('前端')
+    expect(received).toEqual([])
+  })
+
+  it('体不是 JSON 时静默丢弃，但仍然回 204（上报通道不能反过来把应用弄挂）', async () => {
+    const upstream = await stubHttp('前端')
+    const received: unknown[] = []
+    const gateway = await startGateway({
+      routes: [{ prefix: '/', port: upstream.port }],
+      onClientLog: (payload) => received.push(payload),
+    })
+    cleanups.push(() => gateway.close())
+
+    const response = await fetch(`${gateway.url}${LOG_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{不是 JSON',
+    })
+    expect(response.status).toBe(204)
+    expect(received).toEqual([])
+  })
+
+  it('超大体积直接 413，不把内存交出去', async () => {
+    const upstream = await stubHttp('前端')
+    const gateway = await startGateway({
+      routes: [{ prefix: '/', port: upstream.port }],
+      onClientLog: () => undefined,
+    })
+    cleanups.push(() => gateway.close())
+
+    const response = await fetch(`${gateway.url}${LOG_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'x'.repeat(20_000),
+    }).catch(() => null)
+    // 服务端可能在读完之前就断开连接，两种结果都算合格
+    if (response !== null) expect(response.status).toBe(413)
+    expect(upstream.seen).toEqual([])
   })
 })

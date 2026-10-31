@@ -8,7 +8,7 @@
  * - 心跳用 SSE 注释行 `: ping`，不占用 `seq`，也不污染事件缓冲
  */
 import { z } from 'zod'
-import { NormalizedMessage, PlanTaskStatus, AppStatus, PreviewStatus, Readiness } from './domain.js'
+import { NormalizedMessage, PlanTaskStatus, AppStatus, LogEntry, PreviewStatus, Readiness } from './domain.js'
 
 const Seq = z.number().int().nonnegative()
 
@@ -109,6 +109,19 @@ export const PreviewStatusEvent = z.object({
   status: PreviewStatus,
 })
 
+/**
+ * 运行日志（M2 错误面板）。
+ *
+ * 一条一个 `LogEntry`，**不做合帧**：日志要的是时序，合帧会让"错误发生在前、预览就绪在后"
+ * 这种因果关系看不出来。洪水保护放在 `LogStore` 的去重（同一句合并成 `repeat`）。
+ */
+export const AppLogEvent = z.object({
+  type: z.literal('app.log'),
+  seq: Seq,
+  appId: z.string(),
+  entry: LogEntry,
+})
+
 export const ErrorEvent = z.object({
   type: z.literal('error'),
   seq: Seq,
@@ -135,6 +148,7 @@ export const SseEvent = z.discriminatedUnion('type', [
   GitCommitEvent,
   PreviewReadyEvent,
   PreviewStatusEvent,
+  AppLogEvent,
   ErrorEvent,
   StreamResetEvent,
 ])

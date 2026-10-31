@@ -6,7 +6,22 @@
  * 本包不碰 RPC：给它一个 appId + home，它把「数据库 + 网关 + dev server(+ 后端)」拉起来，
  * 通过 `publish` 回调把状态推给上层（上层转发成 SSE）。
  */
-export { startGateway, type Gateway, type GatewayOptions, type GatewayStats, type Route } from './proxy.js'
+export {
+  startGateway,
+  LOG_PATH,
+  type Gateway,
+  type GatewayOptions,
+  type GatewayStats,
+  type Route,
+} from './proxy.js'
+export {
+  classifyLine,
+  inputFromError,
+  LogStore,
+  parseClientLog,
+  stripAnsi,
+  type LogInput,
+} from './logs.js'
 export { findFreePort, findFreePorts } from './ports.js'
 export { ensureDeps, type DepsResult, type EnsureDepsOptions } from './deps.js'
 export {

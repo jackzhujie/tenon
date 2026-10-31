@@ -31,6 +31,13 @@ export interface SpawnOptions {
   env: NodeJS.ProcessEnv
   /** 日志里标是谁的输出（`vite` / `api`），两个进程的日志混在一起时很有用 */
   label?: string
+  /**
+   * 每读到一行就回调一次（`stream` 用来判断级别）。
+   *
+   * 与 `output()` 并存而不是替代：`output()` 是**失败时的现场**（最后 40 行，随错误返回），
+   * 这个回调是**活着的时候的流水**。两者用途不同，都得留。
+   */
+  onLine?: (line: string, stream: 'stdout' | 'stderr') => void
 }
 
 const MAX_LOG_LINES = 200
@@ -98,15 +105,16 @@ export function spawnLogged(options: SpawnOptions): Launched {
   })
 
   const prefix = options.label === undefined ? '' : `[${options.label}] `
-  const collect = (chunk: Buffer): void => {
-    for (const line of chunk.toString('utf8').split(/\r?\n/)) {
-      if (line.trim() === '') continue
-      lines.push(`${prefix}${line}`)
+  const collect = (chunk: Buffer, stream: 'stdout' | 'stderr'): void => {
+    for (const raw of chunk.toString('utf8').split(/\r?\n/)) {
+      if (raw.trim() === '') continue
+      lines.push(`${prefix}${raw}`)
       if (lines.length > MAX_LOG_LINES) lines.splice(0, lines.length - MAX_LOG_LINES)
+      options.onLine?.(raw, stream)
     }
   }
-  child.stdout?.on('data', collect)
-  child.stderr?.on('data', collect)
+  child.stdout?.on('data', (chunk: Buffer) => collect(chunk, 'stdout'))
+  child.stderr?.on('data', (chunk: Buffer) => collect(chunk, 'stderr'))
 
   const exitHandlers: Array<(info: ExitInfo) => void> = []
   const exited = new Promise<ExitInfo>((resolve) => {

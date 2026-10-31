@@ -50,6 +50,8 @@ export interface ApiLaunchSpec {
   /** 连接池上限：pglite 档恒为 1 */
   poolMax: number
   env?: NodeJS.ProcessEnv
+  /** 每行输出回调（错误面板用）。编译器的报错也归 `api` —— 它同样意味着"后端起不来" */
+  onLine?: (line: string, stream: 'stdout' | 'stderr') => void
 }
 
 export type ApiLauncher = (spec: ApiLaunchSpec) => Promise<Launched>
@@ -147,6 +149,7 @@ export const launchApi: ApiLauncher = async (spec) => {
     FORCE_COLOR: '0',
   })
 
+  const onLine = spec.onLine
   if (spec.entry.output === null) {
     return spawnLogged({
       command: process.execPath,
@@ -154,6 +157,7 @@ export const launchApi: ApiLauncher = async (spec) => {
       cwd: spec.repoDir,
       env,
       label: 'api',
+      ...(onLine === undefined ? {} : { onLine }),
     })
   }
 
@@ -176,6 +180,7 @@ export const launchApi: ApiLauncher = async (spec) => {
     cwd: spec.repoDir,
     env,
     label: 'tsc',
+    ...(onLine === undefined ? {} : { onLine }),
   })
 
   // ★ 必须**等第一次编译产出**再起运行器。
@@ -203,6 +208,7 @@ export const launchApi: ApiLauncher = async (spec) => {
     cwd: spec.repoDir,
     env,
     label: 'api',
+    ...(onLine === undefined ? {} : { onLine }),
   })
   return groupLaunched([compiler, runner])
 }

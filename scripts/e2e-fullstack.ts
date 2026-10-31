@@ -1,11 +1,11 @@
 /**
  * 真机端到端（M2）：建全栈应用 → 装依赖 → 起 PGlite → 起 Nest → 经网关 CRUD → 重启后数据还在。
  *
- * 这条链路**不进 CI**：要联网装 NestJS（首次一两分钟），还要等 PGlite 冷启动 + ts-node 编译。
+ * 这条链路**不进 CI**：要联网装 NestJS（首次一两分钟），还要等 PGlite 冷启动 + tsc 编译。
  * `pnpm test` 里对应的是用 stub 后端与假库验状态机（`packages/gateway/test/preview.test.ts`）。
  *
  * 它守的是单测**没法**守的四件事：
- * 1. 模板装得起来、跑得起来（ts-node + 装饰器 + 迁移自动执行）
+ * 1. 模板装得起来、跑得起来（tsc + 装饰器 + 迁移自动执行）
  * 2. `pool.max=1` 真的传到了 pg.Pool（`/api/health` 从驱动实例上读回来的）
  * 3. 网关的 `/api/*` 分流没串到 Vite
  * 4. 停预览再起，数据还在（PGlite 数据目录没被清）
@@ -33,6 +33,17 @@ interface Item {
   title: string
   done: boolean
   createdAt: string
+}
+
+interface LogEntry {
+  id: string
+  appId: string
+  at: number
+  source: 'web' | 'api' | 'vite' | 'db' | 'tenon'
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+  detail: string | null
+  repeat: number
 }
 
 let failures = 0
@@ -82,7 +93,7 @@ async function main(): Promise<void> {
     check('模板是 nest-api', created.app.templateId === 'nest-api', created.app.templateId)
     check('铺出了后端目录', true)
 
-    console.log('\n2) 起预览（首次要装 NestJS 依赖 + PGlite 冷启动 + ts-node 编译，耐心等）')
+    console.log('\n2) 起预览（首次要装 NestJS 依赖 + PGlite 冷启动 + tsc 首次编译，耐心等）')
     const startedAt = Date.now()
     await rpc('preview.start', { appId })
     const ready = await server.preview.waitReady(appId, 10 * 60 * 1000)
@@ -160,7 +171,45 @@ async function main(): Promise<void> {
     const dbFiles = await readdir(join(home, 'apps', appId, 'pgdata')).catch(() => [] as string[])
     check('pgdata 落盘了（不是纯内存库）', dbFiles.length > 0, dbFiles.slice(0, 5).join(','))
 
-    console.log('\n6) 停预览再起：数据必须还在（停 ≠ 删库）')
+    console.log('\n6) 运行日志：子进程输出与页面异常都进得去（错误面板的数据源）')
+    /*
+     * 子进程那一路只能靠真跑：stub 上游不会真的往 stderr 写东西。
+     * 断言落在"确实收到了 Vite 与 Nest 的输出"—— 这两条一有，面板才不会空着。
+     */
+    const logsBefore = await rpc<{ entries: LogEntry[] }>('logs.list', { appId, limit: 200 })
+    const sources = new Set(logsBefore.entries.map((entry) => entry.source))
+    check(
+      '收得到构建/前端的输出（vite 来源有日志）',
+      sources.has('vite'),
+      JSON.stringify([...sources]),
+    )
+    check(
+      '收得到后端输出（api 来源有日志）',
+      sources.has('api'),
+      JSON.stringify(logsBefore.entries.filter((entry) => entry.source === 'api').slice(-2)),
+    )
+    check(
+      'ANSI 转义已剥掉（否则界面里全是 [2m 之类）',
+      logsBefore.entries.every((entry) => !entry.message.includes('\u001B')),
+    )
+
+    // 页面侧：SDK 用相对路径 POST，网关自己吃掉（不转发给 Vite / Nest）
+    const reported = await fetch(`${url}/__tenon/log`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        level: 'error',
+        message: 'e2e: 页面渲染失败（探针）',
+        detail: 'at App.tsx:1:1',
+      }),
+    })
+    check('上报端点回 204（不落上游，也不报错）', reported.status === 204, `HTTP ${reported.status}`)
+
+    const logsAfter = await rpc<{ entries: LogEntry[] }>('logs.list', { appId, sources: ['web'] })
+    const mine = logsAfter.entries.find((entry) => entry.message.includes('e2e: 页面渲染失败'))
+    check('前端上报的异常进了日志，且带着堆栈', mine?.detail === 'at App.tsx:1:1', JSON.stringify(mine))
+
+    console.log('\n7) 停预览再起：数据必须还在（停 ≠ 删库）')
     await rpc('preview.stop', { appId })
     const stopped = await rpc<{ preview: { state: string; url: string | null } }>('preview.status', { appId })
     check('停掉后 state=stopped 且没有 url', stopped.preview.state === 'stopped' && stopped.preview.url === null)

@@ -159,6 +159,47 @@ export const PreviewStatus = z.object({
 })
 export type PreviewStatus = z.infer<typeof PreviewStatus>
 
+// ---------------------------------------------------------------- 运行日志
+
+/**
+ * 日志来源。**不是**"哪个进程"，而是"用户该去哪里改代码"：
+ *
+ * - `web`  前端（浏览器里的异常、`console.error`、SDK 主动上报）
+ * - `api`  后端（Nest 的 stdout/stderr）
+ * - `vite` dev server 与构建（编译错、HMR 报错）
+ * - `db`   应用数据库（PGlite 起不来、迁移失败）
+ * - `tenon` 平台自己（预览就绪、判红的原因）
+ *
+ * 面板按它分组，Agent 按它决定读哪个文件 —— 所以它是契约，不是随手加的 tag。
+ */
+export const LogSource = z.enum(['web', 'api', 'vite', 'db', 'tenon'])
+export type LogSource = z.infer<typeof LogSource>
+
+export const LogLevel = z.enum(['debug', 'info', 'warn', 'error'])
+export type LogLevel = z.infer<typeof LogLevel>
+
+/**
+ * 一条运行日志。
+ *
+ * `id` 由服务端的 `LogStore` 分配，**去重时复用同一个 id** —— 前端据此做 upsert：
+ * 同一句错误在一秒内刷 50 次，界面上是一条 `×50`，而不是 50 行。
+ * （React 渲染错误最常见的形态就是无限循环刷同一句，不折叠会把面板冲垮。）
+ */
+export const LogEntry = z.object({
+  id: z.string(),
+  appId: z.string(),
+  at: z.number(),
+  source: LogSource,
+  level: LogLevel,
+  /** 单行摘要（面板里永远只显示这一行） */
+  message: z.string(),
+  /** 堆栈 / 结构化细节，点开才看。没有则为 null */
+  detail: z.string().nullable(),
+  /** 这一条被合并了多少次（≥1）。1 表示就发生了一次 */
+  repeat: z.number().int().positive(),
+})
+export type LogEntry = z.infer<typeof LogEntry>
+
 // ---------------------------------------------------------------- 模板
 
 export const TemplateInfo = z.object({

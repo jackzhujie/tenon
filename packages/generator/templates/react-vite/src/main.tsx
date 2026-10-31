@@ -1,7 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { TenonErrorBoundary } from './tenon-boundary'
+import { installTenonLog } from './tenon-log'
 import './styles.css'
+
+// 先装钩子再渲染：渲染期抛的错要能被上报到日志面板（详见 tenon-log.ts）
+installTenonLog()
 
 const container = document.getElementById('root')
 if (container === null) {
@@ -10,6 +15,8 @@ if (container === null) {
 
 createRoot(container).render(
   <StrictMode>
-    <App appName="{{appName}}" />
+    <TenonErrorBoundary>
+      <App appName="{{appName}}" />
+    </TenonErrorBoundary>
   </StrictMode>,
 )

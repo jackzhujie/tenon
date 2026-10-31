@@ -83,6 +83,8 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       await agent.pool?.release(input.id)
       // 预览必须先停：dev server 还在写 node_modules / .vite 时删目录会留下半截图
       await preview.stop(input.id)
+      // 日志缓冲跟着应用一起丢，否则删掉的应用还在内存里留着几百行
+      preview.forget(input.id)
       await core.apps.delete(input.id, input.removeFiles)
       return { deleted: true }
     },
@@ -126,6 +128,21 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     'preview.stop': async (input) => ({ preview: await preview.stop(input.appId) }),
 
     'preview.status': async (input) => ({ preview: preview.status(input.appId) }),
+
+    /*
+     * 日志缓冲在 `PreviewManager` 里（跟着应用走，不跟着预览跑），
+     * 所以这两个处理器只是转发 —— 但**不能省**：SSE 只推连上之后发生的事，
+     * 切回一个早就跑着的应用时，历史日志只能靠 `logs.list` 拿。
+     */
+    'logs.list': async (input) => ({
+      entries: preview.logs(input.appId, {
+        limit: input.limit,
+        ...(input.sources === undefined ? {} : { sources: input.sources }),
+        ...(input.minLevel === undefined ? {} : { minLevel: input.minLevel }),
+      }),
+    }),
+
+    'logs.clear': async (input) => ({ cleared: preview.clearLogs(input.appId) }),
 
     'plan.get': async (input) => {
       const chat = requireChat(agent)

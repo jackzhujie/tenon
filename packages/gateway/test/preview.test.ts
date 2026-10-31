@@ -383,4 +383,89 @@ describe('PreviewManager', () => {
       code: 'APP_HOME_MISSING',
     })
   })
+
+  /*
+   * ---------------------------------------------------------------- 日志
+   *
+   * 三个来源各一条：子进程输出、页面主动上报、平台自己的判断。
+   * 它们最后都落在同一个缓冲里（`manager.logs`）并推同一种事件（`app.log`），
+   * 界面上才可能是一个面板而不是三个。
+   */
+
+  it('子进程输出进日志：级别按内容判，ANSI 已剥掉，并推 app.log', async () => {
+    const dir = await makeApp()
+    const base = stubUpstream('ok')
+    const noisy: Launcher = async (spec) => {
+      // 模拟 Vite 的真实输出：一堆正常信息 + 一条带颜色的报错
+      spec.onLine?.('VITE v7.3.7 ready in 312 ms', 'stdout')
+      spec.onLine?.('\u001B[31mError: 找不到模块 ./pages/Home\u001B[39m', 'stderr')
+      return base(spec)
+    }
+    const { manager, events } = managerFor(dir, noisy)
+
+    await manager.start(APP_ID)
+    await manager.waitReady(APP_ID)
+
+    const entries = manager.logs(APP_ID, { sources: ['vite'] })
+    const messages = entries.map((entry) => entry.message)
+    expect(messages).toContain('VITE v7.3.7 ready in 312 ms')
+    expect(messages).toContain('Error: 找不到模块 ./pages/Home')
+    // ANSI 不能被原样塞进界面
+    expect(messages.some((message) => message.includes('\u001B'))).toBe(false)
+    expect(entries.find((entry) => entry.message.startsWith('Error:'))?.level).toBe('error')
+    expect(entries.find((entry) => entry.message.startsWith('VITE'))?.level).toBe('info')
+
+    const logEvents = events.filter((event) => event.type === 'app.log')
+    expect(logEvents.length).toBeGreaterThanOrEqual(2)
+    expect(logEvents[0]).toMatchObject({ appId: APP_ID })
+  })
+
+  it('页面上报的异常经网关进日志，停掉预览之后还看得到', async () => {
+    const dir = await makeApp()
+    const { manager } = managerFor(dir, stubUpstream('ok'))
+
+    await manager.start(APP_ID)
+    const ready = await manager.waitReady(APP_ID)
+
+    const response = await fetch(`${ready.url as string}/__tenon/log`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        level: 'error',
+        message: 'TypeError: items.map is not a function',
+        detail: 'at App.tsx:12:9',
+      }),
+    })
+    expect(response.status).toBe(204)
+
+    const webLogs = manager.logs(APP_ID, { sources: ['web'] })
+    expect(webLogs.at(-1)).toMatchObject({
+      source: 'web',
+      level: 'error',
+      message: 'TypeError: items.map is not a function',
+      detail: 'at App.tsx:12:9',
+    })
+
+    await manager.stop(APP_ID)
+    // ★ 缓冲跟着应用走、不跟着预览跑：回看报错正是面板的主要用途
+    expect(manager.logs(APP_ID).length).toBeGreaterThan(0)
+    expect(manager.logs(APP_ID, { sources: ['web'] })).not.toEqual([])
+  })
+
+  it('平台自己的判断也进日志：起不来时有一条带原因的 error', async () => {
+    const dir = await makeApp()
+    const failing: Launcher = async () => {
+      throw new Error('vite 起不来：端口被占')
+    }
+    const { manager } = managerFor(dir, failing)
+
+    await manager.start(APP_ID)
+    await manager.waitReady(APP_ID, 5000)
+
+    const errors = manager.logs(APP_ID, { minLevel: 'error' })
+    expect(errors.some((entry) => entry.message.includes('端口被占'))).toBe(true)
+    // 清空只影响界面，不该把缓冲搞坏
+    expect(manager.clearLogs(APP_ID)).toBeGreaterThan(0)
+    expect(manager.logs(APP_ID)).toEqual([])
+  })
 })

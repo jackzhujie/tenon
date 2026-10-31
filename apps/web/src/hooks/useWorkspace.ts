@@ -16,6 +16,7 @@ import type {
   App,
   AppStatus,
   GitCommit,
+  LogEntry,
   NormalizedMessage,
   PreviewStatus,
   SseEvent,
@@ -60,6 +61,8 @@ interface State {
   status: AppStatus | null
   preview: PreviewStatus | null
   commits: GitCommit[]
+  /** 运行日志（错误面板）。跟 `app.log` 事件增量 + `logs.list` 首拉 */
+  logs: LogEntry[]
   stream: StreamState
   usage: UsageInfo | null
   model: ActiveModel | null
@@ -79,6 +82,7 @@ const initialState: State = {
   status: null,
   preview: null,
   commits: [],
+  logs: [],
   stream: 'stopped',
   usage: null,
   model: null,
@@ -99,6 +103,8 @@ type Action =
   | { kind: 'select'; appId: string | null }
   | { kind: 'history'; messages: NormalizedMessage[] }
   | { kind: 'commits'; commits: GitCommit[] }
+  | { kind: 'logs'; logs: LogEntry[] }
+  | { kind: 'logs.clear' }
   | { kind: 'preview'; preview: PreviewStatus | null }
   | { kind: 'optimistic'; message: NormalizedMessage }
   | { kind: 'submit.start' }
@@ -132,6 +138,28 @@ function upsertTool(tools: ToolActivity[], toolCallId: string, patch: Partial<To
   const current = next[index] as ToolActivity
   next[index] = { ...current, ...patch }
   return next
+}
+
+/**
+ * 日志按 id upsert。
+ *
+ * 为什么不能无脑 append：服务端会把"同一句在 1 秒内重复"合并成一条 `repeat++`，
+ * 而合并后的条目 **id 不变**、还是会被推过来。append 的话同一行会重复出现 N 次；
+ * replace 才对应"界面上一条 ×N"。
+ *
+ * 上限 300：面板只显示最后一批，但保留一点余量让筛选时还能翻到更多。
+ */
+const MAX_LOGS = 300
+
+function upsertLog(logs: LogEntry[], entry: LogEntry): LogEntry[] {
+  const index = logs.findIndex((item) => item.id === entry.id)
+  if (index !== -1) {
+    const next = [...logs]
+    next[index] = entry
+    return next
+  }
+  const next = [...logs, entry]
+  return next.length > MAX_LOGS ? next.slice(next.length - MAX_LOGS) : next
 }
 
 function reduceEvent(state: State, event: SseEvent): State {
@@ -190,6 +218,9 @@ function reduceEvent(state: State, event: SseEvent): State {
     case 'preview.status':
       return { ...state, preview: event.status }
 
+    case 'app.log':
+      return { ...state, logs: upsertLog(state.logs, event.entry) }
+
     case 'preview.ready':
       return state.preview === null
         ? state
@@ -245,6 +276,7 @@ function reducer(state: State, action: Action): State {
         live: null,
         preview: null,
         commits: [],
+        logs: [],
         usage: null,
         status: state.apps.find((app) => app.id === action.appId)?.status ?? null,
         error: null,
@@ -254,6 +286,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, messages: action.messages, live: null }
     case 'commits':
       return { ...state, commits: action.commits }
+    case 'logs':
+      return { ...state, logs: action.logs.slice(-MAX_LOGS) }
+    case 'logs.clear':
+      return { ...state, logs: [] }
     case 'preview':
       return { ...state, preview: action.preview }
     case 'optimistic':
@@ -294,6 +330,7 @@ export interface Workspace {
   submit(content: string): Promise<void>
   stop(): Promise<void>
   startPreview(restart?: boolean): Promise<void>
+  clearLogs(): Promise<void>
   clearError(): void
 }
 
@@ -356,6 +393,21 @@ export function useWorkspace(): Workspace {
     dispatch({ kind: 'commits', commits: log.commits })
   }, [])
 
+  /**
+   * 首拉日志。
+   *
+   * 必须拉：SSE 只推"连上之后"的事，而用户切回来最想看的是**刚才**那条报错。
+   * 拉失败不该打断别的东西 —— 日志面板空着比整页报错好。
+   */
+  const refreshLogs = useCallback(async (appId: string) => {
+    try {
+      const result = await rpc('logs.list', { appId, limit: 200 })
+      dispatch({ kind: 'logs', logs: result.entries })
+    } catch {
+      dispatch({ kind: 'logs', logs: [] })
+    }
+  }, [])
+
   useEffect(() => {
     const appId = state.activeAppId
     if (appId === null) return
@@ -366,6 +418,7 @@ export function useWorkspace(): Workspace {
           rpc('preview.status', { appId }),
           refreshHistory(appId),
           refreshCommits(appId),
+          refreshLogs(appId),
         ])
         if (!cancelled) dispatch({ kind: 'preview', preview: preview.preview })
       } catch (err) {
@@ -375,7 +428,7 @@ export function useWorkspace(): Workspace {
     return () => {
       cancelled = true
     }
-  }, [state.activeAppId, refreshHistory, refreshCommits])
+  }, [state.activeAppId, refreshHistory, refreshCommits, refreshLogs])
 
   // ---------------------------------------------------------------- 事件流（先连后发）
 
@@ -406,6 +459,7 @@ export function useWorkspace(): Workspace {
           // 本地增量不可信了，只能重拉全量
           void refreshHistory(appId).catch(() => {})
           void refreshCommits(appId).catch(() => {})
+          void refreshLogs(appId).catch(() => {})
         },
       },
     })
@@ -416,7 +470,7 @@ export function useWorkspace(): Workspace {
       stream.stop()
       if (streamRef.current === stream) streamRef.current = null
     }
-  }, [state.activeAppId, refreshCommits, refreshHistory])
+  }, [state.activeAppId, refreshCommits, refreshHistory, refreshLogs])
 
   // ---------------------------------------------------------------- 动作
 
@@ -509,6 +563,17 @@ export function useWorkspace(): Workspace {
     }
   }, [])
 
+  const clearLogs = useCallback(async () => {
+    const appId = activeAppIdRef.current
+    dispatch({ kind: 'logs.clear' })
+    if (appId === null) return
+    try {
+      await rpc('logs.clear', { appId })
+    } catch {
+      /* 清不掉只是界面上的事，别弹错 */
+    }
+  }, [])
+
   const clearError = useCallback(() => dispatch({ kind: 'error', message: null }), [])
 
   const activeApp = useMemo(
@@ -525,6 +590,7 @@ export function useWorkspace(): Workspace {
     submit,
     stop,
     startPreview,
+    clearLogs,
     clearError,
   }
 }

@@ -22,6 +22,7 @@ export const sseEventTypes = [
   'git.commit',
   'preview.ready',
   'preview.status',
+  'app.log',
   'error',
   'stream.reset',
 ] as const satisfies readonly SseEventType[]

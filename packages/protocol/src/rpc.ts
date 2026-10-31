@@ -12,6 +12,9 @@ import {
   FileNode,
   GitCommit,
   GitFileChange,
+  LogEntry,
+  LogLevel,
+  LogSource,
   MessagePart,
   ModelTier,
   NormalizedMessage,
@@ -158,6 +161,31 @@ export const rpcMethods = {
   'preview.status': {
     input: z.object({ appId: Id }),
     output: z.object({ preview: PreviewStatus }),
+  },
+
+  /**
+   * 运行日志（M2 错误面板）。
+   *
+   * 为什么要单独一个 RPC 而不是只靠 SSE：SSE 只推"连上之后"发生的事。
+   * 用户切回一个早就跑着的应用时，最想看的恰恰是**刚才**那条报错 ——
+   * 所以缓冲留在服务端，`logs.list` 一次拿回来，SSE 只负责增量。
+   *
+   * `limit` 从**最新**往回数（面板默认看最后 200 条，越界的老日志没人看）。
+   */
+  'logs.list': {
+    input: z.object({
+      appId: Id,
+      limit: z.number().int().positive().max(500).default(200),
+      /** 只要这几类来源（不传 = 全部） */
+      sources: z.array(LogSource).optional(),
+      /** 只要这个级别及以上（`error` 看问题、`debug` 排细节） */
+      minLevel: LogLevel.optional(),
+    }),
+    output: z.object({ entries: z.array(LogEntry) }),
+  },
+  'logs.clear': {
+    input: z.object({ appId: Id }),
+    output: z.object({ cleared: z.number().int().nonnegative() }),
   },
 
   'plan.get': {

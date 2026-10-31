@@ -23,6 +23,8 @@ export interface LaunchSpec {
   /** 后端端口。没有后端就传 undefined —— 模板不会配 /api 代理 */
   apiPort?: number
   env?: NodeJS.ProcessEnv
+  /** 每行输出回调（错误面板用）。注入的假 launcher 可以直接忽略 */
+  onLine?: (line: string, stream: 'stdout' | 'stderr') => void
 }
 
 export type Launcher = (spec: LaunchSpec) => Promise<Launched>
@@ -53,5 +55,6 @@ export const launchVite: Launcher = async (spec) => {
     args: [bin, '--port', String(spec.vitePort), '--strictPort', '--host', '127.0.0.1'],
     cwd: spec.repoDir,
     env,
+    ...(spec.onLine === undefined ? {} : { onLine: spec.onLine }),
   })
 }
