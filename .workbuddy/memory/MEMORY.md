@@ -6,10 +6,12 @@
 隐喻：榫卯不用钉子靠构件咬合 = 应用由标准组件咬合，Agent 只做设计与搭接。
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
-## 当前状态（2026-10-31 晚）
-M0 逆向完成 → **DESIGN v1.2.1** → **M1 第一周四个 spike 全部跑通** → 正在做 M1 主干（`packages/` 尚未建）。
-仓库已有 pnpm workspace 骨架 + `spikes/{db,agent,gateway,loc}`（可 `pnpm spike:*` 复跑）。
-**开工入口：`docs/STATUS.md`**；实测数字：**`docs/SPIKES.md`**；方案：`docs/DESIGN.md`（唯一事实来源）。
+## 当前状态（2026-10-31 深夜）
+M0 逆向完成 → **DESIGN v1.2.2** → 四个 spike 全过 → **M1 主干第 1~6 步已落地**（提交 `599ed98`）。
+已建 `packages/{protocol,core,agent,server}`：服务能起、能对话（SSE 流式）、能落库、能每轮自动 git 提交、崩溃后 `resume()` 续跑。
+`pnpm test` 28 项 + `pnpm smoke` 9 项全绿；`pnpm dev:faux` 不需要任何 API Key 就能起服务。
+**下一步**：工具层（read/write/edit/bash）→ generator → `packages/gateway`（预览）→ `apps/web`。
+**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4 下一步拆解 / §4.5 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`（唯一事实来源）。
 
 ## 三条铁律
 1. **Electron 只做壳**，业务全在本地 HTTP Server（否则 Web 模式 / Agent 自调试 / SaaS 化全废）
@@ -23,6 +25,14 @@ M0 逆向完成 → **DESIGN v1.2.1** → **M1 第一周四个 spike 全部跑�
 - **源码定位双属性**：原生标签 `data-tenon-loc`、组合组件 `data-tenon-callsite`（需组件透传 `{...props}`）；点击时 callsite 优先
 - 成本：PGlite 冷启动 2.4s、每应用 pgdata 38MB、dumpDataDir 约 4.5MB/0.7s
 - 无 API Key 也能开发：`pi-ai` 的 `providers/faux`（`fauxProvider()` + `fauxAssistantMessage()`）
+
+## M1 落地时撞出来的硬约束（v1.2.2，比 spike 更贵）
+- **不能用 `git.statusMatrix` 判断变更**：isomorphic-git 的 stat 快路径会把**同长度同毫秒**的改动判成"没变"（`v1\n`→`v2\n` 返回 `[1,1,1]`，`WORKDIR.oid()` 也返回旧值）→ `commitAll` 自算 blob oid + `add({force:true})`，**别改回去**
+- **`pi.live` 没有 token 增量**（只有 `{run,generation:{attempt}}`）→ 流式只能走 `watchEvents` 的 `message_update.changes[].type==='text_delta'`
+- **`message_end` 对用户 entry 也触发** → 只推 `role==='assistant'` 的 `message.end`
+- **SSE 必须"先连上再提交"**（建连即写 `: connected`），与 Vite HMR 首帧同一个坑
+- **`defineDoc<T>` 的 T 必须用 `type` alias**（interface 拿不到隐式索引签名，`JsonObject` 约束会挂）
+- **BYOK 密钥不能进 `process.env`**（生成应用子进程会继承）→ `createProvider` + `@earendil-works/pi-ai/api/openai-completions` 的 `stream/streamSimple` 现场拼 provider
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程
