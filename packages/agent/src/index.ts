@@ -1,0 +1,70 @@
+/**
+ * `@tenon/agent` —— pi 生态的唯一入口。
+ *
+ * 依赖方向（DESIGN §3.2）：`server → agent`。上层只见 `AgentRuntime`，
+ * 不直接 import pi：上游一次 minor 升级只在这里修（铁律 3 的落地方式）。
+ */
+import type { CoreServices } from '@tenon/core'
+import { ChatService } from './chat.js'
+import { HarnessPool } from './harness-pool.js'
+import { planModel, resolveModel, type ModelPlan, type ResolvedModel } from './models.js'
+import type { SseEventInput } from '@tenon/protocol'
+
+export * from './models.js'
+export * from './harness-pool.js'
+export * from './normalize.js'
+export * from './docs.js'
+export { ChatService } from './chat.js'
+
+export interface AgentRuntimeOptions {
+  core: CoreServices
+  publish: (event: SseEventInput) => void
+  env?: NodeJS.ProcessEnv
+}
+
+export interface AgentRuntime {
+  /** 已配好模型；没配时 `undefined`（server 仍能起来，UI 去引导配置） */
+  readonly model: ResolvedModel | undefined
+  readonly plan: ModelPlan | undefined
+  readonly chat: ChatService | undefined
+  readonly pool: HarnessPool | undefined
+  close(): Promise<void>
+}
+
+/**
+ * 装配顺序很重要：`planModel` 不抛错 → server 一定会起来；
+ * 真正 `resolveModel`（可能失败）与 harness 池只在有模型时创建。
+ */
+export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
+  const plan = planModel(options.core, { env: options.env })
+  if (plan === undefined) {
+    return {
+      model: undefined,
+      plan,
+      chat: undefined,
+      pool: undefined,
+      async close() {},
+    }
+  }
+
+  const model = resolveModel(options.core, { env: options.env })
+  const pool = new HarnessPool({ home: options.core.home, model })
+  const chat = new ChatService({
+    pool,
+    apps: options.core.apps,
+    home: options.core.home,
+    model,
+    publish: options.publish,
+  })
+
+  return {
+    model,
+    plan,
+    chat,
+    pool,
+    async close() {
+      await chat.close()
+      await pool.closeAll()
+    },
+  }
+}

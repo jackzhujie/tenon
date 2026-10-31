@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.1
+# DESIGN.md — 详细方案设计 v1.2.2
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -396,6 +396,12 @@ stream.start(events => bus.publish(appId, events)) // → SSE 推给前端
 ```
 
 前端把事件归约为 UI 状态（见 §15.4）。**不要**用轮询；**不要**让前端直接读 harness 存储。
+
+> **v1.2.2 落地要点（M1 实测）**
+> 1. **`pi.live` 里没有 token 增量**。它只有运行态（`{run:{taskId,inputs}, generation:{attempt}}`），拿它做流式是死路。真正的增量在 `watchEvents` 的 `message_update.changes[].type === 'text_delta'`。
+> 2. `message_end` 对**用户 entry 也会触发**。服务端只把 `role === 'assistant'` 的 `message.end` 推给前端，否则前端会把自己刚发的那条气泡重绘一次。
+> 3. 增量帧的 `messageId` 在流式期间恒为 `'live'`：assistant entry id 要到 `message_end` 才存在，而一个会话同时只有一条在飞的回答。前端用一个 live 气泡接增量，收到 `message.end` 时替换成真实 id 的消息。
+> 4. **客户端必须先连上 SSE 再提交**（与 Vite HMR 首帧同一个坑）。`GET /events` 会在建连时立刻写 `: connected`，前端据此判断可以发提交了。
 
 ---
 
@@ -995,7 +1001,7 @@ Nest stdout ---line--> LogTailer --parse--> 事件总线
 
 ```
 submission.done
-  → 计算变更（git status --porcelain，忽略 .tenon/、node_modules、*.sqlite）
+  → 计算变更（**自算 blob oid 比对工作区与 HEAD**，忽略 .tenon/、node_modules、*.sqlite）
   → 质量门禁（§8.6）
   → 生成 message：Conventional Commits，scope 取主要改动目录
       feat(dishes): 新增菜品管理 CRUD
@@ -1004,6 +1010,8 @@ submission.done
   → commit（author = Tenon Agent <agent@local>，trailer 写入会话/任务/模型）
   → 记录 plan 任务 ↔ commit 映射，推送 UI 版本时间线
 ```
+
+> **v1.2.2 实测修正：不能用 `git.statusMatrix` 判断变更。** isomorphic-git 的 stat 快路径会把**同长度、同一毫秒内**的改动判成"没变"（`v1\n` → `v2\n` 时 statusMatrix 返回 `[1,1,1]`，`WORKDIR` walker 的 `oid()` 也返回旧值）。对「一轮一 commit」这是致命漏检，且完全静默。`packages/core/src/git.ts` 改为自己按 `blob <len>\0 + content` 算 sha1 与 HEAD 树比对，再 `git.add({ force: true })` 绕过 index 缓存 —— 宁可每轮多读一遍盘。该行为已有回归测试（`packages/core/test/git.test.ts`）。
 
 **用户可回滚**：版本面板列出 commit（时间/摘要/模型/改动文件数/±行数），支持「查看 diff」「回滚到此」（`revert`，非 `reset --hard`，不丢后续历史）。
 

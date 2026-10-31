@@ -1,0 +1,205 @@
+/**
+ * RPC 方法表（DESIGN §7.2 的 M1 子集）。
+ *
+ * 一张表三种用途：服务端校验入参、前端获得 `RpcInput<'chat.submit'>` 类型、
+ * 测试用它断言「契约里声明的每个方法都真的挂了实现」（`server/test/rpc-coverage.test.ts`）。
+ *
+ * 新增方法只改这里 + 在 server 里注册 handler，两边不同步会被覆盖率测试抓到。
+ */
+import { z } from 'zod'
+import {
+  App,
+  FileNode,
+  GitCommit,
+  GitFileChange,
+  MessagePart,
+  ModelTier,
+  NormalizedMessage,
+  PlanTask,
+  ProviderProfile,
+  Release,
+} from './domain.js'
+
+const Id = z.string().min(1)
+const WhenBusy = z.enum(['follow-up', 'steer', 'reject'])
+
+/** 点选/框选上下文（DESIGN §10.2），M1 先留出形状，M3 才真正注入 */
+export const SelectionContext = z.object({
+  kind: z.enum(['element', 'region', 'error']),
+  route: z.string().optional(),
+  loc: z
+    .object({
+      file: z.string(),
+      line: z.number(),
+      column: z.number(),
+      kind: z.enum(['element', 'callsite', 'component-impl']),
+    })
+    .optional(),
+  callsite: z
+    .object({ file: z.string(), line: z.number(), column: z.number() })
+    .optional(),
+  componentStack: z.array(z.string()).optional(),
+  text: z.string().optional(),
+  rect: z
+    .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+    .optional(),
+})
+export type SelectionContext = z.infer<typeof SelectionContext>
+
+export const ChatSubmitInput = z.object({
+  appId: Id,
+  content: z.string().min(1),
+  parts: z.array(MessagePart).default([]),
+  selection: SelectionContext.optional(),
+  whenBusy: WhenBusy.default('follow-up'),
+  /** 幂等键（前端生成 uuid）。同键重放 → 命中同一 Submission，这是 DoD 的一部分 */
+  requestId: z.string().min(1),
+  modelTier: ModelTier.default('auto'),
+})
+export type ChatSubmitInput = z.infer<typeof ChatSubmitInput>
+
+const Empty = z.object({})
+
+export const rpcMethods = {
+  health: {
+    input: Empty,
+    output: z.object({
+      ok: z.literal(true),
+      version: z.string(),
+      tenonHome: z.string(),
+      /** 没配模型时为 null —— server 必须能在「还没配置」的状态下正常启动 */
+      model: z
+        .object({
+          mode: z.enum(['faux', 'openai-compatible']),
+          providerId: z.string(),
+          modelId: z.string(),
+        })
+        .nullable(),
+      openApps: z.array(z.string()),
+      sseSubscribers: z.number(),
+    }),
+  },
+
+  'app.list': {
+    input: z.object({ includeArchived: z.boolean().default(false) }),
+    output: z.object({ apps: z.array(App) }),
+  },
+  'app.get': {
+    input: z.object({ id: Id }),
+    output: z.object({
+      app: App,
+      releases: z.array(Release),
+      lastCommit: GitCommit.nullable(),
+    }),
+  },
+  'app.create': {
+    input: z.object({
+      name: z.string().min(1).max(64),
+      templateId: z.string().default('blank'),
+      styleId: z.string().nullable().default(null),
+      /** 建库（pgdata）是 M2 的事；M1 只建目录 + git init */
+      description: z.string().optional(),
+    }),
+    output: z.object({ app: App }),
+  },
+  'app.delete': {
+    input: z.object({ id: Id, removeFiles: z.boolean().default(true) }),
+    output: z.object({ deleted: z.literal(true) }),
+  },
+
+  'chat.submit': {
+    input: ChatSubmitInput,
+    output: z.object({
+      /** 同一 `requestId` 重放会拿到同一个 id —— 幂等语义由 pi-durable 保证，不需要额外字段 */
+      submissionId: z.string(),
+    }),
+  },
+  'chat.stop': {
+    input: z.object({ appId: Id }),
+    output: z.object({ stopped: z.boolean() }),
+  },
+  'chat.history': {
+    input: z.object({
+      appId: Id,
+      limit: z.number().int().positive().max(500).default(200),
+      before: z.string().optional(),
+    }),
+    output: z.object({
+      messages: z.array(NormalizedMessage),
+      /** 还有更早的消息时为游标，M1 先返回 null */
+      nextCursor: z.string().nullable(),
+    }),
+  },
+
+  'plan.get': {
+    input: z.object({ appId: Id }),
+    output: z.object({ tasks: z.array(PlanTask) }),
+  },
+
+  'files.tree': {
+    input: z.object({ appId: Id, depth: z.number().int().min(1).max(8).default(2) }),
+    output: z.object({ nodes: z.array(FileNode) }),
+  },
+  'files.read': {
+    input: z.object({ appId: Id, path: z.string().min(1) }),
+    output: z.object({ path: z.string(), content: z.string(), etag: z.string() }),
+  },
+
+  'git.log': {
+    input: z.object({ appId: Id, limit: z.number().int().positive().max(200).default(30) }),
+    output: z.object({ commits: z.array(GitCommit) }),
+  },
+  'git.diff': {
+    input: z.object({ appId: Id, from: z.string().min(1), to: z.string().default('HEAD') }),
+    output: z.object({ changes: z.array(GitFileChange), patch: z.string() }),
+  },
+  'git.revert': {
+    input: z.object({ appId: Id, sha: z.string().min(1) }),
+    output: z.object({ commit: GitCommit }),
+  },
+
+  'settings.get': {
+    input: Empty,
+    output: z.object({ values: z.record(z.string(), z.unknown()) }),
+  },
+  'settings.set': {
+    input: z.object({ values: z.record(z.string(), z.unknown()) }),
+    output: z.object({ values: z.record(z.string(), z.unknown()) }),
+  },
+
+  'provider.list': {
+    input: Empty,
+    output: z.object({ profiles: z.array(ProviderProfile) }),
+  },
+  'provider.upsert': {
+    input: z.object({
+      id: z.string().optional(),
+      label: z.string().min(1),
+      kind: z.enum(['builtin', 'openai-compatible']),
+      baseUrl: z.string().nullable().default(null),
+      tier: ModelTier.default('auto'),
+      modelId: z.string().min(1),
+      paramsJson: z.string().nullable().default(null),
+      /** 明文只在写入方向出现；读出方向永远没有这个字段 */
+      apiKey: z.string().nullable().default(null),
+    }),
+    output: z.object({ profile: ProviderProfile }),
+  },
+  'provider.delete': {
+    input: z.object({ id: Id }),
+    output: z.object({ deleted: z.literal(true) }),
+  },
+} as const
+
+export type RpcMethods = typeof rpcMethods
+export type RpcMethod = keyof RpcMethods
+export type RpcInput<M extends RpcMethod> = z.input<RpcMethods[M]['input']>
+/** 服务端看到的入参（已过 zod 默认值/裁剪） */
+export type RpcArgs<M extends RpcMethod> = z.output<RpcMethods[M]['input']>
+export type RpcOutput<M extends RpcMethod> = z.output<RpcMethods[M]['output']>
+
+export const rpcMethodNames = Object.keys(rpcMethods) as RpcMethod[]
+
+export function isRpcMethod(name: string): name is RpcMethod {
+  return Object.hasOwn(rpcMethods, name)
+}

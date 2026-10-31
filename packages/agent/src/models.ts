@@ -1,0 +1,192 @@
+/**
+ * 模型解析（BYOK，DESIGN §4.2）。
+ *
+ * 三条路，按优先级：
+ * 1. `TENON_FAUX=1` → pi-ai 自带的 `providers/faux`。**没有 API Key 也能跑通整条链路**，
+ *    CI 与本地冒烟都靠它 —— 别去 mock harness，那会绕开真正要验的东西。
+ * 2. 设置里选中的 provider profile（`provider_profiles.api_key_enc` 解密）→ 用
+ *    `createProvider` + `api/openai-completions` 现场拼一个 openai 兼容 provider。
+ *    **密钥不进 `process.env`**：生成应用的子进程会继承环境变量，那是真实的泄漏面。
+ * 3. 都没有 → `AGENT_NO_MODEL`，让 UI 去引导配置，而不是偷偷回退到假模型。
+ */
+import type { MutableModels, Provider } from '@earendil-works/pi-ai/models'
+import { createModels, createProvider } from '@earendil-works/pi-ai/models'
+import * as completions from '@earendil-works/pi-ai/api/openai-completions'
+import { fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai/providers/faux'
+import { TenonError } from '@tenon/protocol'
+import type { CoreServices } from '@tenon/core'
+import { SETTING_KEYS } from '@tenon/core'
+
+export const FAUX_PROVIDER_ID = 'faux'
+export const FAUX_MODEL_ID = 'faux-mini'
+/** 生产默认值；profile.paramsJson 可覆盖（不同模型的上下文窗口差得很远） */
+const DEFAULT_CONTEXT_WINDOW = 128_000
+const DEFAULT_MAX_TOKENS = 8_192
+
+export interface ModelChoice {
+  readonly provider: string
+  readonly modelId: string
+}
+
+export interface ResolvedModel {
+  readonly mode: 'faux' | 'openai-compatible'
+  readonly choice: ModelChoice
+  readonly models: MutableModels
+  /**
+   * faux 是"剧本式"的：每次生成都必须先塞一条响应，否则 harness 没有东西可流。
+   * 真实 provider 下是 no-op。
+   */
+  primeTurn(userText: string): void
+}
+
+interface FauxHandle {
+  appendResponses(messages: unknown[]): void
+}
+
+function readParams(paramsJson: string | null): { contextWindow?: number; maxTokens?: number } {
+  if (paramsJson === null || paramsJson === '') return {}
+  try {
+    const parsed = JSON.parse(paramsJson) as Record<string, unknown>
+    return {
+      contextWindow:
+        typeof parsed['contextWindow'] === 'number' ? parsed['contextWindow'] : undefined,
+      maxTokens: typeof parsed['maxTokens'] === 'number' ? parsed['maxTokens'] : undefined,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function buildFaux(): ResolvedModel {
+  const faux = fauxProvider({
+    provider: FAUX_PROVIDER_ID,
+    models: [{ id: FAUX_MODEL_ID, contextWindow: 32_000 }],
+    tokensPerSecond: 60,
+  })
+  const models = createModels()
+  models.setProvider(faux.provider)
+  const handle = faux as unknown as FauxHandle
+  return {
+    mode: 'faux',
+    choice: { provider: FAUX_PROVIDER_ID, modelId: FAUX_MODEL_ID },
+    models,
+    primeTurn(userText: string) {
+      const excerpt = userText.replace(/\s+/g, ' ').slice(0, 40)
+      handle.appendResponses([
+        fauxAssistantMessage(
+          `【开发模式 · faux 模型】收到：「${excerpt}」。\n\n` +
+            '这条回复来自 pi-ai 的本地假模型，用来验证「提交 → 流式 → 落库 → SSE」这条链路。' +
+            '要接真模型，请在设置里添加提供商（OpenAI 兼容）并填入 API Key，然后把 agent.activeProviderId 指向它。',
+        ),
+      ])
+    },
+  }
+}
+
+function buildOpenAICompatible(
+  core: CoreServices,
+  profileId: string,
+): ResolvedModel {
+  const profile = core.providers.find(profileId)
+  if (profile === undefined) {
+    throw new TenonError('AGENT_NO_MODEL', `选中的提供商已不存在：${profileId}`, { profileId })
+  }
+  const apiKey = core.providers.revealApiKey(profileId)
+  if (apiKey === undefined) {
+    throw new TenonError('AGENT_NO_MODEL', `提供商「${profile.label}」没有配置 API Key`, { profileId })
+  }
+  const baseUrl = profile.baseUrl ?? 'https://api.openai.com/v1'
+  const params = readParams(profile.paramsJson)
+  const modelId = profile.modelId
+
+  const provider: Provider = createProvider({
+    id: profile.id,
+    name: profile.label,
+    baseUrl,
+    // 只保留 openai-completions：M1 的 BYOK 就这一种协议，其他协议等真需求进来再加
+    api: {
+      stream: completions.stream as never,
+      streamSimple: completions.streamSimple as never,
+    },
+    models: [
+      {
+        id: modelId,
+        name: modelId,
+        api: 'openai-completions',
+        provider: profile.id as never,
+        baseUrl,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        reasoning: false,
+        contextWindow: params.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+        maxTokens: params.maxTokens ?? DEFAULT_MAX_TOKENS,
+      } as never,
+    ],
+    auth: {
+      apiKey: {
+        name: `${profile.label} API key`,
+        resolve: async () => ({
+          auth: { apiKey },
+          source: 'Tenon 设置',
+        }),
+      },
+    },
+  })
+
+  const models = createModels()
+  models.setProvider(provider)
+  return {
+    mode: 'openai-compatible',
+    choice: { provider: profile.id, modelId },
+    models,
+    primeTurn() {
+      /* 真实 provider 不需要预置响应 */
+    },
+  }
+}
+
+export interface ResolveModelOptions {
+  env?: NodeJS.ProcessEnv
+  /** 显式指定 profile，跳过设置里的默认值（测试用） */
+  profileId?: string
+}
+
+export interface ModelPlan {
+  readonly mode: 'faux' | 'openai-compatible'
+  readonly profileId?: string
+  readonly choice: ModelChoice
+}
+
+/**
+ * 只**描述**会用哪个模型，不构造 provider、不抛错。
+ * 给 `/health` 用：server 必须能在"还没配模型"的状态下正常启动，否则用户连设置页都进不去。
+ */
+export function planModel(core: CoreServices, options: ResolveModelOptions = {}): ModelPlan | undefined {
+  const env = options.env ?? process.env
+  if (env['TENON_FAUX'] === '1' || env['TENON_FAUX'] === 'true') {
+    return { mode: 'faux', choice: { provider: FAUX_PROVIDER_ID, modelId: FAUX_MODEL_ID } }
+  }
+  const requested = options.profileId ?? core.settings.get<string>(SETTING_KEYS.activeProviderId)
+  const candidate =
+    requested !== undefined && requested !== ''
+      ? core.providers.find(requested)
+      : core.providers.list().find((profile) => profile.hasApiKey)
+  if (candidate === undefined) return undefined
+  return {
+    mode: 'openai-compatible',
+    profileId: candidate.id,
+    choice: { provider: candidate.id, modelId: candidate.modelId },
+  }
+}
+
+export function resolveModel(core: CoreServices, options: ResolveModelOptions = {}): ResolvedModel {
+  const plan = planModel(core, options)
+  if (plan === undefined) {
+    throw new TenonError(
+      'AGENT_NO_MODEL',
+      '还没有可用的模型。请在设置里添加提供商并填入 API Key；开发调试可设 TENON_FAUX=1 用假模型。',
+    )
+  }
+  if (plan.mode === 'faux') return buildFaux()
+  return buildOpenAICompatible(core, plan.profileId as string)
+}

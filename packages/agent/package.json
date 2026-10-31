@@ -1,0 +1,18 @@
+{
+  "name": "@tenon/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "pi 集成层：模型解析（BYOK / faux）、每应用一个 harness、对话事件桥",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@earendil-works/chord": "1.4.0",
+    "@tenon/core": "workspace:*",
+    "@tenon/protocol": "workspace:*"
+  }
+}

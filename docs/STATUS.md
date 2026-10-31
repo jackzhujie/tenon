@@ -1,14 +1,28 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-10-31（四个 spike 全部跑完，进入 M1 主干）
+> 最后更新：2026-10-31（M1 主干第 1~6 步落地，28 个测试 + 9 项端到端冒烟全绿）
 
 ---
 
 ## 0. 一句话现状
 
-**M0 逆向完成 → DESIGN v1.2.1 定稿 → 第一周四个 spike 全部通过（撞出 `pool.max=1` 硬约束）→ 现在做 M1 主干。**
-仓库里已有一层 pnpm workspace 骨架与 `spikes/`（四个 spike 都能 `pnpm spike:*` 复跑）。
+**M0 逆向完成 → DESIGN v1.2.2 → 四个 spike 全过 → M1 主干前 6 步已落地（能跑、有测试）。**
+
+先跑这三条验证它还活着：
+
+```bash
+pnpm install && pnpm dev:faux   # 不需要 API Key，用 faux 模型起服务（会打印 TENON_READY）
+pnpm test                       # 28 项单测 + 集成测试
+pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
+```
+
+- `packages/{protocol,core,agent,server}` 已建；`pnpm typecheck` 全绿（含四个 spike）
+- 服务真起来了：Fastify 5 / 随机端口绑 `127.0.0.1` / Bearer Token / `/api/health` / `TENON_READY` 握手行
+- `tenon.db`（`node:sqlite`）在建应用、写设置、存提供商密钥时真的落盘
+- 每应用一个 `.tenon/harness.sqlite`，进程重启后 `resume()` 把中断的一轮**跑完**（有测试）
+- SSE 增量 / `message.end` / `usage` 全链路打通；每轮结束自动 git 提交（无改动不产生空提交）
+- **还没做**：工具与生成器、预览网关（第 7 步）、Web 前端（第 8 步）、Electron 壳（第 9 步）
 
 ---
 
@@ -72,26 +86,61 @@
 
 详细数字、可复跑命令、被推翻的假设：**`docs/SPIKES.md`**。
 
-### 4.2 M1 主干（按依赖顺序）—— 现在从这里开始
+### 4.2 M1 主干（按依赖顺序）
 
-进度：第 1 步已开一半（workspace + `spikes/` 已就位，`packages/*` 尚未建）。
+| # | 步骤 | 状态 | 落在哪 |
+|---|---|---|---|
+| 1 | monorepo 骨架（workspace / tsconfig / vitest） | ✅ | `packages/*` 四个已建；`generator`、`db-provisioner`、`runtime-sdk`、`ui`、`component-host` 与 `apps/*` 随对应步骤建 |
+| 2 | server 起来（Fastify 5 / 随机端口 / Token / health） | ✅ | `packages/server/src/{app,bin,index}.ts` |
+| 3 | `tenon.db`（`node:sqlite`，5 张表） | ✅ | `packages/core/src/{db,stores/*}.ts` |
+| 4 | harness 池（每应用一个 sqlite，`resume()`） | ✅ | `packages/agent/src/harness-pool.ts` |
+| 5 | SSE 对话链路（`chat.submit/stop/history`） | ✅ | `packages/agent/src/chat.ts` + `packages/server/src/sse.ts` |
+| 6 | Git 自动提交（isomorphic-git，trailer） | ✅ | `packages/core/src/git.ts` |
+| 7 | **静态预览**：App Gateway 托管纯前端 React 应用，HMR 打通（M1 不碰数据库） | ⬜ 下一步 | 从 `spikes/gateway` 演进成 `packages/gateway` |
+| 8 | **Web 模式**：`pnpm dev:web` 全流程可用（前端 React 19 + Vite 7） | ⬜ | `apps/web` |
+| 9 | **Electron 壳**：最后接入，打包冒烟（mac + win） | ⬜ | `apps/desktop`，spawn `server/src/bin.ts` 读 `TENON_READY` |
 
-1. **monorepo 骨架** — pnpm workspace ✅ / `packages/{protocol,server,agent,generator,db-provisioner,runtime-sdk,ui,core,component-host}` + `apps/{web,desktop}` 待建；tsconfig base ✅ + eslint/biome + vitest
-2. **server 起来** — Fastify 5 + TS ESM，随机端口绑 `127.0.0.1`，Bearer Token，`/api/health`
-3. **`tenon.db`** — 用 `node:sqlite` 建 `apps` / `releases` / `settings` / `provider_profiles`（schema 见 DESIGN §6.2）
-4. **harness 池** — 每应用一个 `.tenon/harness.sqlite`，pi-durable 封装在 `packages/agent/adapter`（**照 `spikes/agent/src/index.ts` 抄，别忘 `resume()`**）
-5. **SSE 对话链路** — `chat.submit` / `chat.stop` / 事件流（`requestId` 幂等，`whenBusy` 策略）
-6. **Git 自动提交** — isomorphic-git init，每轮 commit 带 trailer 元数据
-7. **静态预览** — App Gateway 托管一个纯前端 React 应用（**`spikes/gateway` 可直接演进**），热更新打通（M1 不碰数据库）
-8. **Web 模式** — `pnpm dev:web` 全流程可用
-9. **Electron 壳** — **最后接入**，打包冒烟（mac + win）
+第 7 步之前还缺一块**内容生产者**：现在 Agent 没有工具，只能说不能写。接 `pi-coding-agent` 的 read/write/edit/bash + `generator` 是第 7 步的前置（见 §4.4）。
 
 ### 4.3 M1 验收（DoD）
 
-- [ ] `pnpm dev:web` 打开即可对话
-- [ ] 生成一个纯前端 Todo 应用，iframe 里热更新生效
-- [ ] 每轮对话产生一个 git commit
-- [ ] 杀进程重启后，对话与任务能续跑（`resume()`）
+- [ ] `pnpm dev:web` 打开即可对话 —— server 侧已具备，缺 Web 前端（第 8 步）
+- [ ] 生成一个纯前端 Todo 应用，iframe 里热更新生效 —— 缺工具与网关（第 7 步）
+- [x] 每轮对话产生一个 git commit —— 已有机制（`chat.ts` 在每轮结束调用 `commitAll`）；**本轮没有文件改动时不产生空提交**，等工具接上才会真的产出 commit
+- [x] 杀进程重启后，对话与任务能续跑（`resume()`）—— `packages/server/test/chat.test.ts` 的「崩溃续跑」用例：生成中途关进程 → 重启 → 这一轮自己跑完（403ms）
+
+### 4.4 下一步具体做什么（第 7 步拆解）
+
+1. **工具层**：`packages/agent/src/tools/` 用 `defineTool` 包 `pi-coding-agent` 的 read/write/edit/bash，`cwd` 指 `apps/<id>/repo`；`replay: 'safe'`
+2. **生成器**：`packages/generator` 模板渲染（`templates/`）+ `data-tenon-loc` 注入（照 `spikes/loc` 的双属性）
+3. **网关**：`packages/gateway` 从 `spikes/gateway` 演进，`preview.start/stop/status` 三个 RPC 落地，事件用 `preview.ready`
+4. **前端**：`apps/web` 先做「会话 + iframe 预览」两栏，SSE 客户端注意**先连后发**（DESIGN §4.5 第 4 条）
+
+### 4.5 代码地图（只列已落地的）
+
+```
+packages/
+├── protocol/            # ★ 契约：errors(ErrorCode) / domain / rpc(方法表) / events(SSE) / result(信封)
+│   └── src/rpc.ts       #   一张表三种用途：服务端校验、前端取类型、覆盖率测试断言
+├── core/                # 领域服务，不认识 HTTP
+│   ├── src/paths.ts     #   TENON_HOME 布局（唯一算路径的地方）
+│   ├── src/db.ts        #   node:sqlite + PRAGMA user_version 线性迁移
+│   ├── src/git.ts       #   isomorphic-git：commitAll / log / diff / revert（回滚 = 新提交）
+│   ├── src/secrets.ts   #   AES-256-GCM + 0600 密钥文件（桌面版换 safeStorage）
+│   └── src/stores/      #   apps / releases / settings / providers
+├── agent/               # pi 生态的唯一入口（铁律 3 的落地点）
+│   ├── src/models.ts    #   faux / BYOK(openai-compatible, 自建 provider)
+│   ├── src/harness-pool.ts  # 每应用一个 harness.sqlite + resume()
+│   ├── src/chat.ts      #   submit/stop/history/plan + watchEvents → SSE（40ms 合帧）
+│   └── src/docs.ts      #   tenon.app / tenon.plan（defineDoc）
+└── server/              # 只做「挂到 HTTP 上」
+    ├── src/app.ts       #   Fastify 装配 / RPC 路由 / SSE / 错误处理
+    ├── src/auth.ts      #   Bearer（/api/health 免 Token）
+    ├── src/handlers.ts  #   `satisfies HandlerMap` → 漏实现编译期就报错
+    └── src/bin.ts       #   CLI 入口，打印 TENON_READY
+```
+
+依赖方向（DESIGN §3.2）**禁止反向**：`protocol ← core/agent/server`；`server → agent → core`。
 
 ---
 
@@ -113,6 +162,12 @@
 | **不要用 `reset --hard` 做回滚** | 一律 `git revert`，保留历史 |
 | **产品库与应用库是两件事** | 别把 `tenon.db`（SQLite）和用户业务库（PG）混为一谈 |
 | **无 API Key 也能开发** | `pi-ai` 自带 `providers/faux`（`fauxProvider()` + `fauxAssistantMessage()`），CI 与本地都用它，别 mock harness |
+| **`git.statusMatrix` 会漏改动** | isomorphic-git 的 stat 快路径把**同长度、同一毫秒**的改动判成"没变"（`v1\n`→`v2\n` 返回 `[1,1,1]`），`WORKDIR` walker 的 `oid()` 也返回旧值。`commitAll` 已改为自算 blob oid + `add({force:true})`，见 `packages/core/src/git.ts`。**别改回去** |
+| **`pi.live` 没有 token 增量** | 它只有 `{run,generation:{attempt}}`。流式必须用 `watchEvents(...)` 的 `message_update.changes[].type==='text_delta'` |
+| **`message_end` 对用户 entry 也触发** | 服务端只推 `role === 'assistant'` 的 `message.end`，否则前端会重绘自己刚发的气泡 |
+| **SSE 必须先连上再提交** | 与 HMR 首帧同一个坑。`GET /events` 建连时立刻写 `: connected`，测试/前端要等它再发 `chat.submit` |
+| **`defineDoc<T>` 的 T 必须用 `type` 不能是 `interface`** | 约束是 `T extends JsonObject`，而只有类型别名会拿到隐式索引签名；interface 会报「缺少索引签名」 |
+| **模型密钥不能塞 `process.env`** | 生成应用的子进程会继承环境变量，那是真实泄漏面。`packages/agent/src/models.ts` 用 `createProvider` + `api/openai-completions` 现场拼 provider |
 
 ---
 
@@ -124,15 +179,27 @@
 | pnpm | 9.x | 9.15.9 ✅ |
 | git | 任意（isomorphic-git 是纯 JS，系统 git 可选）| 2.39.5 ✅ |
 
-spike 复跑入口（在仓库根目录）：
+日常入口（在仓库根目录）：
 
 ```bash
-pnpm install
+pnpm dev:faux       # TENON_FAUX=1 起 server，打印 TENON_READY {url,port,token,home,model}
+pnpm dev:server     # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
+pnpm test           # vitest：core（db/git/secrets/apps）+ server（rpc/sse/chat/续跑）
+pnpm smoke          # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
+pnpm typecheck      # 4 个 packages + 4 个 spikes
+```
+
+spike 复跑入口（历史证据，仍在）：
+
+```bash
 pnpm spike:db       # PGlite + TypeORM 压测（含正确性探针）→ spikes/db/results/spike-db.json
 pnpm spike:agent    # pi-durable 闭环 + 崩溃续跑            → spikes/agent/results/spike-agent.json
 pnpm spike:gateway  # 网关 HMR 代理
 pnpm spike:loc      # 定位插件精度
 ```
+
+服务端环境变量：`TENON_HOME`（数据目录，默认 `~/.tenon`）、`TENON_PORT`（0=随机）、
+`TENON_HOST`、`TENON_TOKEN`、`TENON_FAUX=1`（假模型）、`TENON_LOG=1`（pino）。
 
 > `spikes/*/pgdata*`、`spikes/*/work/` 是运行产物，已 gitignore；`results/*.json` 保留入库作为证据。
 
@@ -144,11 +211,11 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.1），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.2），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
-当前阶段：M1 主干。四个 spike 已全部通过，按 STATUS.md §4.2 的顺序推进，
-从 packages/protocol + packages/server 起（spikes/ 里的四个脚本是可直接演进的参考实现）。
+当前阶段：M1 主干。第 1~6 步已完成（packages/{protocol,core,agent,server}，28 个测试 + 9 项冒烟全绿）。
+接着做 STATUS.md §4.4：工具层 → 生成器 → 预览网关 → Web 前端。`pnpm test` 与 `pnpm smoke` 要一直保持绿。
 
 三条铁律不要违反：Electron 只做壳 / 生成应用不感知运行环境 / 实验性依赖锁版本 + adapter 包装。
 ```

@@ -1,0 +1,15 @@
+{
+  "name": "@tenon/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tenon 领域服务：TENON_HOME 布局、tenon.db（node:sqlite）、应用注册表、文件、Git",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@tenon/protocol": "workspace:*",
+    "isomorphic-git": "1.44.8"
+  }
+}

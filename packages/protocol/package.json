@@ -1,0 +1,14 @@
+{
+  "name": "@tenon/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tenon RPC 契约：错误模型、领域类型、方法表、SSE 事件（zod 单一事实来源）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

@@ -35,16 +35,25 @@
 |---|---|
 | [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、M1 任务清单、已知陷阱 |
 | [**四个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度的真实数字 |
-| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.1）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
+| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.2）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
 | [逆向工作手册](docs/REVERSE_ENGINEERING.md) | 内部研究用（不随开源发布） |
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.1** 定稿；M1 第一周的**四个技术 spike 已全部跑通**（含 PGlite 压测与 pi-durable 崩溃续跑），仓库已有 pnpm workspace 骨架与 `spikes/` 参考实现。
+M0 逆向研究完成；方案 **v1.2.2**；四个技术 spike 全部跑通。**M1 主干第 1~6 步已落地**：四个核心包（`protocol` / `core` / `agent` / `server`）能起服务、能对话、能落库、能自动提交，28 个测试 + 9 项端到端冒烟全绿。
 
-**当前进度：M1 主干（`packages/protocol` + `packages/server` 起）** —— 任务清单、spike 复跑命令、验收标准与已知陷阱见 [STATUS.md](docs/STATUS.md)，实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
+想先跑起来看（**不需要任何 API Key**）：
+
+```bash
+pnpm install
+pnpm dev:faux     # 起 server，打印 TENON_READY {url,port,token,home,model}
+pnpm test         # 28 项单测 / 集成测试
+pnpm smoke        # 9 项端到端（spawn 真进程，走 HTTP + SSE）
+```
+
+**还没做的**：工具与生成器、预览网关、Web 前端、Electron 壳 —— 见 [STATUS.md §4.2/§4.4](docs/STATUS.md)。实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License
 
