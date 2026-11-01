@@ -224,7 +224,15 @@ async function runElectron(dir: string, parentUrl: string, gatewayOrigin: string
   // 与 smoke:desktop 同一个坑：带着它 `electron` 会被当成 node 跑
   delete env['ELECTRON_RUN_AS_NODE']
 
-  const child = spawn(electronPath, [mainPath], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  /*
+   * `--no-sandbox`：Chromium 的沙箱需要 clone/namespace 权限，在被收窄的 shell 沙箱里
+   * 会 `sandbox initialization failed: Operation not permitted` → network service 崩溃
+   * → 打开本地页面直接 ERR_FAILED。报错文案里完全没有"沙箱"两个字，看着像服务没起。
+   *
+   * 关了不影响这条链路要验的东西：Alt 命中、overlay 绘制、capture 阶段吃掉 click、
+   * 跨源 postMessage 与父窗口校验，全在渲染进程里，与进程隔离无关。
+   */
+  const child = spawn(electronPath, ['--no-sandbox', mainPath], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   let stdout = ''
   let stderr = ''
   child.stdout.on('data', (chunk: Buffer) => {

@@ -1,9 +1,9 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 第 1~2 步**：226 个测试 + 9 项端到端冒烟 +
-> 16 项预览 e2e + 12 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、
-> `pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 前五步完成（点选链路通了）**）
+> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 前六步与代码回滚**：239 个测试 + 9 项端到端冒烟 +
+> 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 22 项改动/回滚 e2e + 全栈 e2e + 8 项桌面冒烟全绿；
+> `pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 前六步 + 代码回滚完成**）
 
 ---
 
@@ -22,17 +22,18 @@ Vite/Nest 子进程输出、页面异常（含堆栈）都汇进日志面板，�
 在预览里**按住 Alt** 就能描边高亮，**Alt+点一下**把元素反查回 `src/App.tsx:25:3` 并跨源送回平台，
 Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Agent。整条链路在 Electron 的真 Chromium
 里跑通（`pnpm e2e:inspector` 12 项，父页面与网关**跨源**，token 与 origin 都是真校验）。
-下一步是 Diff 视图与回滚。
+下一步是回滚的**数据**侧（代码已经能退回，库还停在新的样子）。
 
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 226 项单测 + 集成测试（约 137s，含 PGlite 冷启动）
+pnpm test                       # 239 项单测 + 集成测试（约 84s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
-pnpm e2e:inspector               # ★ 12 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
+pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
+pnpm e2e:diff                    # ★ 22 项改动链路：git.log / git.show / git.revert 全走真 HTTP（含根提交与错误码）
 pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁移 → Vite+Nest 双进程 → CRUD 经网关 → 重启后数据还在
 pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界面、退出后不留孤儿进程
@@ -185,8 +186,10 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 4 | **跨源回传**：iframe hash 带 token → `postMessage` → 父窗口校验 `origin` + `source` + `token` → Composer 顶部 chip → `chat.submit` 带上 `selection` | ✅ | `apps/web/src/lib/selection.ts`、`hooks/useInspectorSelection.ts`、`packages/protocol/src/selection-text.ts` |
 | 4.5 | **送到 Agent**：拼成 `[TENON-SELECTION] {json}` 首行（`pi-durable` 的 submit 只吃纯文本），渲染用户气泡时用 `stripSelectionBlock` 剥回原文 | ✅ 链路已通；"改样式并自验"仍需真模型（faux 做不到） | `packages/agent/src/chat.ts`、`MessageList.tsx` |
 | 5 | **真机 e2e**：Electron 开真 Chromium，父页面在**另一个源**，模拟 Alt+Click，用平台自己的校验函数过一遍 | ✅ | `scripts/e2e-inspector.ts`（`pnpm e2e:inspector`，12 项） |
-| 6 | Diff 视图（一轮改了什么，逐文件、逐 hunk） | 待做 | `apps/web` + `packages/core/src/git.ts` |
-| 7 | 回滚（`git revert` + 数据库快照回放，代码与数据一致） | 待做 | `packages/core` + `packages/db-provisioner` |
+| 6 | **Diff 视图**：`git.show` 返回逐文件、逐行的结构化差异（两侧行号、`binary`/`truncated` 标记）；面板覆盖在预览之上（iframe 不卸载），左侧版本列表、右侧折叠上下文的逐行着色 | ✅ | `packages/core/src/git.ts` 的 `showCommit` / `buildDiff`、`apps/web/src/features/diff/DiffPanel.tsx`、`lib/diff.ts` |
+| 7a | **代码回滚**：`git.revert` 产生反向提交（历史保留），两步确认，回滚后自动停在回滚提交上 | ✅ | `apps/web/src/hooks/useWorkspace.ts` 的 `revertCommit`、`DiffPanel` 的确认态 |
+| 7b | **回滚的数据侧**：执行过迁移的 commit 存快照 + `dbRestore` 可选还原 | 待做（策略要改，见 §4.7） | `packages/db-provisioner` |
+| 8 | 真机 e2e：三条 git RPC 全部走真 HTTP（含根提交、错误码映射） | ✅ | `scripts/e2e-diff.ts`（`pnpm e2e:diff`，22 项） |
 
 ### 4.3 M1 验收（DoD）
 
@@ -253,27 +256,36 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 - [ ] **Docker compose 产物** —— ⛔ 阻塞：本机无 `docker`/`podman`/`colima`，无法"构建并跑起来"。
       DoD ④ 不能靠猜收口，故**不产出未验证的 Dockerfile**
 
-### 4.7 下一步具体做什么（M3 第 6 步：Diff 视图与回滚）
+### 4.7 下一步具体做什么（M3 第 7b 步：回滚的数据侧）
 
-M3 的前半段（定位 → 点选 → 回传 → 进对话）已经通了，`pnpm e2e:inspector` 在真 Chromium 里
-跑通 12 项。**还差"看得见改了什么、能退回去"**：
+代码回滚已经通了（`pnpm e2e:diff` 22 项，含"回滚后内容回到上一版、历史变成 3 条"）。
+**没通的是数据**：如果这一轮改过 schema 或写入过数据，回滚代码之后库还停在新的样子。
 
-1. **Diff 视图**：`git.log` 已有每轮 commit，缺的是"这一轮改了哪几行"
-   - `packages/core/src/git.ts` 加 `git.diff({ appId, sha })`：用 isomorphic-git 的 `readBlob`
-     取 `sha` 与父提交的树，逐文件做行级 diff（**不要**拉 `git diff` 文本解析，node 侧没有 git 二进制）
-   - 协议加 `git.diff` RPC；`apps/web` 的提交列表点进去看逐文件 hunk（Monaco 的 diff editor 已在依赖里）
-2. **回滚**：`git revert`（不是 `reset --hard`）+ 数据库快照回放
-   - 快照已经在 `db-provisioner` 里有 `dumpDataDir` / `restoreDataDir` 的基础，
-     要对齐"这个 commit 时的库"：迁移执行过的 commit 才需要回放
-   - 验收：改一轮 → 回滚 → 代码与数据都回到那一轮之前，且**历史还在**（`revert` 产生新 commit）
-3. **截图**：`SelectionContext.screenshot` 字段留了但没填 —— 用 Electron 的 `capturePage`
-   或 iframe 里 `html2canvas` 都行，属于增强，卡在 3 之后做
+DESIGN §12.3 当时写的是"`pglite` 档 directory 归档 + `postgres` 档 `pg_dump --format=custom`"。这条要改，
+理由和跨档迁移那次一样：**用户机器上没有 `pg_dump`**，而"零安装"是这个产品的承诺。
+好在 `packages/db-provisioner/src/migrate.ts` 已经有一套纯 JS 的跨库逻辑拷贝，快照可以复用它 ——
+把「源库」换成「同一台 PG」、把「目标」换成一个临时库，导出的就是逻辑快照。
 
-> 一条现实约束：`faux` provider 只能验证链路，验证不了"点选后真的把样式改对了"。
-> M3 DoD ① 的最后一厘米要等有真模型 key 时手动过一遍，别在文档里写成已验证。
+要做的事：
+
+1. **定义"什么时候值得存快照"**：每一轮都存 × 几十 MB 不现实。判据是「这个 commit 的改动里
+   出现了 schema 变更」——`migrations/`、`*.entity.ts`、`shared/schema.ts` 任一命中就存
+2. **`snapshot(appId)` / `restoreSnapshot(appId, sha)`** 两个方法，落在 `DatabaseManager` 上
+   （它已经管着 pglite 的 `dataDir` 与 postgres 的连接，不用新起抽象）
+   - `pglite` 档最简单：`dataDir` 是目录，`cp -r` 到 `snapshots/<sha>/`（**先 stop 再拷**，
+     PGlite 在跑的时候文件不一致）
+   - `postgres` 档走逻辑拷贝：建临时库 → `migrateDatabase` → 导出 SQL 文件 → 删临时库
+3. **`git.revert` 加 `dbRestore` 可选参数**（默认 false），UI 在确认框里加一个勾选框，
+   文案要说清"会丢弃这之后写入的数据"
+4. **验收**：写一行数据 → 跑一次迁移 → 提交 → 回滚（带 `dbRestore`）→ 表结构回到旧版且那行数据还在；
+   再验一次「不勾 dbRestore」时数据保留、只有代码回去
+
+> 两个坑先说在前面：① PGlite **必须先停再拷目录**，热拷出来的是半写状态，恢复时能起得来但表坏了；
+> ② postgres 档的临时库名要带随机后缀，两个应用同时回滚时不能撞名。
 
 > 已知欠账（有环境就能补）：Docker compose 产物（M2 第 8 步）；
-> `pglite → 真 PG` 的迁移端到端；`pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）。
+> `pglite → 真 PG` 的迁移端到端；`pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）；
+> `SelectionContext.screenshot` 字段留了没填（Electron `capturePage` 或 iframe 里 canvas）。
 
 ### 4.8 代码地图（只列已落地的）
 
@@ -363,6 +375,7 @@ scripts/
 ├── smoke.ts             # 端到端冒烟（真 spawn bin.ts）
 ├── smoke-desktop.ts     # 桌面冒烟：真起 Electron / Tenon.app，加载界面后退出并验证不留孤儿进程
 ├── e2e-preview.ts       # 16 项真机断言（含定位注入与 HMR 经网关的真实推送）
+├── e2e-diff.ts          # 22 项：git.log / git.show / git.revert 的真 HTTP 行为
 └── e2e-fullstack.ts     # ★ 全栈真机断言：库/迁移/双进程/CRUD 经网关/重启后数据还在
 ```
 
@@ -451,6 +464,11 @@ scripts/
 | **`loc.file` 必须当成不可信输入** | 它会原样进 Agent 上下文。校验里明确拒掉绝对路径、`..`、盘符、反斜杠 —— 否则生成应用（用户和 Agent 都能改那份代码）发一条 `{loc:{file:"../../tenon.db"}}` 就等于给了一条"去读平台库"的指令注入 |
 | **overlay 必须 `pointer-events: none`** | 否则鼠标永远命中高亮层，`event.target` 永远是 overlay，"什么都选不中"。同理，选中那一下要在 **capture 阶段** `preventDefault + stopPropagation`，否则生成应用自己的 onClick 会跟着触发（按钮提交表单、链接跳走） |
 | **框选的元素上限要"先过滤再截断"** | `slice(0,50)` 写在过滤之前，塞几条垃圾进去就能把真元素挤掉。同理，框选只留**最内层**元素：把 `<main>` 这类容器交给 Agent 只会让它把改动面放大 |
+| **`git.show` 不是 `git.diff`** | `git.diff(from)` 算的是"从 from 到 HEAD"的累积变化。版本列表里点第 3 条会显示第 3 条之后的所有改动，看起来像"这一轮改了 8 个文件"。看单条提交必须用 `showCommit`（内部取 `commit.parent[0]` 和它比）—— 有测试专门造了第三条提交来盯这件事 |
+| **`''.split('\n')` 是 `['']`，不是空数组** | 新增/删除文件时缺失的那一侧不能传空串：会在全 `+` 的差异里混进一行 context，行号也整体错一格。传 `null`，内部换成 `[]` |
+| **`git.resolveRef` 对 40 位 hex 不校验存在性** | 它原样返回，真正报错的是 `readCommit`（英文 "Could not find …"）。只 catch resolveRef 的话，用户传个瞎编的 sha 会拿到 `INTERNAL` 而不是 `GIT_DIFF_FAILED` |
+| **改动面板必须覆盖，不能替换预览** | 替换 = iframe 卸载 = HMR 连接断开 + 预览回到空白，看完 diff 切回去等于重启一次。用 `absolute inset-0` 盖住，iframe 留在原地 |
+| **Electron 的沙箱失败表现为"页面打不开"** | 被收窄的 shell 沙箱里 Chromium 报 `sandbox initialization failed: Operation not permitted` → network service 崩溃 → `loadURL` 直接 `ERR_FAILED (-2)`。文案里一个"沙箱"字都没有，第一反应会怀疑服务没起。e2e 里加 `--no-sandbox`（这条链路要验的东西全在渲染进程里，与进程隔离无关） |
 
 ---
 
@@ -469,7 +487,7 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：25 个测试文件（226 项，含迁移、runtime-sdk、定位与点选校验）
+pnpm test                  # vitest：26 个测试文件（239 项，含迁移、runtime-sdk、定位、点选校验与 diff 折叠）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
@@ -535,7 +553,7 @@ pnpm spike:loc      # 定位插件精度
 
 当前阶段：M2 全栈生成，第 1~3 步已完成（db-provisioner 两档供给 + nest-api 模板 + 双进程预览；
 日志/错误面板 + LogStore 三来源汇流；runtime-sdk 源码分发 + 跨档逻辑拷贝迁移）。
-226 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 12 + e2e:fullstack + 桌面包全绿。
+239 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 22 + e2e:fullstack + 桌面包全绿。
 **M2 只剩 Docker compose 产物**（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）。
 有 Docker 环境后按 STATUS.md §4.7 补；否则直接进 M3（精调与版本：源码定位、框选、Diff、回滚）。
 `pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`。

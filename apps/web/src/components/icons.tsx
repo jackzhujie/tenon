@@ -75,8 +75,20 @@ export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
-export function ExternalIcon(props: SVGProps<SVGSVGElement>) {
+/** 改动：两条长短不一的横线 + 一个增删标记，比"文件"更贴近"diff" */
+export function DiffIcon(props: SVGProps<SVGSVGElement>) {
   return (
+    <Base {...props}>
+      <path d="M4 6h10" />
+      <path d="M4 12h16" />
+      <path d="M4 18h7" />
+      <path d="M18 4v4" />
+      <path d="M16 6h4" />
+    </Base>
+  )
+}
+
+export function ExternalIcon(props: SVGProps<SVGSVGElement>) {  return (
     <Base {...props}>
       <path d="M15 3h6v6" />
       <path d="M10 14 21 3" />

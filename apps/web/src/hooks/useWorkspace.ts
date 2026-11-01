@@ -19,6 +19,7 @@ import type {
   LogEntry,
   NormalizedMessage,
   PreviewStatus,
+  RpcOutput,
   SelectionContext,
   SseEvent,
   TemplateInfo,
@@ -46,6 +47,9 @@ export interface ActiveModel {
   modelId: string
 }
 
+/** `git.show` 的返回：一条提交自己改了什么（见 protocol 的同名 RPC） */
+export type GitShow = RpcOutput<'git.show'>
+
 export interface UsageInfo {
   model: string
   inputTokens: number
@@ -66,6 +70,12 @@ interface State {
   logs: LogEntry[]
   /** 精调：从预览里点选的元素/区域。提交时一并交给 Agent，提交后清掉 */
   selection: SelectionContext | null
+  /** 改动面板：当前查看的提交内容（`git.show` 的结果） */
+  diff: GitShow | null
+  /** 点开的是哪一条。与 `diff.commit.sha` 分开存，切换时旧内容还在，不会闪成空白 */
+  viewingSha: string | null
+  diffLoading: boolean
+  reverting: boolean
   stream: StreamState
   usage: UsageInfo | null
   model: ActiveModel | null
@@ -87,6 +97,10 @@ const initialState: State = {
   commits: [],
   logs: [],
   selection: null,
+  diff: null,
+  viewingSha: null,
+  diffLoading: false,
+  reverting: false,
   stream: 'stopped',
   usage: null,
   model: null,
@@ -111,6 +125,9 @@ type Action =
   | { kind: 'logs.clear' }
   | { kind: 'preview'; preview: PreviewStatus | null }
   | { kind: 'selection'; selection: SelectionContext | null }
+  | { kind: 'diff'; sha: string | null; diff: GitShow | null }
+  | { kind: 'diff.loading'; loading: boolean }
+  | { kind: 'revert'; reverting: boolean }
   | { kind: 'optimistic'; message: NormalizedMessage }
   | { kind: 'submit.start' }
   | { kind: 'submit.done' }
@@ -299,6 +316,12 @@ function reducer(state: State, action: Action): State {
       return { ...state, preview: action.preview }
     case 'selection':
       return { ...state, selection: action.selection }
+    case 'diff':
+      return { ...state, viewingSha: action.sha, diff: action.diff }
+    case 'diff.loading':
+      return { ...state, diffLoading: action.loading }
+    case 'revert':
+      return { ...state, reverting: action.reverting }
     case 'optimistic':
       return { ...state, messages: [...state.messages, action.message], submitting: true, error: null }
     case 'submit.start':
@@ -339,6 +362,10 @@ export interface Workspace {
   startPreview(restart?: boolean): Promise<void>
   clearLogs(): Promise<void>
   setSelection(selection: SelectionContext | null): void
+  /** 打开某一版看它改了什么（`git.show`） */
+  showCommit(sha: string): Promise<void>
+  /** 回滚某一版（`revert`：产生新的反向提交，历史保留） */
+  revertCommit(sha: string): Promise<void>
   clearError(): void
 }
 
@@ -487,6 +514,8 @@ export function useWorkspace(): Workspace {
 
   const selectApp = useCallback((appId: string | null) => {
     dispatch({ kind: 'select', appId })
+    // 上一个应用的改动不能留在面板里 —— 路径、sha 全是别人的，看着像数据串了
+    dispatch({ kind: 'diff', sha: null, diff: null })
   }, [])
 
   const createApp = useCallback(
@@ -593,6 +622,56 @@ export function useWorkspace(): Workspace {
     }
   }, [])
 
+  /**
+   * 打开某一版看它改了什么。
+   *
+   * 用 `git.show` 而不是 `git.diff`：后者算的是「从这个 sha 到 HEAD」的累积变化，
+   * 在版本列表里点第三个会显示第三个之后的全部改动 —— 看起来像「这一轮改了 8 个文件」。
+   */
+  const seqRef = useRef(0)
+  const showCommit = useCallback(async (sha: string) => {
+    const appId = activeAppIdRef.current
+    if (appId === null) return
+    // 连点两版时，先发的那次可能后回来。用序号丢弃过期结果，否则界面停在错的那一版
+    seqRef.current += 1
+    const seq = seqRef.current
+    dispatch({ kind: 'diff', sha, diff: null })
+    dispatch({ kind: 'diff.loading', loading: true })
+    try {
+      const result = await rpc('git.show', { appId, sha })
+      if (seq !== seqRef.current) return
+      dispatch({ kind: 'diff', sha: result.commit.sha, diff: result })
+    } catch (err) {
+      if (seq === seqRef.current) dispatch({ kind: 'error', message: messageOf(err) })
+    } finally {
+      if (seq === seqRef.current) dispatch({ kind: 'diff.loading', loading: false })
+    }
+  }, [])
+
+  /**
+   * 回滚一版。服务端用 `revert` 语义（产生新的反向提交，历史不丢）。
+   *
+   * 回滚之后**打开的是那条回滚提交** —— 用户刚做的动作，面板应该跟着它，
+   * 而不是停在已经被回滚掉的原提交上（那样看着像什么都没发生）。
+   */
+  const revertCommit = useCallback(
+    async (sha: string) => {
+      const appId = activeAppIdRef.current
+      if (appId === null) return
+      dispatch({ kind: 'revert', reverting: true })
+      try {
+        const result = await rpc('git.revert', { appId, sha })
+        await refreshCommits(appId)
+        await showCommit(result.commit.sha)
+      } catch (err) {
+        dispatch({ kind: 'error', message: messageOf(err) })
+      } finally {
+        dispatch({ kind: 'revert', reverting: false })
+      }
+    },
+    [refreshCommits, showCommit],
+  )
+
   const clearError = useCallback(() => dispatch({ kind: 'error', message: null }), [])
 
   const setSelection = useCallback(
@@ -617,5 +696,7 @@ export function useWorkspace(): Workspace {
     clearLogs,
     clearError,
     setSelection,
+    showCommit,
+    revertCommit,
   }
 }

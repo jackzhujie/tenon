@@ -9,6 +9,7 @@
 import { z } from 'zod'
 import {
   App,
+  DiffFile,
   FileNode,
   GitCommit,
   GitFileChange,
@@ -229,7 +230,20 @@ export const rpcMethods = {
   },
   'git.diff': {
     input: z.object({ appId: Id, from: z.string().min(1), to: z.string().default('HEAD') }),
-    output: z.object({ changes: z.array(GitFileChange), patch: z.string() }),
+    output: z.object({
+      changes: z.array(GitFileChange),
+      files: z.array(DiffFile),
+      patch: z.string(),
+    }),
+  },
+  'git.show': {
+    input: z.object({ appId: Id, sha: z.string().min(1) }),
+    output: z.object({
+      commit: GitCommit,
+      changes: z.array(GitFileChange),
+      files: z.array(DiffFile),
+      patch: z.string(),
+    }),
   },
   'git.revert': {
     input: z.object({ appId: Id, sha: z.string().min(1) }),

@@ -212,13 +212,62 @@ async function treeDiff(
 const MAX_DIFF_BYTES = 200_000
 const MAX_DIFF_LINES = 1500
 
-/** 行级 LCS 差异。只为「让人看懂改了什么」，不做精确的 hunk 合并。 */
-function unifiedLineDiff(path: string, fromText: string, toText: string): string {
-  const a = fromText.split('\n')
-  const b = toText.split('\n')
+/** 一行差异。`kind` 是给人看的颜色，行号是给"跳到源码"和"对齐两侧"用的 */
+export interface DiffLine {
+  kind: 'ctx' | 'add' | 'del'
+  text: string
+  /** 旧文件里的行号（1 起）；新增行没有 */
+  oldLine: number | null
+  /** 新文件里的行号（1 起）；删除行没有 */
+  newLine: number | null
+}
+
+export interface DiffFile {
+  path: string
+  status: GitFileChange['status']
+  insertions: number
+  deletions: number
+  /** 逐行差异。二进制或超大文件为空，靠 `binary` / `truncated` 说明原因 */
+  lines: DiffLine[]
+  /** 这个文件自己的 unified patch（复制给模型或人看） */
+  patch: string
+  binary?: boolean
+  truncated?: boolean
+}
+
+/**
+ * 行级 LCS 差异。只为「让人看懂改了什么」，不做精确的 hunk 合并 ——
+ * 所以整份文件一次性比对，不切 `@@` 段。
+ *
+ * 为什么返回结构而不是纯文本：前端要按行着色、要能点错误日志跳到某一行，
+ * 让它在浏览器里再解析一遍 `+`/`-` 前缀等于把同一件事做两遍、且更脆
+ * （行内容本身可能以 `+` 开头）。
+ */
+function lineDiff(
+  path: string,
+  /**
+   * 这一侧不存在时传 `null`，**不要传空串**。
+   *
+   * `''.split('\n')` 得到 `['']` —— 一个"空行"。新增文件因此会在全是 `+` 的
+   * 差异里混进一行无意义的 context，删除文件同理，而且行号会整体错一格。
+   */
+  fromText: string | null,
+  toText: string | null,
+): Omit<DiffFile, 'path' | 'status'> {
+  const a = fromText === null ? [] : fromText.split('\n')
+  const b = toText === null ? [] : toText.split('\n')
+  const header = `--- a/${path}\n+++ b/${path}\n`
+
   if (a.length > MAX_DIFF_LINES || b.length > MAX_DIFF_LINES) {
-    return `--- a/${path}\n+++ b/${path}\n@@ 文件过大，省略逐行 diff（${a.length} → ${b.length} 行）@@\n`
+    return {
+      insertions: 0,
+      deletions: 0,
+      lines: [],
+      truncated: true,
+      patch: `${header}@@ 文件过大，省略逐行 diff（${a.length} → ${b.length} 行）@@\n`,
+    }
   }
+
   const n = a.length
   const m = b.length
   const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
@@ -227,31 +276,54 @@ function unifiedLineDiff(path: string, fromText: string, toText: string): string
       lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!)
     }
   }
-  const lines: string[] = []
+
+  const lines: DiffLine[] = []
+  let oldNo = 1
+  let newNo = 1
+  const push = (kind: DiffLine['kind'], text: string): void => {
+    lines.push({
+      kind,
+      text,
+      oldLine: kind === 'add' ? null : oldNo,
+      newLine: kind === 'del' ? null : newNo,
+    })
+    if (kind !== 'add') oldNo += 1
+    if (kind !== 'del') newNo += 1
+  }
+
   let i = 0
   let j = 0
   while (i < n && j < m) {
     if (a[i] === b[j]) {
-      lines.push(` ${a[i]!}`)
+      push('ctx', a[i]!)
       i += 1
       j += 1
     } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) {
-      lines.push(`-${a[i]!}`)
+      push('del', a[i]!)
       i += 1
     } else {
-      lines.push(`+${b[j]!}`)
+      push('add', b[j]!)
       j += 1
     }
   }
   while (i < n) {
-    lines.push(`-${a[i]!}`)
+    push('del', a[i]!)
     i += 1
   }
   while (j < m) {
-    lines.push(`+${b[j]!}`)
+    push('add', b[j]!)
     j += 1
   }
-  return `--- a/${path}\n+++ b/${path}\n${lines.join('\n')}\n`
+
+  const insertions = lines.filter((line) => line.kind === 'add').length
+  const deletions = lines.filter((line) => line.kind === 'del').length
+  const body = lines.map((line) => `${line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}${line.text}`)
+  return {
+    insertions,
+    deletions,
+    lines,
+    patch: `${header}${body.join('\n')}\n`,
+  }
 }
 
 async function blobText(dir: string, oid: string | undefined): Promise<string | undefined> {
@@ -265,29 +337,130 @@ async function blobText(dir: string, oid: string | undefined): Promise<string | 
   return Buffer.from(blob).toString('utf8')
 }
 
+/** 空提交的 diff：整棵树都是「新增」（根提交没有父提交可比） */
+async function treeDiffFromEmpty(
+  dir: string,
+  to: string,
+): Promise<Array<{ path: string; toOid?: string }>> {
+  const results: Array<{ path: string; toOid?: string }> = []
+  await git.walk({
+    fs,
+    dir,
+    trees: [git.TREE({ ref: to })],
+    map: async (filepath, entries) => {
+      const entry = entries[0]
+      if (entry === null || entry === undefined) return undefined
+      if ((await entry.type()) !== 'blob') return undefined
+      const oid = await entry.oid()
+      if (oid !== undefined) results.push({ path: filepath, toOid: oid })
+      return undefined
+    },
+  })
+  return results.sort((x, y) => x.path.localeCompare(y.path))
+}
+
 export interface DiffResult {
   changes: GitFileChange[]
+  /** 逐文件的结构化差异（前端直接渲染这个） */
+  files: DiffFile[]
+  /** 拼成一份完整的 unified patch（复制、塞给模型用） */
   patch: string
 }
 
 export async function diff(dir: string, from: string, to = 'HEAD'): Promise<DiffResult> {
-  const entries = await treeDiff(dir, from, to)
+  return buildDiff(dir, await treeDiff(dir, from, to))
+}
+
+/**
+ * 一条提交自己改了什么（`git show` 的语义）。
+ *
+ * 不要用 `diff(dir, sha)` 代替 —— 那是「sha 之后到 HEAD」的累积变化，
+ * 在提交列表里点第 3 个版本时会显示第 3 个之后的所有改动，看起来像「这一轮改了 8 个文件」。
+ */
+export async function showCommit(
+  dir: string,
+  sha: string,
+): Promise<DiffResult & { commit: GitCommit }> {
+  let oid: string
+  let commit: Awaited<ReturnType<typeof git.readCommit>>['commit']
+  try {
+    oid = await git.resolveRef({ fs, dir, ref: sha })
+    /*
+     * `resolveRef` 对 40 位 hex **不校验存在性**，原样返回就完事；
+     * 真要读不到是 `readCommit` 抛（错误信息是英文的 "Could not find …"）。
+     * 两个都包在同一个 try 里，才能保证对外永远是 GIT_DIFF_FAILED 而不是 INTERNAL。
+     */
+    ;({ commit } = await git.readCommit({ fs, dir, oid }))
+  } catch {
+    throw new TenonError('GIT_DIFF_FAILED', `找不到 commit ${sha}`)
+  }
+  const parent = commit.parent[0]
+  const entries =
+    parent === undefined
+      ? (await treeDiffFromEmpty(dir, oid)).map((entry) => ({
+          path: entry.path,
+          fromOid: undefined as string | undefined,
+          toOid: entry.toOid,
+        }))
+      : await treeDiff(dir, parent, oid)
+  return {
+    ...(await buildDiff(dir, entries)),
+    commit: {
+      sha: oid,
+      message: commit.message.trimEnd(),
+      author: commit.author.name,
+      at: commit.author.timestamp * 1000,
+      parents: commit.parent,
+    },
+  }
+}
+
+async function buildDiff(
+  dir: string,
+  entries: Array<{ path: string; fromOid?: string; toOid?: string }>,
+): Promise<DiffResult> {
   const changes: GitFileChange[] = []
-  const patches: string[] = []
+  const files: DiffFile[] = []
   for (const entry of entries) {
     const status: GitFileChange['status'] =
       entry.fromOid === undefined ? 'added' : entry.toOid === undefined ? 'deleted' : 'modified'
     const before = await blobText(dir, entry.fromOid)
     const after = await blobText(dir, entry.toOid)
-    const fromText = before ?? ''
-    const toText = after ?? ''
-    const lines = unifiedLineDiff(entry.path, fromText, toText).split('\n')
-    const insertions = lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length
-    const deletions = lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length
-    changes.push({ path: entry.path, status, insertions, deletions })
-    if (before !== undefined || after !== undefined) patches.push(unifiedLineDiff(entry.path, fromText, toText))
+
+    /*
+     * `blobText` 返回 undefined 有两种原因：文件不存在（新增/删除的一侧）或不可读（二进制/超大）。
+     * 两者必须分开 —— 混在一起会把「改了一张图」显示成「整文件被替换成空」，
+     * 用户看到的是几百行删除，而实际只动了 2KB。
+     */
+    const exists = entry.fromOid === undefined ? entry.toOid !== undefined : true
+    const missingSide = entry.fromOid === undefined ? after : before
+    const binary = exists && missingSide === undefined
+
+    if (binary) {
+      const header = `--- a/${entry.path}\n+++ b/${entry.path}\n`
+      files.push({
+        path: entry.path,
+        status,
+        insertions: 0,
+        deletions: 0,
+        lines: [],
+        binary: true,
+        patch: `${header}@@ 二进制文件，不做逐行 diff @@\n`,
+      })
+      changes.push({ path: entry.path, status })
+      continue
+    }
+
+    const computed = lineDiff(entry.path, before ?? null, after ?? null)
+    files.push({ path: entry.path, status, ...computed })
+    changes.push({
+      path: entry.path,
+      status,
+      insertions: computed.insertions,
+      deletions: computed.deletions,
+    })
   }
-  return { changes, patch: patches.join('') }
+  return { changes, files, patch: files.map((file) => file.patch).join('') }
 }
 
 /**
@@ -307,7 +480,7 @@ export async function revert(
   const parent = target.commit.parent[0]
   if (parent === undefined) {
     // 根提交的反向应用等于清空仓库，语义可疑；真需要就走「删应用」而不是回滚
-    throw new TenonError('NOT_IMPLEMENTED', 'M1 不支持回滚仓库的第一个提交')
+    throw new TenonError('NOT_IMPLEMENTED', '不支持回滚仓库的第一个提交（等于清空仓库）')
   }
   const entries = (await treeDiff(dir, parent, target.oid)).map((e) => ({
     path: e.path,

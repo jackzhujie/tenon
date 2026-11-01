@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { gitops } from '../src/index.js'
 
-const { commitAll, diff, initRepo, log, revert } = gitops
+const { commitAll, diff, initRepo, log, revert, showCommit } = gitops
 
 let dir: string
 
@@ -80,6 +80,91 @@ describe('Git 一等公民（isomorphic-git）', () => {
 
     const { readFile } = await import('node:fs/promises')
     expect((await readFile(join(dir, 'a.txt'), 'utf8')).trim()).toBe('v1')
+  })
+
+  it('showCommit 只看这一条提交自己改了什么（不是它之后累积的改变）', async () => {
+    await writeFile(join(dir, 'a.txt'), 'one\ntwo\n')
+    const first = await commitAll(dir, 'init')
+    await writeFile(join(dir, 'a.txt'), 'one\nTWO\n')
+    const second = await commitAll(dir, 'second')
+    await writeFile(join(dir, 'b.txt'), 'later\n')
+    await commitAll(dir, 'third')
+
+    const shown = await showCommit(dir, second!.sha)
+
+    // 第三条加的文件不该出现在第二条的 diff 里 —— 这是「看这一轮改了什么」和
+    // 「从这一轮到 HEAD 改了什么」的区别，最容易写错的一处
+    expect(shown.files.map((f) => f.path)).toEqual(['a.txt'])
+    expect(shown.commit.sha).toBe(second!.sha)
+    expect(shown.commit.parents).toEqual([first!.sha])
+  })
+
+  it('showCommit 的逐行差异带两侧行号（前端要按它对齐全文件）', async () => {
+    await writeFile(join(dir, 'a.txt'), 'one\ntwo\nthree\n')
+    await commitAll(dir, 'init')
+    await writeFile(join(dir, 'a.txt'), 'one\nTWO\nthree\nfour\n')
+    const second = await commitAll(dir, 'bump')
+
+    const [file] = (await showCommit(dir, second!.sha)).files
+    expect(file).toBeDefined()
+    const rows = file!.lines.map((line) => [line.kind, line.text, line.oldLine, line.newLine])
+    expect(rows).toEqual([
+      ['ctx', 'one', 1, 1],
+      ['del', 'two', 2, null],
+      ['add', 'TWO', null, 2],
+      ['ctx', 'three', 3, 3],
+      ['add', 'four', null, 4],
+      // 末尾换行会让 split('\n') 多出一个空串，它是真实的「最后一行」
+      ['ctx', '', 4, 5],
+    ])
+    expect(file!.insertions).toBe(2)
+    expect(file!.deletions).toBe(1)
+  })
+
+  it('根提交的 showCommit 把整棵树当新增（没有父提交可比）', async () => {
+    await writeFile(join(dir, 'a.txt'), 'only\n')
+    const first = await commitAll(dir, 'init')
+
+    const shown = await showCommit(dir, first!.sha)
+    expect(shown.commit.parents).toEqual([])
+    expect(shown.files.map((f) => [f.path, f.status])).toEqual([['a.txt', 'added']])
+    expect(shown.files[0]?.lines.some((line) => line.kind === 'add')).toBe(true)
+  })
+
+  it('新增文件的每一行都是 +，不混进空洞的 context 行', async () => {
+    await writeFile(join(dir, 'a.txt'), 'base\n')
+    await commitAll(dir, 'init')
+    await writeFile(join(dir, 'b.txt'), 'one\ntwo\n')
+    const second = await commitAll(dir, 'add b')
+    await writeFile(join(dir, 'b.txt'), 'one\ntwo\nthree\n')
+    const third = await commitAll(dir, 'edit b')
+
+    const added = (await showCommit(dir, second!.sha)).files.find((f) => f.path === 'b.txt')
+    /*
+     * 旧实现把缺失一侧当成空串传给 diff，`''.split('\n')` 给出 `['']` ——
+     * 一个"空行"，于是新增文件里混进一行 context，全 + 的文件看起来像"改了一行"。
+     * 这也是行号整体错一格的来源。
+     */
+    expect(added?.lines.every((line) => line.kind === 'add')).toBe(true)
+    expect(added?.lines.map((line) => line.newLine)).toEqual([1, 2, 3])
+
+    // 删除也要对称：全是 - 行，不该有 context
+    const removed = (await showCommit(dir, third!.sha)).files.find((f) => f.path === 'b.txt')
+    expect(removed?.lines.map((line) => line.kind)).toEqual(['ctx', 'ctx', 'add', 'ctx'])
+  })
+
+  it('二进制文件标 binary，不假装成「整文件被删光」', async () => {
+    await writeFile(join(dir, 'logo.bin'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]))
+    const first = await commitAll(dir, 'init')
+    await writeFile(join(dir, 'logo.bin'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x02]))
+    const second = await commitAll(dir, 'change image')
+
+    const shown = await showCommit(dir, second!.sha)
+    expect(first).toBeDefined()
+    expect(shown.files[0]?.binary).toBe(true)
+    expect(shown.files[0]?.lines).toEqual([])
+    // 关键：不能报成 0 insertions / 一堆 deletions 让人以为文件被清空
+    expect(shown.files[0]?.patch).toContain('二进制文件')
   })
 
   it('回滚第一个提交会明确拒绝（语义可疑，不做）', async () => {

@@ -170,6 +170,11 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       return gitops.diff(appPaths(core.home, app.id).repoDir, input.from, input.to)
     },
 
+    'git.show': async (input) => {
+      const app = core.apps.require(input.appId)
+      return gitops.showCommit(appPaths(core.home, app.id).repoDir, input.sha)
+    },
+
     'git.revert': async (input) => {
       const app = core.apps.require(input.appId)
       const result = await gitops.revert(appPaths(core.home, app.id).repoDir, input.sha, {

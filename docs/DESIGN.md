@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.11
+# DESIGN.md — 详细方案设计 v1.2.12
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -1224,15 +1224,41 @@ submission.done
 
 > **v1.2.2 实测修正：不能用 `git.statusMatrix` 判断变更。** isomorphic-git 的 stat 快路径会把**同长度、同一毫秒内**的改动判成"没变"（`v1\n` → `v2\n` 时 statusMatrix 返回 `[1,1,1]`，`WORKDIR` walker 的 `oid()` 也返回旧值）。对「一轮一 commit」这是致命漏检，且完全静默。`packages/core/src/git.ts` 改为自己按 `blob <len>\0 + content` 算 sha1 与 HEAD 树比对，再 `git.add({ force: true })` 绕过 index 缓存 —— 宁可每轮多读一遍盘。该行为已有回归测试（`packages/core/test/git.test.ts`）。
 
-**用户可回滚**：版本面板列出 commit（时间/摘要/模型/改动文件数/±行数），支持「查看 diff」「回滚到此」（`revert`，非 `reset --hard`，不丢后续历史）。
+**用户可回滚**：版本面板列出 commit（时间/摘要），支持「查看 diff」「回滚到此」（`revert`，非 `reset --hard`，不丢后续历史）。
+
+**Diff 的形状（v1.2.12 落地）**：`git.show({appId, sha})` 返回**结构化**的逐行差异，不是一段 patch 文本：
+
+```
+{ commit, changes: [{path, status, insertions, deletions}],
+  files: [{ path, status, insertions, deletions,
+            lines: [{kind: 'ctx'|'add'|'del', text, oldLine, newLine}],
+            patch, binary?, truncated? }],
+  patch }
+```
+
+三个决定都是踩过才定的：
+
+- **结构化而不是让前端解析 `+`/`-` 前缀** —— 行内容本身可能以 `+` 开头，纯文本解析必然错位；
+  服务端拼 patch 给模型用，前端拿 `lines` 渲染，同一份事实两个视图
+- **单条提交用 `git.show`，不是 `git.diff(sha)`** —— `diff(from)` 是"从 from 到 HEAD"的累积变化，
+  在版本列表里点第 3 条会把第 3 条之后的改动全算进去。`showCommit` 内部取 `commit.parent[0]` 与之比较，
+  根提交没有父提交则由单树 walk 把整棵树报成 `added`
+- **`binary` / `truncated` 显式标记** —— `readBlob` 返回不了文本有"不存在"和"不可读"两种原因，
+  混在一起会把"改了一张图"显示成"整文件被删光"
+
+界面侧：改动面板**覆盖**在预览之上（`absolute inset-0`）而不是替换 —— 替换会卸载 iframe，
+HMR 连接断开、预览归零，看完 diff 切回去等于重启一次。逐行折叠上下文（默认 ±3 行，
+两处改动隔得近时合成一段），版本列表在左侧，回滚按钮两步确认。
 
 ### 12.3 数据库回滚
 
 代码能回滚，schema 也能回滚（下迁移），但**数据**不一定。策略：
 
 - 每个执行过迁移的 commit → 生成 DB 快照 `snapshots/<sha>.*`（保留最近 20 个 + 所有 release）
-  - `pglite` 档：`dumpDataDir()` → `snapshots/<sha>.tar.gz`（WASM 实例的整目录归档）
-  - `postgres` 档：`pg_dump --format=custom` → `snapshots/<sha>.dump`
+  - `pglite` 档：`dumpDataDir()` → `snapshots/<sha>.tar.gz`（WASM 实例的整目录归档，**必须先 stop 再拷**）
+  - ~~`postgres` 档：`pg_dump --format=custom`~~ → **v1.2.12 撤掉**：用户机器上没有 `pg_dump`，
+    与「零安装」承诺冲突（和 M2 跨档迁移放弃 `pg_dump` 是同一个理由）。改为复用
+    `migrate.ts` 的纯 JS 逻辑拷贝 —— 建临时库 → `migrateDatabase` → 导出 SQL → 删临时库
 - 回滚时可选 `dbRestore: true` → 还原快照（**默认关闭**，UI 明确提示"会丢失此后数据"）；两档统一用 `DatabaseProvider.restore()` 抽象，调用方不感知实现
 - 发布时必存快照 → 对应 release 可"回滚到上线版本（含数据）"
 
@@ -1536,12 +1562,13 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > 无法实测就不产出未验证的 Dockerfile；`templates/nest-api` 的 `Dockerfile` 与 `compose.yml` 记为已知欠账，
 > 进 M3 之前不补。真 PG 端到端同理）。**M2 其余 DoD 均有实测。**
 
-> **M3 进度（v1.2.11，2026-11-01）**：前五步落地 —— ① 编译期注入 `data-tenon-loc` / `data-tenon-callsite`；
-> ② `resolveTarget()` 反查；③ inspector 交互（Alt+Hover 描边、Alt+Click 选中、Alt+Drag 框选只收最内层、ESC 退出）；
-> ④ 跨源回传（hash 带 token + 父窗口三道校验 + Composer chip + `chat.submit` 带 `selection`）；
-> ⑤ 真机 e2e（`pnpm e2e:inspector`，Electron 真 Chromium，父页面与网关跨源，12 项）。
-> **下一步：Diff 视图与回滚**（`git.diff` 用 isomorphic-git 的 `readBlob` 逐文件做行级 diff，不解析 `git diff` 文本 ——
-> node 侧没有 git 二进制）。M3 DoD ① 的"改样式并自验"要等真模型 key 才能验，`faux` 只能验链路。
+> **M3 进度（v1.2.12，2026-11-01）**：前六步 + 代码回滚落地 —— ① 编译期注入 `data-tenon-loc` / `data-tenon-callsite`；
+> ② `resolveTarget()` 反查；③ inspector 交互（Alt+Hover / Alt+Click / Alt+Drag / ESC）；④ 跨源回传
+> （hash 带 token + 父窗口三道校验 + Composer chip + `chat.submit` 带 `selection`）；⑤ 真机 e2e
+> （`pnpm e2e:inspector` 13 项）；⑥ Diff 视图（`git.show` 结构化逐行差异 + 覆盖式面板 + 折叠上下文）；
+> ⑦ 代码回滚（`revert` 语义、两步确认、回滚后停在回滚提交上；`pnpm e2e:diff` 22 项）。
+> **下一步：回滚的数据侧**（快照策略按 §12.3 改后的路线走）。
+> M3 DoD ① 的"改样式并自验"要等真模型 key 才能验，`faux` 只能验链路。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 

@@ -232,3 +232,34 @@ export const GitFileChange = z.object({
   deletions: z.number().optional(),
 })
 export type GitFileChange = z.infer<typeof GitFileChange>
+
+/**
+ * 一行差异。
+ *
+ * 结构化而不是让前端解析 patch 文本，是因为两边都要用同一份事实：
+ * 服务端要拼 patch 交给模型，前端要逐行着色并显示行号。
+ * 让前端再按 `+` / `-` 前缀解析一遍，行内容本身以 `+` 开头时就会错位。
+ */
+export const DiffLine = z.object({
+  kind: z.enum(['ctx', 'add', 'del']),
+  text: z.string(),
+  /** 旧文件行号（1 起）；新增行为 null */
+  oldLine: z.number().nullable(),
+  /** 新文件行号（1 起）；删除行为 null */
+  newLine: z.number().nullable(),
+})
+export type DiffLine = z.infer<typeof DiffLine>
+
+export const DiffFile = z.object({
+  path: z.string(),
+  status: z.enum(['added', 'modified', 'deleted']),
+  insertions: z.number(),
+  deletions: z.number(),
+  lines: z.array(DiffLine),
+  patch: z.string(),
+  /** 二进制文件不做逐行 diff，`lines` 为空 */
+  binary: z.boolean().optional(),
+  /** 超过行数上限，`lines` 为空，只能看 patch 的说明 */
+  truncated: z.boolean().optional(),
+})
+export type DiffFile = z.infer<typeof DiffFile>

@@ -4,6 +4,7 @@ import { ChatPanel } from '../features/chat/ChatPanel.js'
 import { PreviewPanel } from '../features/preview/PreviewPanel.js'
 import { LogPanel } from '../features/logs/LogPanel.js'
 import { NewAppDialog } from '../features/apps/NewAppDialog.js'
+import { DiffPanel } from '../features/diff/DiffPanel.js'
 import { useWorkspace } from '../hooks/useWorkspace.js'
 import { useInspectorSelection } from '../hooks/useInspectorSelection.js'
 import { cn } from '../lib/cn.js'
@@ -43,8 +44,21 @@ export function App() {
   const { state } = workspace
   const [creating, setCreating] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
+  const [diffOpen, setDiffOpen] = useState(false)
   // 预览里"按住 Alt 点一下"选中的东西，从 iframe 发回来（跨源，靠 origin + token 认）
   const inspectorToken = useInspectorSelection(state.preview, workspace.setSelection)
+
+  /**
+   * 打开改动面板。默认看**最新一版** —— 用户点这个按钮想的通常是"刚才那轮改了什么"，
+   * 而不是"翻历史"。翻历史是他看到最新一版之后才有的念头。
+   */
+  const openDiff = (): void => {
+    setDiffOpen(true)
+    const latest = state.commits[0]
+    if (latest !== undefined && state.diff?.commit.sha !== latest.sha) {
+      void workspace.showCommit(latest.sha)
+    }
+  }
 
   if (state.booting) {
     return (
@@ -89,15 +103,29 @@ export function App() {
           />
         </section>
 
-        <section className="flex min-w-0 flex-1 flex-col">
+        {/* relative：改动面板 absolute 覆盖在这一块上，iframe 保持挂载（否则 HMR 连接会断） */}
+        <section className="relative flex min-w-0 flex-1 flex-col">
           <PreviewPanel
             appId={state.activeAppId}
             preview={state.preview}
             fullscreen={fullscreen}
             inspectorToken={inspectorToken}
+            onOpenDiff={openDiff}
             onStart={(restart) => void workspace.startPreview(restart)}
             onToggleFullscreen={() => setFullscreen((value) => !value)}
           />
+          {diffOpen && state.activeAppId !== null && (
+            <DiffPanel
+              commits={state.commits}
+              selectedSha={state.viewingSha}
+              diff={state.diff}
+              loading={state.diffLoading}
+              reverting={state.reverting}
+              onSelect={(sha) => void workspace.showCommit(sha)}
+              onRevert={(sha) => void workspace.revertCommit(sha)}
+              onClose={() => setDiffOpen(false)}
+            />
+          )}
           {/* 日志在预览下方：它解释的正是"上面这块为什么不动" */}
           {state.activeAppId !== null && (
             <LogPanel

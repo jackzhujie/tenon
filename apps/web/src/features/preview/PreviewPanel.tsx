@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { PreviewStatus, Readiness } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import {
+  DiffIcon,
   ExternalIcon,
   MaximizeIcon,
   MinimizeIcon,
@@ -63,6 +64,8 @@ export interface PreviewPanelProps {
   fullscreen: boolean
   /** 精调 inspector 的会话 token（拼进 iframe 的 hash，见 useInspectorSelection） */
   inspectorToken: string | null
+  /** 这一版改了什么 —— 打开改动面板（覆盖在预览之上，iframe 不卸载） */
+  onOpenDiff(): void
   onStart(restart?: boolean): void
   onToggleFullscreen(): void
 }
@@ -72,6 +75,7 @@ export function PreviewPanel({
   preview,
   fullscreen,
   inspectorToken,
+  onOpenDiff,
   onStart,
   onToggleFullscreen,
 }: PreviewPanelProps) {
@@ -113,6 +117,16 @@ export function PreviewPanel({
         {state === 'failed' && <span className="text-[11px] text-bad">启动失败</span>}
 
         <span className="ml-auto flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-1.5"
+            title="看看这一版改了什么"
+            disabled={appId === null}
+            onClick={onOpenDiff}
+          >
+            <DiffIcon className="size-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="sm"
