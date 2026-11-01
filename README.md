@@ -61,8 +61,14 @@ M0 逆向研究完成；方案 **v1.2.7**；四个技术 spike 全部跑通。**
 作为上下文 chip 交给 Agent；改动面板逐行显示某一版改了什么，回滚默认只退代码，
 勾上「连数据库一起回去」才会连数据一起退（只对改过表结构的版本提供）。
 
-259 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e + 全栈 e2e +
-8 项桌面冒烟全绿。安装包默认路径上不带任何需按平台编译的原生模块（打包脚本会审计并打印清单）。
+**能发布了**：点「发布」把这个 commit 冻结成 `v2026.11.01-1` 这样的版本（annotated tag，
+发布说明写进 tag 正文），并推到本地裸库 `~/.tenon/backups/<appId>.git` ——
+那是个标准裸库，`git clone` 出来就是这一版的完整代码。发布前会挡三种状态：正在生成、
+工作区有没提交的改动、仓库里一条提交都没有。
+
+277 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
+32 项发布 e2e（**用系统 git 当裁判**：`fsck --strict` + `clone`）+ 全栈 e2e + 8 项桌面冒烟全绿。
+安装包默认路径上不带任何需按平台编译的原生模块（打包脚本会审计并打印清单）。
 
 想先跑起来看（**不需要任何 API Key**，用的是 pi-ai 自带的 faux 模型）：
 
@@ -70,11 +76,12 @@ M0 逆向研究完成；方案 **v1.2.7**；四个技术 spike 全部跑通。**
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 259 项单测 / 集成测试（约 90s，含 PGlite 冷启动）
+pnpm test                   # 277 项单测 / 集成测试（约 100s，含 PGlite 冷启动）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
 pnpm e2e:diff               # 36 项改动/回滚链路：git.log / show / revert 全走真 HTTP
+pnpm e2e:release            # 32 项发布链路：打 tag → 推本地裸库 → 系统 git 验 fsck / clone
 pnpm e2e:fullstack          # ★ 全栈真机链路（要联网装 Nest）：起库 → 迁移 → 双进程 → CRUD → 重启后数据还在
 pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后不留孤儿进程
@@ -82,7 +89,7 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**下一步**：M3 收尾（发布 push），剩下的欠账与验收细节见 [STATUS.md §4.7](docs/STATUS.md)。
+**下一步**：M4。M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)。
 实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License

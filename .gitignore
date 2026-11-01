@@ -3,7 +3,10 @@ node_modules/
 dist/
 dist-electron/
 out/
-release/
+# 只忽略 electron-builder 的产物目录。**不要写成 `release/`**：
+# 那样会连 apps/web/src/features/release/ 一起忽略，而 Tailwind 的内容扫描会跳过
+# .gitignore 命中的路径 —— 新加的类名不生成 CSS，界面上"只有新写的样式失效"，极难查
+/apps/desktop/release/
 *.tsbuildinfo
 .turbo/
 .pnpm-store/

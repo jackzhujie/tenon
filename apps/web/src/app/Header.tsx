@@ -57,9 +57,19 @@ export interface HeaderProps {
   stream: StreamState
   onSelectApp(appId: string): void
   onCreate(): void
+  /** 打开发布对话框 */
+  onRelease(): void
 }
 
-export function Header({ apps, activeApp, model, stream, onSelectApp, onCreate }: HeaderProps) {
+export function Header({
+  apps,
+  activeApp,
+  model,
+  stream,
+  onSelectApp,
+  onCreate,
+  onRelease,
+}: HeaderProps) {
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-panel/80 px-3">
       <div className="flex items-center gap-2 pr-1">
@@ -80,6 +90,15 @@ export function Header({ apps, activeApp, model, stream, onSelectApp, onCreate }
       <div className="ml-auto flex items-center gap-3">
         <ModelTag model={model} />
         <StreamDot state={stream} />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={activeApp === null}
+          title="把这个版本冻结下来并推到备份库"
+          onClick={onRelease}
+        >
+          发布
+        </Button>
       </div>
     </header>
   )

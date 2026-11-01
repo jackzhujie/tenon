@@ -13,6 +13,7 @@ import { listTemplates } from '@tenon/generator'
 import type { RpcArgs, RpcMethod, RpcMethods, RpcOutput } from '@tenon/protocol'
 import { TenonError } from '@tenon/protocol'
 import { pickSnapshot, type PickedSnapshot } from './revert-data.js'
+import { publishRelease } from './release.js'
 import type { SseBus } from './sse.js'
 
 export interface ServerDeps {
@@ -232,6 +233,16 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
           skippedCommits: restore?.skipped ?? 0,
         },
       }
+    },
+
+    'release.list': async (input) => {
+      const app = core.apps.require(input.appId)
+      return { releases: core.releases.list(app.id, input.limit) }
+    },
+
+    'release.publish': async (input) => {
+      const app = core.apps.require(input.appId)
+      return publishRelease({ core, app, notes: input.notes })
     },
 
     'settings.get': async () => ({ values: core.settings.all() }),

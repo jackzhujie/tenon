@@ -31,6 +31,7 @@
     "e2e:fullstack": "tsx scripts/e2e-fullstack.ts",
     "e2e:inspector": "tsx scripts/e2e-inspector.ts",
     "e2e:diff": "tsx scripts/e2e-diff.ts",
+    "e2e:release": "tsx scripts/e2e-release.ts",
     "clean": "rm -rf node_modules **/node_modules"
   },
   "devDependencies": {

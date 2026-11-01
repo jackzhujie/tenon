@@ -19,6 +19,7 @@ import type {
   LogEntry,
   NormalizedMessage,
   PreviewStatus,
+  Release,
   RpcOutput,
   SelectionContext,
   SseEvent,
@@ -50,6 +51,13 @@ export interface ActiveModel {
 /** `git.show` 的返回：一条提交自己改了什么（见 protocol 的同名 RPC） */
 export type GitShow = RpcOutput<'git.show'>
 
+/** `release.publish` 的返回 */
+export type PublishResult = RpcOutput<'release.publish'>
+
+export type PublishOutcome =
+  | { ok: true; result: PublishResult }
+  | { ok: false; message: string }
+
 export interface UsageInfo {
   model: string
   inputTokens: number
@@ -76,6 +84,9 @@ interface State {
   viewingSha: string | null
   diffLoading: boolean
   reverting: boolean
+  /** 发布记录（`release.list`）：发布对话框里的历史 */
+  releases: Release[]
+  publishing: boolean
   stream: StreamState
   usage: UsageInfo | null
   model: ActiveModel | null
@@ -101,6 +112,8 @@ const initialState: State = {
   viewingSha: null,
   diffLoading: false,
   reverting: false,
+  releases: [],
+  publishing: false,
   stream: 'stopped',
   usage: null,
   model: null,
@@ -128,6 +141,8 @@ type Action =
   | { kind: 'diff'; sha: string | null; diff: GitShow | null }
   | { kind: 'diff.loading'; loading: boolean }
   | { kind: 'revert'; reverting: boolean }
+  | { kind: 'releases'; releases: Release[] }
+  | { kind: 'publishing'; publishing: boolean }
   | { kind: 'optimistic'; message: NormalizedMessage }
   | { kind: 'submit.start' }
   | { kind: 'submit.done' }
@@ -300,6 +315,7 @@ function reducer(state: State, action: Action): State {
         commits: [],
         logs: [],
         usage: null,
+        releases: [],
         status: state.apps.find((app) => app.id === action.appId)?.status ?? null,
         error: null,
       }
@@ -322,6 +338,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, diffLoading: action.loading }
     case 'revert':
       return { ...state, reverting: action.reverting }
+    case 'releases':
+      return { ...state, releases: action.releases }
+    case 'publishing':
+      return { ...state, publishing: action.publishing }
     case 'optimistic':
       return { ...state, messages: [...state.messages, action.message], submitting: true, error: null }
     case 'submit.start':
@@ -369,6 +389,8 @@ export interface Workspace {
    * `dbRestore` 为真时把库一起还原到这一版之前（服务端会先停预览）。
    */
   revertCommit(sha: string, dbRestore?: boolean): Promise<void>
+  /** 发布（`release.publish`）。失败的原因返回给调用方，由对话框就地显示 */
+  publish(notes: string): Promise<PublishOutcome>
   clearError(): void
 }
 
@@ -434,6 +456,16 @@ export function useWorkspace(): Workspace {
     dispatch({ kind: 'commits', commits: log.commits })
   }, [])
 
+  const refreshReleases = useCallback(async (appId: string) => {
+    try {
+      const result = await rpc('release.list', { appId, limit: 20 })
+      dispatch({ kind: 'releases', releases: result.releases })
+    } catch {
+      // 发布历史拉不到不该挡住别的：对话框里显示"还没有发布过"比整页报错好
+      dispatch({ kind: 'releases', releases: [] })
+    }
+  }, [])
+
   /**
    * 首拉日志。
    *
@@ -460,6 +492,7 @@ export function useWorkspace(): Workspace {
           refreshHistory(appId),
           refreshCommits(appId),
           refreshLogs(appId),
+          refreshReleases(appId),
         ])
         if (!cancelled) dispatch({ kind: 'preview', preview: preview.preview })
       } catch (err) {
@@ -469,7 +502,7 @@ export function useWorkspace(): Workspace {
     return () => {
       cancelled = true
     }
-  }, [state.activeAppId, refreshHistory, refreshCommits, refreshLogs])
+  }, [state.activeAppId, refreshHistory, refreshCommits, refreshLogs, refreshReleases])
 
   // ---------------------------------------------------------------- 事件流（先连后发）
 
@@ -681,8 +714,35 @@ export function useWorkspace(): Workspace {
     [refreshCommits, showCommit, startPreview],
   )
 
-  const clearError = useCallback(() => dispatch({ kind: 'error', message: null }), [])
+  /**
+   * 发布：打 tag + 推到本地备份库 + 记一条 release。
+   *
+   * 失败时**不弹全局错误条**，而是把原因返回给调用方 —— 发布对话框开着的时候，
+   * 错误应该出现在对话框里（"工作区还有没提交的改动"这句话离开上下文就没意义了）。
+   */
+  const publish = useCallback(
+    async (notes: string): Promise<PublishOutcome> => {
+      const appId = activeAppIdRef.current
+      if (appId === null) return { ok: false, message: '还没有选中应用' }
+      dispatch({ kind: 'publishing', publishing: true })
+      try {
+        const trimmed = notes.trim()
+        const result = await rpc('release.publish', {
+          appId,
+          ...(trimmed === '' ? {} : { notes: trimmed }),
+        })
+        await refreshReleases(appId)
+        return { ok: true, result }
+      } catch (err) {
+        return { ok: false, message: messageOf(err) }
+      } finally {
+        dispatch({ kind: 'publishing', publishing: false })
+      }
+    },
+    [refreshReleases],
+  )
 
+  const clearError = useCallback(() => dispatch({ kind: 'error', message: null }), [])
   const setSelection = useCallback(
     (selection: SelectionContext | null) => dispatch({ kind: 'selection', selection }),
     [],
@@ -707,5 +767,6 @@ export function useWorkspace(): Workspace {
     setSelection,
     showCommit,
     revertCommit,
+    publish,
   }
 }

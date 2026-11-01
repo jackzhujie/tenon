@@ -5,6 +5,7 @@ import { PreviewPanel } from '../features/preview/PreviewPanel.js'
 import { LogPanel } from '../features/logs/LogPanel.js'
 import { NewAppDialog } from '../features/apps/NewAppDialog.js'
 import { DiffPanel } from '../features/diff/DiffPanel.js'
+import { ReleaseDialog } from '../features/release/ReleaseDialog.js'
 import { useWorkspace } from '../hooks/useWorkspace.js'
 import { useInspectorSelection } from '../hooks/useInspectorSelection.js'
 import { cn } from '../lib/cn.js'
@@ -45,6 +46,7 @@ export function App() {
   const [creating, setCreating] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const [diffOpen, setDiffOpen] = useState(false)
+  const [releaseOpen, setReleaseOpen] = useState(false)
   // 预览里"按住 Alt 点一下"选中的东西，从 iframe 发回来（跨源，靠 origin + token 认）
   const inspectorToken = useInspectorSelection(state.preview, workspace.setSelection)
 
@@ -77,6 +79,7 @@ export function App() {
         stream={state.stream}
         onSelectApp={workspace.selectApp}
         onCreate={() => setCreating(true)}
+        onRelease={() => setReleaseOpen(true)}
       />
 
       <main className="flex min-h-0 flex-1">
@@ -142,6 +145,16 @@ export function App() {
         templates={state.templates}
         onClose={() => setCreating(false)}
         onCreate={workspace.createApp}
+      />
+
+      <ReleaseDialog
+        open={releaseOpen}
+        appName={workspace.activeApp?.name ?? null}
+        headCommit={state.commits[0] ?? null}
+        releases={state.releases}
+        publishing={state.publishing}
+        onClose={() => setReleaseOpen(false)}
+        onPublish={workspace.publish}
       />
 
       {state.error !== null && !state.booting && (

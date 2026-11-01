@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.13
+# DESIGN.md — 详细方案设计 v1.2.14
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -601,6 +601,7 @@ docs/
 │       │   └── cache/              # 依赖缓存、截图、构建产物
 │       ├── pgdata/                 # ★ 应用数据库目录（pglite 默认；供给 = embedded 时为 PG data dir）
 │       └── exports/<releaseId>/    # Docker 上下文 / 静态包
+├── backups/<appId>.git             # ★ 发布目标：本地裸库（`git clone` 就得到那一版）
 └── models.json.enc                 # 加密的提供商配置（Electron 走 safeStorage）
 ```
 
@@ -1228,8 +1229,8 @@ Nest stdout ---line--> LogTailer --parse--> 事件总线
 | 工作区 | 每应用一个 git 仓库 `~/.tenon/apps/<id>/repo` |
 | 提交粒度 | **一次 Agent 回合 = 一次 commit**（有实际改动才提交） |
 | commit 元数据 | trailer 记录来源：`Tenon-Conversation`、`Tenon-Submission`、`Tenon-Task`、`Tenon-Model` |
-| 分支 | `main` 为开发线；`release/<version>` 由发布创建（只读） |
-| 发布 | `git tag v<yyyy.MM.dd>-<n>` + `git push origin main --tags` |
+| 分支 | 只有 `main`。**不建 `release/<version>` 分支**：发布靠 tag 就够，多一条长期存活的分支只会让"哪条是准的"变模糊 |
+| 发布 | `git tag v<yyyy.MM.dd>-<n>`（annotated，说明进正文）+ 推到本地裸库 `~/.tenon/backups/<id>.git`（v1.2.14 落地，§13.3）；远端 push 待接 |
 | 回滚 | 代码：`git revert <sha>`（生成可追溯的反向提交）；数据：可选 DB 快照还原 |
 | 备份 | 未配置远端时，push 到本地裸库 `~/.tenon/backups/<id>.git` |
 
@@ -1368,14 +1369,35 @@ CMD ["node", "dist/server/main.js"]
 - `docker-compose.yml` **默认即含 PostgreSQL**（`db` 服务 + 命名卷 + `service_healthy` 依赖）；`pglite` 档仅在本地开发与预览使用，**不进生产产物** —— 导出时自动把 `DATABASE_URL` 改写成 compose 内的 `postgres://` 连接串，应用代码零改动
 - 镜像大小目标 < 250MB（alpine + prod 依赖裁剪）
 
-### 13.3 发布流程（UI）
+### 13.3 发布流程（v1.2.14 落地：「冻结版本 + 本地备份库」这一档）
 
 ```
-发布 → 选择目标（本地镜像 / 导出 tar / 推到 Registry / 仅 push 代码）
-     → 质量门禁 + 全量构建（在临时目录，不污染工作区）
-     → 生成 release 记录（version、commit、镜像 digest、DB 快照）
-     → 可选：自动生成发布说明（LLM 总结本轮 diff）
+发布 → 打 annotated tag（v<yyyy.MM.dd>-<n>，发布说明写进 tag 正文）
+     → 把仓库镜像到本地裸库 ~/.tenon/backups/<appId>.git（对象 + ref）
+     → 记一条 release（version / commit / kind=push / artifactPath）
 ```
+
+**为什么本地这一档不用 `git.push`**：isomorphic-git 1.44 的 push 只走 HTTP 传输
+（对本地路径也报 `requires a "http" parameter`）—— 而「用户机器上正好有个 Git 服务」是不该有的假设，
+为了备份去起一个更荒唐。所以用 git 自己的对象模型搬运：收集可达对象 → `writeObject` 写进目标裸库 → 写 ref。
+传的东西和真 push 一样是**对象 + ref**，只是省掉了协商（整库镜像是全量语义，不需要增量协商；
+已存在的对象会跳过，所以重复发布只写增量）。
+
+产物是**标准裸库**，`git clone` 出来就是这一版的完整代码。`pnpm e2e:release` 请系统 git 当裁判：
+`fsck --strict`（对象图完整、没有悬空引用）+ `clone` + `log`/`tag`/`cat-file` 全过才算数。
+系统 git **只出现在 e2e 里**，产品运行时不依赖任何 git 二进制。
+
+**闸门**：应用不在生成中（`APP_BUSY`）、仓库有提交（`RELEASE_NO_COMMITS`）、工作区干净
+（`GIT_DIRTY_WORKTREE` —— 半截状态发出去比不发更糟）。推送失败会把刚打的 tag 删掉，
+不留「有 tag 没记录」的半成品：否则下次发布直接跳到 `-2`，用户会以为少发了一版。
+
+**还没做的（别在文档里假装做了）**：
+
+| 缺口 | 为什么现在不做 |
+|---|---|
+| 推到真正的远端（GitHub / GitLab / Gitea） | 要凭据、要真网络，本机无法验证。接的时候是加一个 transport，不是重写发布流程 |
+| Docker 产物 / 静态包导出 | 前者阻塞在「本机无容器运行时」（M2 第 8 步），后者要跑 `vite build` 并打包产物 |
+| 质量门禁（lint / typecheck / 测试） | 现在发布前只查「有提交」与「工作区干净」。门禁要跑起来才有意义，跑不动就别假装拦截 |
 
 **不在用户机器上直接 `docker build`**（可能没装 Docker）：默认**导出构建上下文 + 一条可复制命令**；检测到 Docker 可用时才提供"本地构建"按钮。
 
@@ -1609,13 +1631,16 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > 无法实测就不产出未验证的 Dockerfile；`templates/nest-api` 的 `Dockerfile` 与 `compose.yml` 记为已知欠账，
 > 进 M3 之前不补。真 PG 端到端同理）。**M2 其余 DoD 均有实测。**
 
-> **M3 进度（v1.2.13，2026-11-01）**：前六步 + 代码与数据回滚全部落地 —— ① 编译期注入 `data-tenon-loc` / `data-tenon-callsite`；
+> **M3 进度（v1.2.14，2026-11-01）**：全部九步落地 —— ① 编译期注入 `data-tenon-loc` / `data-tenon-callsite`；
 > ② `resolveTarget()` 反查；③ inspector 交互（Alt+Hover / Alt+Click / Alt+Drag / ESC）；④ 跨源回传
 > （hash 带 token + 父窗口三道校验 + Composer chip + `chat.submit` 带 `selection`）；⑤ 真机 e2e
 > （`pnpm e2e:inspector` 13 项）；⑥ Diff 视图（`git.show` 结构化逐行差异 + 覆盖式面板 + 折叠上下文）；
 > ⑦ 代码回滚（`revert` 语义、两步确认、回滚后停在回滚提交上）；⑦b 数据回滚（§12.3：schema 提交自动存快照
 > + `dbRestore` 可选还原，`pnpm e2e:diff` 36 项）。
-> **下一步：M3 第 8 步的发布 push**（`releases` 表与 `app.get` 已经在位，缺 UI 与产物导出）。
+> ⑧ 发布 push（§13.3）：annotated tag（说明进正文）+ 镜像到本地裸库 `~/.tenon/backups/<appId>.git`
+> + release 记录；闸门是「不在生成中 / 有提交 / 工作区干净」，推送失败删 tag。
+> `pnpm e2e:release` 32 项，**用系统 git 当裁判**（`fsck --strict` + `clone`）—— 只有 e2e 用系统 git，产品不依赖它。
+> **M3 到此收口。** 下一步是 M4；发布侧还欠「真远端 push」「Docker / 静态包产物」「质量门禁」三块（§13.3 表格）。
 > M3 DoD ① 的"改样式并自验"要等真模型 key 才能验，`faux` 只能验链路。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。

@@ -1,9 +1,9 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 前六步、代码回滚与数据回滚**：259 个测试 + 9 项端到端冒烟 +
-> 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 36 项改动/回滚 e2e + 全栈 e2e + 8 项桌面冒烟全绿；
-> `pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 除发布 push 外全部完成**）
+> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成**：277 个测试 + 9 项端到端冒烟 +
+> 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 36 项改动/回滚 e2e + 32 项发布 e2e（系统 git 当裁判：`fsck --strict` + `clone`）
+> + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 已收口**）
 
 ---
 
@@ -18,7 +18,7 @@ Vite/Nest 子进程输出、页面异常（含堆栈）都汇进日志面板，�
 第 3 步把「要发布」的两块补齐了 —— **运行时 SDK**（异常上报 / 错误边界 / Nest 5xx 过滤器，源码分发进模板）
 与**跨档数据迁移**（`pglite → postgres` 纯 JS 逻辑拷贝，零二进制依赖）。
 
-**M3 前半段完成**：模板里的每个 JSX 都带着 `data-tenon-loc` / `data-tenon-callsite`（编译期注入，只 dev 生效）；
+**M3 完成**：模板里的每个 JSX 都带着 `data-tenon-loc` / `data-tenon-callsite`（编译期注入，只 dev 生效）；
 在预览里**按住 Alt** 就能描边高亮，**Alt+点一下**把元素反查回 `src/App.tsx:25:3` 并跨源送回平台，
 Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Agent。整条链路在 Electron 的真 Chromium
 里跑通（`pnpm e2e:inspector` 13 项，父页面与网关**跨源**，token 与 origin 都是真校验）。
@@ -26,16 +26,21 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 动了表结构的那几版会自动存下库快照，勾上「连数据库一起回去」才会连数据一起退 —— 而且会先检查能不能做，
 做不到就什么都不动（不会留下"代码退了、数据没退"的半成品）。
 
+**能发布了**：顶栏「发布」把这个 commit 冻结成 `v<日期>-<n>`（annotated tag，说明进正文），
+推到本地裸库 `~/.tenon/backups/<appId>.git` —— 标准裸库，`git clone` 出来就是这一版的完整代码。
+`pnpm e2e:release` 用**系统 git 当裁判**（`fsck --strict` + `clone`）验收；产品运行时不依赖任何 git 二进制。
+
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 259 项单测 + 集成测试（约 84s，含 PGlite 冷启动）
+pnpm test                       # 277 项单测 + 集成测试（约 102s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
 pnpm e2e:diff                    # ★ 36 项改动链路：git.log / git.show / git.revert 全走真 HTTP（含根提交与错误码）
+pnpm e2e:release                 # ★ 32 项发布链路：打 tag + 推本地裸库，用系统 git 做 fsck --strict 与 clone 验收
 pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁移 → Vite+Nest 双进程 → CRUD 经网关 → 重启后数据还在
 pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界面、退出后不留孤儿进程
@@ -191,7 +196,8 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 6 | **Diff 视图**：`git.show` 返回逐文件、逐行的结构化差异（两侧行号、`binary`/`truncated` 标记）；面板覆盖在预览之上（iframe 不卸载），左侧版本列表、右侧折叠上下文的逐行着色 | ✅ | `packages/core/src/git.ts` 的 `showCommit` / `buildDiff`、`apps/web/src/features/diff/DiffPanel.tsx`、`lib/diff.ts` |
 | 7a | **代码回滚**：`git.revert` 产生反向提交（历史保留），两步确认，回滚后自动停在回滚提交上 | ✅ | `apps/web/src/hooks/useWorkspace.ts` 的 `revertCommit`、`DiffPanel` 的确认态 |
 | 7b | **回滚的数据侧**：改过 schema 的 commit 自动存库快照 + `dbRestore` 可选还原 | ✅ 见 §4.7 | `packages/db-provisioner/src/manager.ts`、`packages/server/src/revert-data.ts` |
-| 8 | 真机 e2e：三条 git RPC 全部走真 HTTP（含根提交、错误码映射） | ✅ | `scripts/e2e-diff.ts`（`pnpm e2e:diff`，22 项） |
+| 8 | 真机 e2e：三条 git RPC 全部走真 HTTP（含根提交、错误码映射） | ✅ | `scripts/e2e-diff.ts`（`pnpm e2e:diff`，36 项） |
+| 9 | **发布 push**：打 annotated tag（版本说明进正文）+ 镜像到本地裸库 `~/.tenon/backups/<appId>.git` + 记 release；闸门是「不在生成中 / 有提交 / 工作区干净」，推送失败删 tag | ✅ 见 §4.8 | `packages/core/src/release.ts`、`packages/server/src/release.ts`、`features/release/ReleaseDialog.tsx`、`scripts/e2e-release.ts` |
 
 ### 4.3 M1 验收（DoD）
 
@@ -295,6 +301,43 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 > 一个应用聊五十轮也不可能触发五十次，等真出现容量问题再加 LRU。`app.delete` 时随目录一起删。
 
 
+### 4.8 M3 第 9 步验收（DoD，发布 push）—— ✅ 已完成
+
+- [x] **版本号是 `v<yyyy.MM.dd>-<n>`，同日递增** —— `nextVersion()` 是纯函数（5 条单测钉住：
+      当天首个 `-1`、同日递增、**别的日期的 `-9` 不影响今天**、不认识的字符串直接忽略、形状不精确就不认）
+- [x] **版本号同时参考发布记录与仓库 tag** —— 只信一边都会撞号：记录被删过、或备份库是从别的机器拷来的
+- [x] **tag 是 annotated 且带发布说明** —— `git cat-file -t vX` 返回 `tag`（不是 commit），
+      `git cat-file -p vX` 能看到正文里的说明。轻量 tag 在 `git show` 里什么也没有，
+      把备份库交给别人时版本说明就丢了
+- [x] **★ 备份库是标准裸库，`git clone` 能直接用** —— e2e 请系统 git 当裁判：`fsck --strict` 通过
+      （没有 missing / could not be parsed）、`rev-parse --is-bare-repository` 为 true、
+      clone 出来的工作区 `status --porcelain` 干净、`log` 历史条数对得上
+- [x] **★ 旧版本标签不被改写** —— 发第二版之后，`git cat-file -p <第一版 tag>:src/notes.md`
+      仍然是第一版的内容（发布是**冻结**，不是覆盖）
+- [x] **重复发布只写增量** —— 第二次镜像 `objects` 数为 0（已存在的对象跳过）；
+      改一轮再发只写那几个新对象。备份库不会随发布次数膨胀成 N 份全量
+- [x] **闸门：不在生成中** —— `app.status === 'running'` 时 `APP_BUSY`。生成中途发布 = 发一份写了一半的代码
+- [x] **闸门：工作区必须干净** —— `GIT_DIRTY_WORKTREE`，错误里点名具体文件（`message` 带文件名、
+      `details.paths` 带前 50 个），不是一句"有未提交改动"
+- [x] **闸门：仓库必须有提交** —— `RELEASE_NO_COMMITS`，且**不留下空备份库**（e2e 断言
+      `backups/<id>.git/HEAD` 不存在）
+- [x] **★ 推送失败时把 tag 删掉** —— 否则留下"有 tag、没记录"的半成品：下次发布直接跳到 `-2`，
+      用户会以为少发了一版。集成测试用一个「备份库路径是个普通文件」的场景逼出这条
+- [x] **UI**：顶栏「发布」→ 对话框显示这一版是哪条提交、可选发布说明（进 tag 正文）、
+      成功后给出**备份库路径与 `git clone` 命令**（都能一键复制）+ 发布历史列表。
+      错误就地显示在对话框里（"工作区还有没提交的改动"离开上下文就没意义）
+
+**没做的**（写在这儿而不是含糊过去）：
+
+- **推到真正的远端**（GitHub / GitLab / Gitea）：isomorphic-git 的 `push` 只走 HTTP 传输，
+  要凭据也要真网络，本机无法验证。接的时候是加一个 transport，不是重写发布流程
+- **Docker 产物 / 静态包导出**：前者阻塞在"本机无容器运行时"，后者要跑 `vite build` 再打包产物
+- **质量门禁**（lint / typecheck / 测试）：现在只查"有提交"与"工作区干净"
+
+> 备份库会累积：一个应用一个裸库，每次发布写增量对象。**暂未做清理** —— 生成应用是几十个文本文件，
+> 历史几十轮的体积也只有几 MB。`app.delete` 时备份库**不会**一起删（那是用户可能还想留的交付物），
+> 需要时手动删 `~/.tenon/backups/<appId>.git`。
+
 > 已知欠账（有环境就能补）：Docker compose 产物（M2 第 8 步）；
 > `pglite → 真 PG` 的迁移端到端；`pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）；
 > `SelectionContext.screenshot` 字段留了没填（Electron `capturePage` 或 iframe 里 canvas）。
@@ -315,7 +358,9 @@ packages/
 │   ├── src/paths.ts     #   TENON_HOME 布局（唯一算路径的地方）
 │   ├── src/db.ts        #   node:sqlite + PRAGMA user_version 线性迁移
 │   ├── src/git.ts       #   isomorphic-git：commitAll / log / diff / showCommit / planRevert / revert（回滚 = 新提交）
+│   │                    #   + createReleaseTag（annotated）/ mirrorTo（对象+ref 搬到裸库）/ uncommittedChanges
 │   ├── src/schema-change.ts # ★ 快照触发判据：migrations/ + *.entity.ts + shared/schema.ts（路径约定，7 项测试）
+│   ├── src/release.ts   # ★ 版本号 v<yyyy.MM.dd>-<n>（纯函数，同日递增；记录与 tag 一起参考避免撞号）
 │   ├── src/secrets.ts   #   AES-256-GCM + 0600 密钥文件（桌面版换 safeStorage）
 │   └── src/stores/      #   apps / releases / settings / providers
 ├── agent/               # pi 生态的唯一入口（铁律 3 的落地点）
@@ -370,6 +415,7 @@ packages/
     ├── src/handlers.ts  #   `satisfies HandlerMap` → 漏实现编译期就报错；git.revert 的编排
     │                    #   「检查 → 还原数据 → 回滚代码」（覆盖库不可逆，回滚代码可逆）
     ├── src/revert-data.ts # ★ pickSnapshot：沿祖先链找最近一份库快照 + skippedCommits 语义（6 项测试）
+    ├── src/release.ts   # ★ 发布编排：闸门（生成中/有提交/工作区干净）→ 打 tag → 镜像 → 记账；失败删 tag
     ├── src/static.ts    #   同源托管 web 产物：页面免 Token + index.html 注入 __TENON__ 与 CSP
     ├── src/bin.ts       #   CLI 入口，打印 TENON_READY（TENON_WEB_DIR 可选）
     └── test/support.ts  #   集成测试夹具：boot / rpc / openSse（先连后发只此一份实现）
@@ -382,6 +428,8 @@ apps/web/                # 渲染器：server 的纯客户端（DESIGN §14.6）
 ├── src/features/chat/   #   MessageList（乐观插入 + 粘底）/ Composer / ChatPanel
 ├── src/features/preview/PreviewPanel.tsx  # iframe + 四格进度（数据/服务/预览/api）
 ├── src/features/logs/LogPanel.tsx  # ★ 运行日志底栏：折叠/按来源筛选/错误高亮/详情展开/清空
+├── src/features/release/ReleaseDialog.tsx  # ★ 发布：说明写进 tag、成功后给路径与 git clone 命令、历史列表
+├── src/features/diff/DiffPanel.tsx  # ★ 改动面板：覆盖在预览上（iframe 不卸载）、逐行着色、两步确认回滚
 └── src/features/apps/   #   AppMenu / NewAppDialog（默认选能跑的那个模板）
 
 apps/desktop/            # Electron 壳：只做生命周期（DESIGN §2.2.1）
@@ -497,6 +545,14 @@ scripts/
 | **快照可能比目标更早，别假装精确** | 只有改过 schema 的提交才有快照。回滚第 N 版时父提交 N-1 若没改过 schema，只能往前退到最近一份 —— 中间那几轮写入的数据会一起丢。`skippedCommits` 就是量这个距离的，UI 必须如实说出来 |
 | **快照按 commit sha 归档，不是时间戳** | `exports/db/<sha>/db.tar.gz`。时间戳命名就得再存一份"文件 ↔ 提交"的映射，两份迟早对不上，而错的那一次正好是用户最需要回滚的时候 |
 | **`planRevert` 只往前看 200 条提交** | 沿祖先链找快照依赖 `git.log({depth:200})`。一个应用真到 200 轮以上时，更早的快照会"找不到"而不是"用错"（报 `DB_SNAPSHOT_MISSING`），这是有意选的方向：宁可说没有，不可悄悄退到一份对不上的状态 |
+| **`git.writeObject` 传 string 会把对象写坏** | 传字符串进去，写出来的字节是乱的（实测 tag 对象解压后是一段二进制垃圾，`git fsck` 报 `object could not be parsed`），而且**没有报错**。内容一律 `Buffer.from(str, 'utf8')` 再传。commit / tree / blob 碰巧没炸，只有 tag 露了馅 —— 别因为"之前没事"就不转 |
+| **isomorphic-git 的 `push` 只认 HTTP 传输** | 1.44 对本地路径（`/x/y.git` 或 `file://`）一样报 `requires a "http" parameter`。所以本地备份不能指望 `git.push`，`mirrorTo` 改成自己搬对象 + 写 ref（和真 push 传的东西一样，只是省了协商） |
+| **裸库的 API 必须传 `gitdir`，不能传 `dir`** | `writeObject({dir: '/x/bare.git'})` 会去找 `/x/bare.git/.git/...`（不存在 → 静默什么都不写，`writeRef` 也一样）。裸库要 `gitdir: '/x/bare.git'`。这个坑不会报错，只会让你发现"写完了但啥也没有" |
+| **备份库必须放在仓库外面** | 放进去会被 `commitAll` 一起提交，然后 `mirrorTo` 把备份库自己当内容搬进自己 —— 对象数会指数级膨胀（实测放了之后镜像一次写 16 个对象）。真实布局是 `~/.tenon/backups/<appId>.git` 与 `~/.tenon/apps/<appId>/repo` 平级，测试里也得照这个来 |
+| **`app.create` 自带一个初始提交** | 「chore: 初始化应用」。所以"仓库里没有提交"这个分支没法用新建应用造出来，测试里要先删 `.git` 再 `initRepo` 造空仓库 —— 否则会以为那条闸门失效了 |
+| **发布失败要把刚打的 tag 删掉** | 否则留下"有 tag、没记录"的半成品：下次 `nextVersion` 看到 tag 就算出 `-2`，用户会以为少发了一版。`publishRelease` 在 `mirrorTo` 失败时 `deleteTag` 再抛 `RELEASE_FAILED` |
+| **`.gitignore` 里的 `release/` 会让 Tailwind 扫不到 `features/release/`** | Tailwind v4 的自动内容扫描**跳过 `.gitignore` 命中的路径**。`release/` 本意是 electron-builder 的产物目录，但它把 `apps/web/src/features/release/` 也一起盖住了 → 新写的类名（`max-w-lg`、`min-h-[76px]`、`bg-ok/5`）**不生成 CSS**，界面上只有"这一处新样式失效"，别处全正常，查起来像见鬼。已改成精确路径 `/apps/desktop/release/`。判断办法：`grep 类名 apps/web/dist/assets/*.css` |
+
 
 ---
 
@@ -515,10 +571,12 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：29 个测试文件（259 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据与库快照还原）
+pnpm test                  # vitest：31 个测试文件（277 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
+pnpm e2e:diff              # ★ 改动/回滚：git.log / show / revert 全走真 HTTP
+pnpm e2e:release           # ★ 发布：打 tag + 推本地裸库，用系统 git 验 fsck / clone
 pnpm build:web             # 前端产物
 pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates} + server/node_modules
 pnpm pack:desktop          # electron-builder --dir → apps/desktop/release/mac/Tenon.app
@@ -576,16 +634,17 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.13），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.14），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
-当前阶段：M3 精调与版本，除「发布 push」外全部完成（源码定位注入 → Alt+Click 反查 → 框选 →
-Diff 视图 → 代码回滚 → 数据回滚）。
-259 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:fullstack + 桌面包全绿。
-**欠账两笔**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
-② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）。
+当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
+发布 push）。下一步是 M4，先看 §4.8 的"没做的"清单再决定从哪块进。
+277 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:fullstack + 桌面包全绿。
+**欠账三笔**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
+② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
+③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接。
 `pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`，
-动到 git / 回滚跑 `pnpm e2e:diff`。
+动到 git / 回滚跑 `pnpm e2e:diff`，动到发布跑 `pnpm e2e:release`。
 
 三条铁律不要违反：Electron 只做壳 / 生成应用不感知运行环境 / 实验性依赖锁版本 + adapter 包装。
 （「安装包零原生模块」**不在**这三条里 —— v1.2.13 起已降为偏好，别再拿它当硬约束挡需求。）

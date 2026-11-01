@@ -280,6 +280,28 @@ export const rpcMethods = {
     }),
   },
 
+  'release.list': {
+    input: z.object({ appId: Id, limit: z.number().int().positive().max(100).default(20) }),
+    output: z.object({ releases: z.array(Release) }),
+  },
+  'release.publish': {
+    input: z.object({
+      appId: Id,
+      /** 发布说明。会写进 annotated tag 的正文，也存进发布记录 */
+      notes: z.string().max(2000).optional(),
+    }),
+    output: z.object({
+      release: Release,
+      version: z.string(),
+      commitSha: z.string(),
+      /** 备份库绝对路径：`git clone <它>` 拿到的就是这一版 */
+      backupPath: z.string(),
+      branch: z.string(),
+      /** 这次真正写进备份库的对象数；0 表示备份库本来就已经是最新的 */
+      objects: z.number().int().nonnegative(),
+    }),
+  },
+
   'settings.get': {
     input: Empty,
     output: z.object({ values: z.record(z.string(), z.unknown()) }),

@@ -53,6 +53,9 @@ export const ErrorCode = z.enum([
   'DB_MIGRATE_FAILED',
 
   'EXPORT_FAILED',
+
+  'RELEASE_NO_COMMITS',
+  'RELEASE_FAILED',
 ])
 export type ErrorCode = z.infer<typeof ErrorCode>
 
@@ -98,6 +101,8 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['DB_UNSUPPORTED', 501],
   ['DB_MIGRATE_FAILED', 500],
   ['EXPORT_FAILED', 500],
+  ['RELEASE_NO_COMMITS', 409],
+  ['RELEASE_FAILED', 500],
   ['INTERNAL', 500],
 ]
 

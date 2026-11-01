@@ -10,6 +10,8 @@ export interface TenonHome {
   readonly root: string
   readonly dbFile: string
   readonly appsDir: string
+  /** 发布用的本地裸库（`<appId>.git`）—— 没有远端时的「推送目标」 */
+  readonly backupsDir: string
   readonly secretKeyFile: string
 }
 
@@ -20,6 +22,7 @@ export function resolveHome(env: NodeJS.ProcessEnv = process.env): TenonHome {
     root,
     dbFile: join(root, 'tenon.db'),
     appsDir: join(root, 'apps'),
+    backupsDir: join(root, 'backups'),
     secretKeyFile: join(root, 'secret.key'),
   }
 }
@@ -38,6 +41,8 @@ export interface AppPaths {
   /** 应用数据库目录（pglite 默认档；M2 才真正创建） */
   readonly pgdataDir: string
   readonly exportsDir: string
+  /** 发布目标：本地裸库 `~/.tenon/backups/<appId>.git`（可 `git clone` 走） */
+  readonly backupRepo: string
 }
 
 export function appPaths(home: TenonHome, appId: string): AppPaths {
@@ -54,5 +59,6 @@ export function appPaths(home: TenonHome, appId: string): AppPaths {
     cacheDir: join(tenonDir, 'cache'),
     pgdataDir: join(dir, 'pgdata'),
     exportsDir: join(dir, 'exports'),
+    backupRepo: join(home.backupsDir, `${appId}.git`),
   }
 }

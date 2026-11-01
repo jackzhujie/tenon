@@ -538,3 +538,214 @@ export async function revert(
   }
   return result
 }
+
+// ---------------------------------------------------------------- 发布：打标签 + 推到备份库
+
+/** 工作区里还没提交的路径。发布前要为空 —— 半截状态发出去比不发更糟 */
+export async function uncommittedChanges(dir: string): Promise<string[]> {
+  if (!(await isRepo(dir))) return []
+  const { upserts, deletes } = await workingTreeChanges(dir)
+  return [...upserts, ...deletes]
+}
+
+export async function listTags(dir: string): Promise<string[]> {
+  if (!(await isRepo(dir))) return []
+  try {
+    return (await git.listTags({ fs, dir })).sort()
+  } catch {
+    return []
+  }
+}
+
+export interface ReleaseTagInput {
+  /** 同时是版本号，如 `v2026.11.01-1` */
+  tag: string
+  sha: string
+  message: string
+  when?: Date
+}
+
+/**
+ * 打一个 annotated tag。
+ *
+ * 为什么用 annotated 而不是轻量 tag：轻量 tag 只是一个 ref，`git show` 看不到"谁在什么时候发的、
+ * 这一版想说什么"。发布记录在 `tenon.db` 里有一份，但那是 Tenon 的内部账本 ——
+ * **代码仓库自己也该带着这份信息**，否则把备份库交给别人（`git clone` 走）时版本说明就丢了。
+ */
+export async function createReleaseTag(dir: string, input: ReleaseTagInput): Promise<string> {
+  const when = input.when ?? new Date()
+  const oid = await git.writeTag({
+    fs,
+    dir,
+    tag: {
+      object: input.sha,
+      type: 'commit',
+      tag: input.tag,
+      tagger: {
+        name: AUTHOR.name,
+        email: AUTHOR.email,
+        timestamp: Math.floor(when.getTime() / 1000),
+        // isomorphic-git 要的是"UTC 西为正"的分钟数，正是 Date 的 getTimezoneOffset()
+        timezoneOffset: when.getTimezoneOffset(),
+      },
+      message: input.message,
+    },
+  })
+  await git.writeRef({ fs, dir, ref: `refs/tags/${input.tag}`, value: oid, force: true })
+  return oid
+}
+
+export async function deleteTag(dir: string, tag: string): Promise<void> {
+  await git.deleteRef({ fs, dir, ref: `refs/tags/${tag}` }).catch(() => undefined)
+}
+
+function toBuffer(value: string | Uint8Array): Uint8Array {
+  // ⚠️ 内容必须转成 Buffer：`writeObject` 对 string 的处理是坏的（实测写出来的 tag 对象
+  // 解压后是一段乱码，`git fsck` 直接判定 object could not be parsed）
+  return typeof value === 'string' ? Buffer.from(value, 'utf8') : value
+}
+
+async function objectExists(gitdir: string, oid: string): Promise<boolean> {
+  try {
+    await git.readObject({ fs, gitdir, oid })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 从 HEAD 出发收集**所有可达对象**（提交 / 树 / blob） */
+async function collectReachable(dir: string, head: string): Promise<Set<string>> {
+  const oids = new Set<string>([head])
+  const walkedRoots = new Set<string>()
+  const commits = await git.log({ fs, dir, depth: 100_000 })
+  for (const entry of commits) {
+    oids.add(entry.oid)
+    const { commit } = await git.readCommit({ fs, dir, oid: entry.oid })
+    const root = commit.tree
+    // 一轮一 commit，相邻两轮常常共享整棵子树；按根树去重能把「同一份没变的目录」
+    // 只走一遍（走一遍就是一次 readdir + 每个文件算 oid）
+    if (walkedRoots.has(root)) continue
+    walkedRoots.add(root)
+    await git.walk({
+      fs,
+      dir,
+      trees: [git.TREE({ ref: entry.oid })],
+      map: async (_path, entries) => {
+        const entry2 = entries[0]
+        if (entry2 === null || entry2 === undefined) return undefined
+        const oid = await entry2.oid()
+        if (oid !== undefined) oids.add(oid)
+        return undefined
+      },
+    })
+  }
+  return oids
+}
+
+async function ensureBareRepo(dir: string, branch: string): Promise<void> {
+  try {
+    await fs.promises.access(join(dir, 'objects'))
+  } catch {
+    await mkdir(dir, { recursive: true })
+    await git.init({ fs, dir, bare: true, defaultBranch: branch })
+    return
+  }
+  // 备份库可能是从别处拷来的、或者默认分支不叫 main：HEAD 指错的话
+  // `git clone` 出来是一个空仓库（不报错，最坏的一种失败）
+  const head = await fs.promises.readFile(join(dir, 'HEAD'), 'utf8').catch(() => '')
+  if (!head.includes(`refs/heads/${branch}`)) {
+    await git.writeRef({
+      fs,
+      gitdir: dir,
+      ref: 'HEAD',
+      value: `refs/heads/${branch}`,
+      symbolic: true,
+      force: true,
+    })
+  }
+}
+
+export interface MirrorOptions {
+  branch?: string
+  /** 要一并推过去的 tag（发布版本）；不存在会抛 `GIT_DIFF_FAILED` 之外的原样错误 */
+  tags?: readonly string[]
+}
+
+export interface MirrorResult {
+  branch: string
+  head: string
+  /** 这次真正写进备份库的对象数（已存在的不算 —— 重复发布不应该每次都搬全量） */
+  objects: number
+  tags: string[]
+}
+
+/**
+ * 把仓库**推送**到一个裸库（DESIGN §12.1「未配置远端时 push 到本地裸库」）。
+ *
+ * 为什么不是 `git.push`：isomorphic-git 1.44 的 push 只认 HTTP 传输
+ * （对本地路径也会报 `requires a "http" parameter`），而 Tenon 不能假设用户机器上有 Git 服务、
+ * 也不该为了备份去起一个。所以这里用 git 自己的对象模型搬运：
+ * 收集可达对象 → `writeObject` 写进目标库 → 写 ref。传的东西和真 push 一样是**对象 + ref**，
+ * 只是少了协商（备份是整库镜像，不需要增量协商）。
+ *
+ * 代价：每轮发布要遍历一次对象图。真实应用是几十个文本文件，实测在几十毫秒量级；
+ * 已经存在的对象会跳过，所以重复发布是增量写。
+ */
+export async function mirrorTo(
+  dir: string,
+  targetDir: string,
+  options: MirrorOptions = {},
+): Promise<MirrorResult> {
+  const branch = options.branch ?? 'main'
+  if (!(await isRepo(dir))) {
+    throw new TenonError('GIT_NOT_INITIALIZED', `不是 git 仓库：${dir}`)
+  }
+  const head = await headSha(dir)
+  if (head === undefined) {
+    throw new TenonError('RELEASE_NO_COMMITS', '这个应用还没有任何提交，没有可以发布的内容')
+  }
+
+  await ensureBareRepo(targetDir, branch)
+
+  const tags = [...(options.tags ?? [])]
+  const tagOids: string[] = []
+  for (const tag of tags) {
+    const oid = await git.resolveRef({ fs, dir, ref: `refs/tags/${tag}` })
+    tagOids.push(oid)
+  }
+
+  const oids = await collectReachable(dir, head)
+  for (const oid of tagOids) oids.add(oid)
+
+  let written = 0
+  for (const oid of oids) {
+    if (await objectExists(targetDir, oid)) continue
+    const read = await git.readObject({ fs, dir, oid, format: 'content' })
+    // `format: 'content'` 下类型只可能是这四种；出现别的说明读到的是内部表示
+    // （deflated / wrapped），当一个裸字节搬过去会写坏目标库 —— 宁可报错
+    if (read.type !== 'commit' && read.type !== 'tree' && read.type !== 'blob' && read.type !== 'tag') {
+      throw new TenonError('RELEASE_FAILED', `不认识的对象类型：${read.type}（${oid}）`)
+    }
+    await git.writeObject({
+      fs,
+      gitdir: targetDir,
+      type: read.type,
+      object: toBuffer(read.object as string | Uint8Array),
+      format: 'content',
+    })
+    written += 1
+  }
+
+  for (const [index, tag] of tags.entries()) {
+    await git.writeRef({
+      fs,
+      gitdir: targetDir,
+      ref: `refs/tags/${tag}`,
+      value: tagOids[index] as string,
+      force: true,
+    })
+  }
+  await git.writeRef({ fs, gitdir: targetDir, ref: `refs/heads/${branch}`, value: head, force: true })
+  return { branch, head, objects: written, tags }
+}
