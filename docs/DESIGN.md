@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.9
+# DESIGN.md — 详细方案设计 v1.2.10
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -1022,6 +1022,21 @@ Vite 插件 `tenon-inspector-plugin`（仅 dev 生效）做两件事：
 
 解析规则（`packages/runtime-sdk`）：元素有 `callsite` → `kind:'usage'`；只有 `loc` → 若命中组件库目录（默认 `src/components/ui/`）标 `kind:'component-impl'`（UI 提示"改动影响全局"），否则 `kind:'element'`；都没有则向上查找。
 
+**落地方式（v1.2.10 实测，与上面的初稿有出入）**：不做独立的 `tenon-inspector-plugin` 包 ——
+生成应用不装平台包（铁律 2），所以走「源码分发 + 模板自己挂」：
+`packages/runtime-sdk/src/vite/tenon-loc.ts`（Babel 插件）与 `src/browser/tenon-loc.ts`（反查器）
+由 `sync-templates.mjs` 拷成模板里的 `src/tenon-loc-plugin.ts` / `src/tenon-loc.ts`，模板的
+`vite.config.ts` 用 `react({ babel: { plugins: [[tenonLoc, { appRoot: import.meta.dirname }]] } })` 挂上，
+且只 `command === 'serve'` 才挂（生产产物不写源码路径）。
+
+三个约束是实测撞出来的：
+- **插件文件不许 import `@babel/core` 的类型** —— 模板里没有这个包（Babel 由 `@vitejs/plugin-react` 自带），
+  一 import 应用自己的 `tsc --noEmit` 就红。AST 形状在本地声明 + 运行时校验，一个 babel 包都不引
+- **Babel 的行号 1 起、列号 0 起** —— 注入时 `column + 1`，否则定位整体左移一格（编辑器打开才看得出来）
+- **失效是静默的** —— 插件没挂上时页面照常打开、控制台干净、HMR 正常，只有"点元素定位不到"。
+  所以决策逻辑抽成 `decideInjection()` 单测（24 项），接线由 `pnpm e2e:preview` 抓 `/src/App.tsx`
+  的真实转译产物做硬断言
+
 **代价与约束**：这套机制依赖"组件透传 props"。生成器产出的组合组件必须写 `{...props}`（进 `packages/generator` 模板与质量门禁），否则用户点它只能落到实现文件。
 
 交互（对齐主流设计工具习惯）：
@@ -1094,6 +1109,31 @@ Composer 顶部出现可删除的上下文 chip：
 | 后端 | stdout/stderr 行、Nest Logger JSON、请求日志 | 子进程管道 + 中间件 |
 | 数据库 | 慢查询（> 200ms）、迁移结果 | TypeORM logger |
 | 预览状态 | readiness 变化、端口冲突、重启次数 | Gateway |
+
+### 11.1.1 为什么不用 CDP 采日志（v1.2.10 决策）
+
+**一句话：CDP 是"从外面看"，我们要的是"应用自己说"。** 前者只能在 Chromium 且能 attach 的宿主里工作，
+后者在桌面、Web、用户自己的 Safari、以及导出后的 Docker 里是同一份代码。
+
+| 维度 | CDP（`Runtime.consoleAPICalled` / `exceptionThrown`） | 应用自报（现方案） |
+|---|---|---|
+| 覆盖范围 | **只有浏览器侧**：console、未捕获异常、网络 | 浏览器侧 + Nest / tsc / Vite 子进程输出 + 数据库 + 平台节点（`LogStore` 三来源） |
+| 宿主要求 | 必须是 Chromium，且要能拿到 target | 任意宿主：Chrome / Safari / Firefox / Electron / 手机浏览器 |
+| 独占性 | 一个 target 只允许一个 debugger 客户端；**用户按 F12 就把 channel 抢走**，`attach` 直接抛错。若我们赢了，用户就再也打不开 DevTools | 无冲突，与用户开不开 F12 无关 |
+| 生命周期 | session 断开 = 这段历史消失，还得自己再做一个 store | 缓冲跟应用走：停预览后仍能回看（`app.delete` 才 `forget()`） |
+| **首屏崩溃** | attach 之前的异常全丢 —— 而"打开就白屏"恰恰是最常见的那类报错 | SDK 在 `main.tsx` 第一行装好，首屏就在覆盖内 |
+| HMR 整页重刷 | target 重建，需要重新 `Target.setAutoAttach` + flatten，重建窗口内事件丢失 | Vite 重刷不影响，`window.onerror` 重新挂上即可 |
+| 后端 / 编译期 | 覆盖不到。Node 侧要用 CDP 就得 `--inspect`，而 `NODE_OPTIONS` 正是我们**刻意从子进程环境里洗掉的**东西 | 直接读子进程管道，无需额外开关 |
+| 安全面 | Node 开 `--inspect` ≈ 给本机开一个"可执行任意代码"的端口 | 不新增任何可连端口；页面上报走同源相对路径、不带平台凭证 |
+| 成本 | 要浏览器进程句柄 + 处理 attach/detach 竞态 | 约 3KB 代码、零依赖（`tenon-log.ts`） |
+
+**CDP 唯一明显更强的是 console 全量与网络瀑布。** 这两件事留到做"性能面板"时处理 ——
+届时在**桌面形态**里用 `webContents.debugger` 做可选增强（仅当用户没开 DevTools 才 attach），
+**不进主链路**，因为它一旦成为主链路，Web 模式与用户自己的浏览器就永远只有一半日志。
+网络状态这件事在网关侧本来就有：`/api/*` 由网关代理，4xx/5xx 是平台的既有事件，不必问浏览器要。
+
+> 补记：CDP 在**开发期**仍然有用 —— `/tmp` 下的 `cdp-hold-persist.mjs` / `cdp-harvest-slice.mjs`
+> 是研究对端行为的工具，不是产品链路。两者别混。
 
 ### 11.2 管道
 
@@ -1453,7 +1493,7 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 |---|---|---|
 | **M1 骨架与对话** | monorepo、server、harness 池、SSE、应用注册、Git 自动提交、静态 React 应用预览、Web 模式 | ① `pnpm dev:web` 打开可对话；② 生成一个纯前端 Todo 应用并在 iframe 热更新；③ 每轮产生 commit；④ 杀进程重启后对话续跑 |
 | **M2 全栈生成** | Nest 模板、zod 共享、TypeORM/迁移、**PostgreSQL 两档供给（pglite 默认 / postgres 发布）**、CRUD 生成、runtime SDK、日志/错误面板 | ① 生成带 CRUD + PG 方言的全栈应用（默认 PGlite，零安装）；② **PGlite 与 PostgreSQL 两档跑同一份 TypeORM migration，切换只改连接串**；③ 从 PGlite `pg_dump` 迁移到 Docker PG，数据零丢失；④ Docker compose（含 db）构建并跑起来；⑤ 前端异常出现在错误面板 |
-| **M3 精调与版本** | inspector、框选、截图、Diff 视图、回滚（含 `pg_dump`/`pg_restore`）、发布 push | ① 点选元素改样式并自验；② 框选区域批量改；③ 回滚到任意 commit，代码与数据一致 |
+| **M3 精调与版本** | inspector（编译期定位注入 + 反查 + 框选）、截图、Diff 视图、回滚（`git revert` + 数据库快照，v1.2.9 起不用 `pg_dump`）、发布 push | ① 点选元素改样式并自验；② 框选区域批量改；③ 回滚到任意 commit，代码与数据一致 |
 | **M4 多 Agent 与可观测增强** | 6 角色子 Agent、E2E 自验收、Reviewer、用量/预算、`taskGraph` 状态面板 | ① E2E 子 Agent 能发现并修复一个注入的 bug；② 任务图实时反映子会话；③ 超预算拦截 |
 | **M5 组件体系（官方内置定型）** | chord 宿主接入、6 个标准插槽、`install_component` 工具、**bundled 插件加载器（`resources/plugins` 只读源）**、插件页 UI（列表 / 开关 / 来源标识）、L1 内置积木清单、L2 首发 3 个官方插件（AI 小助手 / Excel 导出 / 审批流）| ① 用一句话给应用装上 AI 小助手并可用；② 卸载后代码与 `AGENTS.md` 同步清理；③ 组件热重载不丢状态；④ **插件页能列出 3 个 bundled 插件并独立开关** |
 | **M6 平台化与开源** | **macOS + Windows 双平台安装包**、**组件 Hub 上线（首期仅官方独源，第三方上架延后到 M7）**、覆盖层更新（hub 版 > bundled 版，不重装软件即可给内置插件打补丁）、收费授权（可延至 M6 末，不阻塞发布）、视觉/动效打磨、i18n、文档站、CI、协议与商标 | ① 两平台安装包签名可安装；② **Hub 里能装一个官方插件，且能在不重装软件的情况下更新一个已内置插件**；③ 新人 10 分钟跑通首个应用；④ 协议文件与贡献流程齐备 |
@@ -1472,7 +1512,15 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > `apps/web` 的 `LogPanel`（折叠底栏 / 来源筛选 / 错误高亮）。
 > **③ 已落地（v1.2.9）**：`migrateDatabase()` 纯 JS 逻辑拷贝（外键拓扑排序 / 生成列排除 / `OVERRIDING SYSTEM VALUE` / 序列 `setval` / 逐表 `count(*)` 校验），`pglite → pglite` 全链路实测 10 项（含 TypeORM 生成的表与序列）；**`pglite → 真 PG` 尚未实测（本机无 Docker/无 PG）**。
 > **⑤ 的 runtime SDK 半边已落地（v1.2.9）**：`packages/runtime-sdk`（`@tenon/runtime`）作为源码事实来源，`sync-templates.mjs` + 漂移测试把 `tenon-log` / `tenon-boundary` / `tenon-logger`（Nest 全局异常过滤器）拷进两个模板。
-> **仍欠：④ Docker compose 产物（阻塞：本机无容器运行时）。**
+> **仍欠：④ Docker compose 产物 —— 2026-11-01 用户决定先跳过**（本机无 `docker`/`podman`/`colima`，
+> 无法实测就不产出未验证的 Dockerfile；`templates/nest-api` 的 `Dockerfile` 与 `compose.yml` 记为已知欠账，
+> 进 M3 之前不补。真 PG 端到端同理）。**M2 其余 DoD 均有实测。**
+
+> **M3 进度（v1.2.10，2026-11-01）**：第 1 步「编译期源码定位注入」与第 2 步「反查解析器」已落地 ——
+> 模板 JSX 带 `data-tenon-loc` / `data-tenon-callsite`（`pnpm e2e:preview` 断言真实转译产物），
+> `resolveTarget()` 把 DOM 元素反查为 `{file,line,column,kind}`（callsite 优先、组件库标 `component-impl`）。
+> **下一步是第 3 步 inspector 交互**：Alt+Hover 高亮 / Alt+Click 选中 / Alt+Drag 框选 / ESC 退出，
+> 以及 `SelectionContext` 经 `postMessage`（校验 origin + 一次性 token）回到 `apps/web`。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 

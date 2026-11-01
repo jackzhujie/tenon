@@ -8,7 +8,8 @@
     "后端入口写在 package.json 的 tenon.api 里（api/main.ts），Tenon 靠它判断这个应用要不要起后端。",
     "应用只认一个 DATABASE_URL；DATABASE_POOL_MAX 是并发容量参数（平台给的，PGlite 档恒为 1），不是环境判断。",
     "迁移放在 api/migrations/，文件名带时间戳，启动时自动跑；同一份迁移在 PGlite 和真 PG 上都能跑。",
-    "后端用 ts-node 跑（不用 nest build）：Nest 的依赖注入需要 emitDecoratorMetadata，esbuild/tsx 不产这个，用 tsx 会得到 'Cannot resolve dependency at index [0]'。",
-    "前端与后端共用 shared/schema.ts 的 zod 契约：后端用它校验入参，前端用它拿类型。"
+    "后端不用 ts-node（Node ≥ 22.18 的原生 TS 类型擦除会抢走 .ts 入口，ts-node/register 已彻底失效）：改成 tsc --watch 编译到 dist-server/，再用 node --watch 跑 .js。顺带好处是 Nest 的 DI 本来就要 emitDecoratorMetadata，tsx/esbuild 不产这个。",
+    "前端与后端共用 shared/schema.ts 的 zod 契约：后端用它校验入参，前端用它拿类型。",
+    "data-tenon-loc / data-tenon-callsite 由编译期 Babel 插件（src/tenon-loc-plugin.ts，挂在 vite.config.ts 上）注入了，不要手写这两个属性 —— 手写的会挡住自动注入。"
   ]
 }

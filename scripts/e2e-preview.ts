@@ -197,6 +197,24 @@ try {
   check('入口模块被 Vite 转译过（拿到的是 JS 不是 TSX）', entry.includes('jsxDEV') || entry.includes('jsx('))
   check('入口模块里没有 TS 类型标注残留', !entry.includes(': string'))
 
+  /**
+   * 编译期源码定位（DESIGN §10.1）。插件没生效时**页面照常打开、控制台干净**，
+   * 只是点元素永远定位不到源码 —— 这种"静默失效"必须在这里硬断言。
+   * 断言落在 Vite 吐出来的 JS 上：属性是 Babel 写进 `jsxDEV(...)` 的 props 里的。
+   */
+  const appModule = await (await fetch(`${url}/src/App.tsx`)).text()
+  const locValue = /data-tenon-loc"?\s*:\s*"(src\/App\.tsx:\d+:\d+)"/.exec(appModule)?.[1]
+  check(
+    'JSX 上注入了 data-tenon-loc，值是 app 内相对路径 file:line:column',
+    locValue !== undefined,
+    `模块里没找到 data-tenon-loc：vite.config.ts 的 babel 插件没挂上？最后 300 字：${appModule.slice(-300)}`,
+  )
+  check(
+    '注入的路径不含 node_modules / 绝对路径前缀',
+    locValue !== undefined && !/node_modules|\/Users\/|^[A-Za-z]:\//.test(locValue),
+    `值：${String(locValue)}`,
+  )
+
   console.log('\n4) 改一个文件（Agent 写代码走的就是这条路）')
   // 先挂探针再改文件：Vite 只为「改动之后仍在线」的客户端推增量，晚了就什么都收不到
   // 按 gatewayPort 连，而不是 url：浏览器里的 clientPort 就是它

@@ -22,6 +22,10 @@ const PAIRS: Array<[string, string]> = [
   ['src/browser/tenon-log.ts', 'nest-api/src/tenon-log.ts'],
   ['src/browser/tenon-boundary.tsx', 'react-vite/src/tenon-boundary.tsx'],
   ['src/browser/tenon-boundary.tsx', 'nest-api/src/tenon-boundary.tsx'],
+  ['src/vite/tenon-loc.ts', 'react-vite/src/tenon-loc-plugin.ts'],
+  ['src/vite/tenon-loc.ts', 'nest-api/src/tenon-loc-plugin.ts'],
+  ['src/browser/tenon-loc.ts', 'react-vite/src/tenon-loc.ts'],
+  ['src/browser/tenon-loc.ts', 'nest-api/src/tenon-loc.ts'],
   ['src/nest/tenon-logger.ts', 'nest-api/api/tenon-logger.ts'],
 ]
 
