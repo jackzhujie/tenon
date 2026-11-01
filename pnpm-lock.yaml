@@ -182,6 +182,9 @@ importers:
       '@tenon/core':
         specifier: workspace:*
         version: link:../core
+      '@tenon/db-provisioner':
+        specifier: workspace:*
+        version: link:../db-provisioner
       '@tenon/gateway':
         specifier: workspace:*
         version: link:../gateway

@@ -122,7 +122,7 @@ export function App() {
               loading={state.diffLoading}
               reverting={state.reverting}
               onSelect={(sha) => void workspace.showCommit(sha)}
-              onRevert={(sha) => void workspace.revertCommit(sha)}
+              onRevert={(sha, dbRestore) => void workspace.revertCommit(sha, dbRestore)}
               onClose={() => setDiffOpen(false)}
             />
           )}

@@ -48,6 +48,7 @@ export const ErrorCode = z.enum([
   'DB_NOT_READY',
   'DB_DUMP_FAILED',
   'DB_RESTORE_FAILED',
+  'DB_SNAPSHOT_MISSING',
   'DB_UNSUPPORTED',
   'DB_MIGRATE_FAILED',
 
@@ -93,6 +94,7 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['DB_NOT_READY', 409],
   ['DB_DUMP_FAILED', 500],
   ['DB_RESTORE_FAILED', 500],
+  ['DB_SNAPSHOT_MISSING', 409],
   ['DB_UNSUPPORTED', 501],
   ['DB_MIGRATE_FAILED', 500],
   ['EXPORT_FAILED', 500],

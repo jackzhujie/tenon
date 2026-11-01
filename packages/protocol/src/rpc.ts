@@ -243,11 +243,41 @@ export const rpcMethods = {
       changes: z.array(GitFileChange),
       files: z.array(DiffFile),
       patch: z.string(),
+      /**
+       * 这个 commit 有没有动表结构。UI 据此决定回滚时要不要提供「连数据一起回去」的选项 ——
+       * 没动 schema 的提交给了这个勾选框也没东西可回，反而诱导用户以为会有变化。
+       */
+      schemaChanged: z.boolean(),
+      /** 这个 commit 有没有存过库快照（决定勾选框能不能真的勾） */
+      hasSnapshot: z.boolean(),
     }),
   },
   'git.revert': {
-    input: z.object({ appId: Id, sha: z.string().min(1) }),
-    output: z.object({ commit: GitCommit }),
+    input: z.object({
+      appId: Id,
+      sha: z.string().min(1),
+      /**
+       * 连数据库一起回到这个提交之前。默认 false —— 数据比代码贵，
+       * "我只是想撤掉那段代码"是最常见的意图，不能让它顺手把数据也抹了。
+       */
+      dbRestore: z.boolean().default(false),
+    }),
+    output: z.object({
+      commit: GitCommit,
+      data: z.object({
+        /** 用户勾了没有 */
+        requested: z.boolean(),
+        /** 实际还原了没有 */
+        restored: z.boolean(),
+        /**
+         * 真正用的快照属于哪个 commit。可能**早于**目标：中间那些提交没改 schema
+         * 就没有快照，只能退到最近一个有的 —— 所以这个值和目标不一致时必须告诉用户。
+         */
+        fromSha: z.string().nullable(),
+        /** 实际丢掉了多少个提交期间写入的数据（`fromSha` 到目标之间隔了几个提交） */
+        skippedCommits: z.number().int().nonnegative(),
+      }),
+    }),
   },
 
   'settings.get': {

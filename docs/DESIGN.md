@@ -1,4 +1,4 @@
-# DESIGN.md — 详细方案设计 v1.2.12
+# DESIGN.md — 详细方案设计 v1.2.13
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
 > 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。
@@ -167,8 +167,10 @@ M1 第 9 步把 §2.2 的三条原则落成 `apps/desktop`。四条当时没写�
    所以 supervisor 一律 `spawn(process.execPath, [server.mjs], { env: {...env, ELECTRON_RUN_AS_NODE: '1'} })`，
    既不要求用户装 node，也不用再塞一份 node 二进制（Electron 39 内置 22.22.1，`node:sqlite` 实测可用）。
 3. **server 打成一个文件（esbuild），`templates` 必须落在 `dist/templates`。**
-   依赖全是纯 JS（产品库是 `node:sqlite`，PGlite 只属于生成应用），12MB 单文件、零原生模块 —— 铁律 3 在打包脚本里
-   用"扫 `dist/` 找 `.node`/`binding.gyp`，发现就失败"兜住。`registry.ts` 按 `import.meta.url` 找 `../templates`，
+   依赖恰好全是纯 JS（产品库是 `node:sqlite`，PGlite 只属于生成应用），所以能打成 12MB 单文件。
+   ~~零原生模块~~ → **v1.2.13 起降为偏好**（见下方变更块）：打包脚本扫 `dist/` 找
+   `.node`/`binding.gyp`/动态库，只**列清单 + 体积 + 平台标签**，不再让构建失败。
+   `registry.ts` 按 `import.meta.url` 找 `../templates`，
    所以 `dist/server/server.mjs` 的兄弟目录必须叫 `templates`。
 4. **生命周期只有一个出口：`TENON_READY`。** 端口是 0（系统分配）、Token 每次随机；
    就绪前退出 → 报错并把 stderr 带出去；就绪后崩溃 → 退避重启并把**新地址**交回窗口；
@@ -176,8 +178,31 @@ M1 第 9 步把 §2.2 的三条原则落成 `apps/desktop`。四条当时没写�
 
 ~~已知限制（M2 处理）：预览装依赖走 `pnpm install`（`TENON_PNPM` 可覆盖）。**没有 pnpm 的机器上，桌面版能建应用、能对话，但预览起不来。**~~
 **v1.2.7 已解决**：安装包自带 pnpm —— `deps.ts` 的解析优先级是 `TENON_PNPM` → 随包的 `<Resources>/server/node_modules/pnpm/bin/pnpm.cjs` →
-node 同目录 → `PATH`。打包实测：`pnpm smoke:desktop:packaged` 全绿，且安装包内仍是**零原生模块**
-（pnpm 自带的 4 个平台 `reflink.*.node` 被 `build.mjs` 按扩展名过滤掉，删掉后 `pnpm install` 实测照常工作）。
+node 同目录 → `PATH`。打包实测：`pnpm smoke:desktop:packaged` 全绿。
+
+> **v1.2.13 变更：撤销「安装包零原生模块」这条硬约束。**
+>
+> **它原本就不是铁律。** 三条铁律是「Electron 只做壳 / 生成应用不感知运行环境 / 实验性依赖锁版本 +
+> adapter 包装」—— 前面几版文档和 `build.mjs` 注释把它误标成"铁律 3 在打包脚本里守住"，
+> 属于自封的额外约束。现在按用户决定解除。
+>
+> **为什么解除是安全的：** 那条约束真正要解决的是「用户机器上 `npm i` 需要 node-gyp / 编译工具链」。
+> 而安装包是**预编译分发**的 —— 原生模块在打包机上就编译好了，用户机器只负责解压运行。
+> 换成二次开发（克隆仓库自己 `pnpm i`）场景时，这条才重新有意义，而那不是终端用户的路径。
+>
+> **换来的自由度：** 需要时可以直接引入带原生扩展的依赖（图像处理、列存分析、SQLite 驱动、
+> 加密库…），不必先花一轮找纯 JS 替代品，也不用为了绕开限制去写"看起来能跑但精度/性能打折"的降级实现。
+> 具体收益：
+> - pnpm 自带的 4 个平台 `reflink.*.node` 不再被过滤（`install` 在 APFS/Btrfs/ReFS 上少拷一遍文件）
+> - 未来若某个能力只有原生实现（如 `sharp`、`duckdb`），直接上，不再绕
+>
+> **放宽限制 ≠ 放弃审计。** 打包仍会扫出所有 `.node` / `binding.gyp` / `.dylib` / `.so` / `.dll`，
+> 按体积排序打印，并标注「本平台 / 其他平台·不加载」。想恢复严格模式就设 `TENON_STRICT_NATIVE=1`
+> （CI 可以用）。理由很简单：知道包里装了什么，和禁止包里装什么是两件事。
+>
+> **仍然守住的边界（这条没变，也不能变）：生成应用的依赖仍然不引入需要按平台编译的包。**
+> 那是用户在**自己机器**上 `pnpm install`，我们没有替他预编译、也不该要求他装 Visual Studio / Xcode
+> Command Line Tools。所以模板 `package.json` 的选型标准不变，变的是 Tenon 自己这一侧。
 
 ### 2.3 为什么这样分
 | 备选 | 问题 |
@@ -250,7 +275,7 @@ node 同目录 → `PATH`。打包实测：`pnpm smoke:desktop:packaged` 全绿�
 | 插件宿主 | `@earendil-works/chord` | **精确锁定 1.4.x** | plugin facet、状态复制、principal 授权 |
 | 契约 | zod（我们）+ TypeBox（chord） | 4.x / 1.3.x | zod 用于 RPC；TypeBox 用于 chord contract（其运行时要求）|
 | Git | isomorphic-git | 1.x | 纯 JS 无原生依赖；检测到系统 git 时可切换 |
-| 产品库 | **`node:sqlite`（Node 内置）** | Node 22.5+ 自带 | `tenon.db` / `harness.sqlite` / `telemetry.db`（单机注册表，零安装、**零原生模块、无需 `@electron/rebuild`**）|
+| 产品库 | **`node:sqlite`（Node 内置）** | Node 22.5+ 自带 | `tenon.db` / `harness.sqlite` / `telemetry.db`（单机注册表，零安装、无需 `@electron/rebuild`）|
 | 应用库 | **PostgreSQL 18**（typeorm + pg） | 18.x | `pglite`（默认）/ `postgres`（发布）；`embedded`、`sqlite` 为逃生口 —— 见 §6.4 |
 | 日志 | pino | 9.x | 结构化、可被探针管道消费 |
 | 测试 | Vitest + Playwright | — | 单测 + Agent E2E |
@@ -1250,17 +1275,35 @@ submission.done
 HMR 连接断开、预览归零，看完 diff 切回去等于重启一次。逐行折叠上下文（默认 ±3 行，
 两处改动隔得近时合成一段），版本列表在左侧，回滚按钮两步确认。
 
-### 12.3 数据库回滚
+### 12.3 数据库回滚（v1.2.13 落地）
 
 代码能回滚，schema 也能回滚（下迁移），但**数据**不一定。策略：
 
-- 每个执行过迁移的 commit → 生成 DB 快照 `snapshots/<sha>.*`（保留最近 20 个 + 所有 release）
-  - `pglite` 档：`dumpDataDir()` → `snapshots/<sha>.tar.gz`（WASM 实例的整目录归档，**必须先 stop 再拷**）
-  - ~~`postgres` 档：`pg_dump --format=custom`~~ → **v1.2.12 撤掉**：用户机器上没有 `pg_dump`，
-    与「零安装」承诺冲突（和 M2 跨档迁移放弃 `pg_dump` 是同一个理由）。改为复用
-    `migrate.ts` 的纯 JS 逻辑拷贝 —— 建临时库 → `migrateDatabase` → 导出 SQL → 删临时库
-- 回滚时可选 `dbRestore: true` → 还原快照（**默认关闭**，UI 明确提示"会丢失此后数据"）；两档统一用 `DatabaseProvider.restore()` 抽象，调用方不感知实现
-- 发布时必存快照 → 对应 release 可"回滚到上线版本（含数据）"
+- **只在"这次提交改了表结构"时存快照**（判据 `hasSchemaChange`：`api/migrations/**`、`*.entity.ts`、
+  `shared/schema.ts`）。每轮都存不现实：PGlite 一份 4~5MB，聊五十轮就是两百多兆；
+  而只改样式的提交库里根本没变。用**路径约定**而不是扫 SQL 关键字 —— 后者要猜方言，
+  还会被字符串里的 `CREATE TABLE` 误伤
+- 落点 `exports/db/<sha>/db.tar.gz`：**按 sha 归档**。按时间戳命名就得再存一份"文件 ↔ 提交"
+  的映射，两份迟早对不上
+  - `pglite` 档：`dumpDataDir('gzip')`。**不是 `cp -r` 数据目录** —— 那才是"必须先 stop"的场景；
+    `dumpDataDir` 是 PGlite 自己的 API，运行中调用安全（已实测：库里开着未提交事务时打快照，
+    还原后未提交的那行不在）
+  - `postgres` 档：`pg_dump --format=custom`，缺二进制报 `DB_UNSUPPORTED`。
+    **不打包 pg 二进制**：`pg_dump` 的版本必须不低于服务端版本，而发布档连的是用户自己的云 PG
+    （13~19 都可能），带一份 18 的二进制去连 19 的库照样失败。发布档的数据回滚，
+    云厂商的 PITR 才是正解
+- **回滚时的顺序是「检查 → 还原数据 → 回滚代码」，不能换。** 覆盖库不可逆，回滚代码可逆
+  （再回滚一次就回来了）。所以凡是可能失败的判断都要挤在最前面 ——
+  否则用户会得到"代码回滚了、数据没回滚"的半成品状态，比直接报错难收拾得多
+- **快照可能比目标更早**：父提交没改 schema 就没快照，只能往前退到最近一份。
+  这时 `skippedCommits` 如实报"中间隔了几轮"，UI 据此说清会丢多少数据，而不是假装精确
+- 回滚时可选 `dbRestore: true` → 还原快照（**默认关闭**）。数据比代码贵：
+  "我只是想撤掉那段代码"是最常见的意图，不能让最贵的操作待在手边
+- 两档统一用 `DatabaseProvider.restore()` 抽象，调用方不感知实现
+- 发布时必存快照 → 对应 release 可"回滚到上线版本（含数据）"（M4 接）
+
+**已知缺口**：快照会累积且**未做清理策略**。一个应用不可能触发五十次 schema 变更，
+等真出现容量问题再加 LRU；`app.delete` 时随目录一起删。
 
 ### 12.4 与 pi-durable 的对齐
 
@@ -1453,7 +1496,11 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > 所以在 Windows x64 上，`npm i` 之后即为可用状态：**不需要 node-gyp、不需要编译工具链、不需要 WSL**。
 >
 > 因此，本文档后续提到的所有「Windows 差异」—— Electron 打包与签名、`embedded-postgres` 原生二进制路径与安装、`gondolin` 缺失微 VM 后端、端口探测命令（`lsof` → `netstat`）——**全部发生在 Tenon 自己引入的本地基建层，与 pi 无关**。
-> **v1.2 后该清单进一步收窄**：应用库默认改为 PGlite（纯 WASM）、产品库改用 Node 内置 `node:sqlite` 之后，**整个可用安装包里不含任何需要按平台编译的原生模块**；`embedded-postgres` 降为逃生口，不再位于默认路径。剩余平台差异只有三项：Electron 打包与签名、`gondolin` 后端缺失、端口探测命令。
+> **v1.2 后该清单进一步收窄**：应用库默认改为 PGlite（纯 WASM）、产品库改用 Node 内置 `node:sqlite` 之后，**默认路径上的安装包不含任何需要按平台编译的原生模块**；`embedded-postgres` 降为逃生口，不再位于默认路径。剩余平台差异只有三项：Electron 打包与签名、`gondolin` 后端缺失、端口探测命令。
+> **v1.2.13 起不再把"零原生模块"当硬约束**（§2.2 变更块）：默认路径上仍然是一个原生模块都没有，
+> 但需要时可以直接引入 —— 安装包预编译分发，用户机器不需要工具链。放宽的是**选择权**，
+> 不是让它悄悄变成"随便带"：打包会审计并打印清单。跨平台产物的要求也没变：
+> 每个平台打自己的包，`.node` 由 electron-builder 在打该平台时一并产出。
 > 推论：**只跑 Server + Web 模式（不打包桌面端）时，Windows 的适配成本接近于零**；桌面首发 Windows 的额外工作量集中在打包发货环节，而非 Agent 运行时。
 
 `gondolin` 微 VM 是可选的高档隔离，但它的可用性**按平台不同**：
@@ -1562,12 +1609,13 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > 无法实测就不产出未验证的 Dockerfile；`templates/nest-api` 的 `Dockerfile` 与 `compose.yml` 记为已知欠账，
 > 进 M3 之前不补。真 PG 端到端同理）。**M2 其余 DoD 均有实测。**
 
-> **M3 进度（v1.2.12，2026-11-01）**：前六步 + 代码回滚落地 —— ① 编译期注入 `data-tenon-loc` / `data-tenon-callsite`；
+> **M3 进度（v1.2.13，2026-11-01）**：前六步 + 代码与数据回滚全部落地 —— ① 编译期注入 `data-tenon-loc` / `data-tenon-callsite`；
 > ② `resolveTarget()` 反查；③ inspector 交互（Alt+Hover / Alt+Click / Alt+Drag / ESC）；④ 跨源回传
 > （hash 带 token + 父窗口三道校验 + Composer chip + `chat.submit` 带 `selection`）；⑤ 真机 e2e
 > （`pnpm e2e:inspector` 13 项）；⑥ Diff 视图（`git.show` 结构化逐行差异 + 覆盖式面板 + 折叠上下文）；
-> ⑦ 代码回滚（`revert` 语义、两步确认、回滚后停在回滚提交上；`pnpm e2e:diff` 22 项）。
-> **下一步：回滚的数据侧**（快照策略按 §12.3 改后的路线走）。
+> ⑦ 代码回滚（`revert` 语义、两步确认、回滚后停在回滚提交上）；⑦b 数据回滚（§12.3：schema 提交自动存快照
+> + `dbRestore` 可选还原，`pnpm e2e:diff` 36 项）。
+> **下一步：M3 第 8 步的发布 push**（`releases` 表与 `app.get` 已经在位，缺 UI 与产物导出）。
 > M3 DoD ① 的"改样式并自验"要等真模型 key 才能验，`faux` 只能验链路。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
@@ -1818,7 +1866,7 @@ L3 必须有真实隔离：**不能给社区插件 `host.serve` 级别的能力*
 | 自托管单二进制（rust-embed + Axum） | ❌ 废弃 → Docker 单容器 | 用户要求 Docker 部署；标准栈更易维护 |
 | 生成应用默认 SQLite | ❌ 废弃（v1.1）→ **PostgreSQL** | 需求升级为"高性能应用 + 通用组件 + AI 小助手"，SQLite 在多写并发/扩展生态（pgvector、LISTEN/NOTIFY）上是硬短板；且切库要重写迁移 |
 | 应用库四档供给（`embedded` 默认 / docker / external / lite） | ⚠️ 调整为**两档**（v1.2）→ `pglite` 默认 + `postgres` 发布 | 四档里有三档都在解决同一件事——"如何让一个原生 PostgreSQL 在用户机器上跑起来"，而这件事本身就是全部麻烦的来源。PGlite 是 PG 编译到 WASM，零安装且方言不变，把四档压成两档；`embedded` / `sqlite` 降为逃生口 |
-| 产品库用 `better-sqlite3` | ⚠️ 改为 **`node:sqlite`**（v1.2）| Electron 内置 Node 22 自带 `node:sqlite`，消除原生模块与 `@electron/rebuild`，使安装包内**无任何需按平台编译的依赖** |
+| 产品库用 `better-sqlite3` | ⚠️ 改为 **`node:sqlite`**（v1.2）| Electron 内置 Node 22 自带 `node:sqlite`，无需 `@electron/rebuild`、不必随包带一份编译产物。**注意：v1.2.13 起"零原生模块"已不是硬约束（§2.2）** —— 这条改动现在读作"内置模块够用，没必要多带一个依赖"，而不是"带了会违规" |
 | `chord` 列为"可选，M5 再引入" | ❌ 废弃（v1.1）→ **基座，M5 主线** | 实际读源码后确认它就是插件生态的标准答案，晚引入等于先自研一遍再推翻 |
 | BYOK 多提供商 | ✅ 保留并强化 | pi-ai 直接覆盖 |
 | Git 版本管理 | ✅ 升级为一等公民 | 用户明确要求 |

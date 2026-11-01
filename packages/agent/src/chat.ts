@@ -13,7 +13,7 @@ import { watchEvents } from '@earendil-works/pi-durable'
 import type { ChatSubmitInput, SseEventInput } from '@tenon/protocol'
 import { composeWithSelection, TenonError } from '@tenon/protocol'
 import type { AppStore, TenonHome } from '@tenon/core'
-import { appPaths, gitops } from '@tenon/core'
+import { appPaths, gitops, hasSchemaChange } from '@tenon/core'
 import type { HarnessPool, RootConversation } from './harness-pool.js'
 import type { PlanDocTask } from './docs.js'
 import { PlanDoc } from './docs.js'
@@ -34,6 +34,18 @@ export interface ChatServiceOptions {
   /** 模型解析结果：faux 模式下每次生成都要先注入剧本 */
   model: ResolvedModel
   publish: (event: SseEventInput) => void
+  /**
+   * 这一轮提交动了 schema 时的钩子（回滚的数据侧要用）。
+   *
+   * 为什么是回调而不是让 `ChatService` 直接持有数据库：agent 包不认识
+   * `db-provisioner`，也不该认识 —— 它只负责"提交完了，这次改的东西值不值得存快照"
+   * 这个判断所需的信息（`changed` 路径列表），剩下的事由 server 接线给
+   * `PreviewManager`。这样 agent 的测试不需要一个真的 PGlite。
+   *
+   * 回调里的异常**不能影响对话本身**：快照失败顶多是少了可回滚的数据点，
+   * 而让一轮对话因为存不了快照而失败是不可接受的。
+   */
+  onSchemaCommit?: (input: { appId: string; sha: string; changed: string[] }) => Promise<void>
 }
 
 /** 按 app 合并文本增量，40ms 或遇到 message_end 时下发 */
@@ -273,6 +285,21 @@ export class ChatService {
         sha: result.sha,
         message: result.message.split('\n')[0] ?? result.message,
       })
+      // 快照按 commit sha 归档，所以必须在拿到 sha 之后 —— 这个顺序不能换
+      if (hasSchemaChange(result.changed) && this.options.onSchemaCommit !== undefined) {
+        await this.options
+          .onSchemaCommit({ appId: app.id, sha: result.sha, changed: result.changed })
+          .catch((err: unknown) => {
+            this.options.publish({
+              type: 'error',
+              appId: app.id,
+              code: 'DB_DUMP_FAILED',
+              message: `库快照失败，这一版将无法连数据一起回滚：${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            })
+          })
+      }
     }
   }
 

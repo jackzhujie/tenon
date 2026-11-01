@@ -364,8 +364,11 @@ export interface Workspace {
   setSelection(selection: SelectionContext | null): void
   /** 打开某一版看它改了什么（`git.show`） */
   showCommit(sha: string): Promise<void>
-  /** 回滚某一版（`revert`：产生新的反向提交，历史保留） */
-  revertCommit(sha: string): Promise<void>
+  /**
+   * 回滚某一版（`revert`：产生新的反向提交，历史保留）。
+   * `dbRestore` 为真时把库一起还原到这一版之前（服务端会先停预览）。
+   */
+  revertCommit(sha: string, dbRestore?: boolean): Promise<void>
   clearError(): void
 }
 
@@ -655,21 +658,27 @@ export function useWorkspace(): Workspace {
    * 而不是停在已经被回滚掉的原提交上（那样看着像什么都没发生）。
    */
   const revertCommit = useCallback(
-    async (sha: string) => {
+    async (sha: string, dbRestore = false) => {
       const appId = activeAppIdRef.current
       if (appId === null) return
       dispatch({ kind: 'revert', reverting: true })
       try {
-        const result = await rpc('git.revert', { appId, sha })
+        const result = await rpc('git.revert', { appId, sha, dbRestore })
         await refreshCommits(appId)
         await showCommit(result.commit.sha)
+        /*
+         * 还原过数据就必须重起预览：服务端为了不刷一屏断连错误先把它停了，
+         * 而回滚后的代码本身也要重跑迁移。不 await —— 起预览要几十秒，
+         * 让回滚的按钮先停下来，启动进度由预览状态自己推。
+         */
+        if (result.data.restored) void startPreview()
       } catch (err) {
         dispatch({ kind: 'error', message: messageOf(err) })
       } finally {
         dispatch({ kind: 'revert', reverting: false })
       }
     },
-    [refreshCommits, showCommit],
+    [refreshCommits, showCommit, startPreview],
   )
 
   const clearError = useCallback(() => dispatch({ kind: 'error', message: null }), [])

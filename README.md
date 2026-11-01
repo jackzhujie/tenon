@@ -57,7 +57,12 @@ M0 逆向研究完成；方案 **v1.2.7**；四个技术 spike 全部跑通。**
 - **能打成桌面应用**：`pnpm pack:desktop` → `Tenon.app`，双击打开就是上面那套界面；
   主进程不 import 任何 `@tenon/*`（铁律：Electron 只当壳）；安装包**自带 pnpm**，不依赖系统装了什么
 
-105 个测试 + 9 项端到端冒烟 + 14 项预览 e2e + 全栈 e2e + 8 项桌面冒烟全绿。安装包内**零原生模块**。
+**能指着元素改界面了**：预览里按住 Alt 高亮描边、Alt+点一下就把元素反查回 `src/App.tsx:25:3`，
+作为上下文 chip 交给 Agent；改动面板逐行显示某一版改了什么，回滚默认只退代码，
+勾上「连数据库一起回去」才会连数据一起退（只对改过表结构的版本提供）。
+
+259 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e + 全栈 e2e +
+8 项桌面冒烟全绿。安装包默认路径上不带任何需按平台编译的原生模块（打包脚本会审计并打印清单）。
 
 想先跑起来看（**不需要任何 API Key**，用的是 pi-ai 自带的 faux 模型）：
 
@@ -65,9 +70,11 @@ M0 逆向研究完成；方案 **v1.2.7**；四个技术 spike 全部跑通。**
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 105 项单测 / 集成测试
+pnpm test                   # 259 项单测 / 集成测试（约 90s，含 PGlite 冷启动）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
-pnpm e2e:preview            # 14 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
+pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
+pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
+pnpm e2e:diff               # 36 项改动/回滚链路：git.log / show / revert 全走真 HTTP
 pnpm e2e:fullstack          # ★ 全栈真机链路（要联网装 Nest）：起库 → 迁移 → 双进程 → CRUD → 重启后数据还在
 pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后不留孤儿进程
@@ -75,8 +82,7 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**下一步**：M2 剩余三件 —— runtime SDK + 日志/错误面板 → `pg_dump` 跨档迁移到 Docker PG → Docker compose 产物，
-见 [STATUS.md §4.5](docs/STATUS.md)。
+**下一步**：M3 收尾（发布 push），剩下的欠账与验收细节见 [STATUS.md §4.7](docs/STATUS.md)。
 实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License

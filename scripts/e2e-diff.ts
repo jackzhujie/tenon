@@ -10,9 +10,9 @@
  *
  * 用法：`pnpm e2e:diff`（跑完删临时目录）、`pnpm e2e:diff --keep`
  */
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { gitops } from '../packages/core/src/index.js'
 import { startServer } from '../packages/server/src/index.js'
 
@@ -57,9 +57,23 @@ interface ShowResult {
     insertions: number
     deletions: number
     lines: DiffLine[]
-    binary?: boolean
+      binary?: boolean
   }>
   patch: string
+  /** 这一版动没动表结构 —— 决定回滚时要不要提供「连数据一起回去」 */
+  schemaChanged: boolean
+  /** 这一版自己有没有存库快照 */
+  hasSnapshot: boolean
+}
+
+interface RevertResult {
+  commit: Commit
+  data: {
+    requested: boolean
+    restored: boolean
+    fromSha: string | null
+    skippedCommits: number
+  }
 }
 
 const home = await mkdtemp(join(tmpdir(), 'tenon-e2e-diff-'))
@@ -170,7 +184,7 @@ try {
   )
 
   console.log('\n6) git.revert：代码退回去，历史不退')
-  const reverted = await rpc<{ commit: Commit }>('git.revert', { appId, sha: second!.sha })
+  const reverted = await rpc<RevertResult>('git.revert', { appId, sha: second!.sha })
   check('回滚产生的是新提交', reverted.commit.sha !== second?.sha)
   check('回滚提交的文案说清是 revert', reverted.commit.message.startsWith('revert:'))
 
@@ -196,6 +210,49 @@ try {
   console.log('\n8) 找不到的 sha：报错而不是空 diff')
   const missing = await rpcError('git.show', { appId, sha: 'deadbeef'.repeat(5) })
   check('错误码是 GIT_DIFF_FAILED', missing.code === 'GIT_DIFF_FAILED', JSON.stringify(missing))
+
+  console.log('\n9) schemaChanged：只有动表结构的提交才为真')
+  check('前两轮只改界面 → 不为真', shown.schemaChanged === false, JSON.stringify(shown.schemaChanged))
+  const schemaFile = join(repo, 'api', 'migrations', '1767225600000-InitNotes.ts')
+  await mkdir(dirname(schemaFile), { recursive: true })
+  await writeFile(schemaFile, 'export class InitNotes {}\n')
+  const third = await gitops.commitAll(repo, '第三轮：加一张表', { conversationId: 'c1', turn: 3 })
+  check('第三轮产生 commit', third !== undefined)
+  const shownThird = await rpc<ShowResult>('git.show', { appId, sha: third!.sha })
+  check('动了 api/migrations/ → schemaChanged 为 true', shownThird.schemaChanged === true)
+  // 全程没起过预览、也没跑过对话，所以不会有快照 —— 这个 false 是"如实回答"，不是失败
+  check('没起过库 → hasSnapshot 为 false', shownThird.hasSnapshot === false)
+
+  console.log('\n10) 带 dbRestore 但没有快照：拒绝，且**代码一动不动**')
+  /*
+   * 这条最重要的是后半句。带数据还原的回滚里，覆盖库不可逆、回滚代码可逆，
+   * 所以实现必须是「检查 → 还原数据 → 回滚代码」。检查失败时如果代码已经动了，
+   * 用户就得到"代码回滚了、数据没回滚"这种半成品状态 —— 比直接报错难收拾得多。
+   */
+  const beforeRefuse = await rpc<{ commits: Commit[] }>('git.log', { appId, limit: 20 })
+  const refusedRestore = await rpcError('git.revert', { appId, sha: third!.sha, dbRestore: true })
+  check('错误码是 DB_SNAPSHOT_MISSING', refusedRestore.code === 'DB_SNAPSHOT_MISSING', JSON.stringify(refusedRestore))
+  check('文案说清"数据没有动"以及该怎么办', refusedRestore.message.includes('数据没有动'), refusedRestore.message)
+  const afterRefuse = await rpc<{ commits: Commit[] }>('git.log', { appId, limit: 20 })
+  check(
+    '提交数没变（preflight 失败不该产生半成品状态）',
+    afterRefuse.commits.length === beforeRefuse.commits.length,
+    `${String(beforeRefuse.commits.length)} → ${String(afterRefuse.commits.length)}`,
+  )
+  check(
+    '那个迁移文件还在（代码真的没被回滚）',
+    await readFile(schemaFile, 'utf8').then(
+      () => true,
+      () => false,
+    ),
+  )
+
+  console.log('\n11) 带 dbRestore=false 的回滚：data 字段如实说自己没动数据')
+  const plain = await rpc<RevertResult>('git.revert', { appId, sha: third!.sha })
+  check('requested 为 false', plain.data.requested === false)
+  check('restored 为 false', plain.data.restored === false)
+  check('fromSha 为 null', plain.data.fromSha === null)
+  check('skippedCommits 为 0', plain.data.skippedCommits === 0)
 
   console.log('')
   if (failures > 0) {

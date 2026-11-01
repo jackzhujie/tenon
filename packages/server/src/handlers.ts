@@ -6,12 +6,13 @@
  * 防止「handler 返回了契约外的形状」这种更隐蔽的漂移。
  */
 import type { CoreServices } from '@tenon/core'
-import { appPaths, files, gitops } from '@tenon/core'
+import { appPaths, files, gitops, isSchemaChange } from '@tenon/core'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { listTemplates } from '@tenon/generator'
 import type { RpcArgs, RpcMethod, RpcMethods, RpcOutput } from '@tenon/protocol'
 import { TenonError } from '@tenon/protocol'
+import { pickSnapshot, type PickedSnapshot } from './revert-data.js'
 import type { SseBus } from './sse.js'
 
 export interface ServerDeps {
@@ -172,21 +173,65 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'git.show': async (input) => {
       const app = core.apps.require(input.appId)
-      return gitops.showCommit(appPaths(core.home, app.id).repoDir, input.sha)
+      const repoDir = appPaths(core.home, app.id).repoDir
+      const shown = await gitops.showCommit(repoDir, input.sha)
+      return {
+        ...shown,
+        schemaChanged: shown.changes.some((change) => isSchemaChange(change.path)),
+        hasSnapshot: (await preview.findDatabaseSnapshot(app.id, shown.commit.sha)) !== null,
+      }
     },
 
     'git.revert': async (input) => {
       const app = core.apps.require(input.appId)
-      const result = await gitops.revert(appPaths(core.home, app.id).repoDir, input.sha, {
-        appId: app.id,
-      })
-      const commits = await gitops.log(appPaths(core.home, app.id).repoDir, 1)
+      const repoDir = appPaths(core.home, app.id).repoDir
+
+      /*
+       * 顺序是刻意的：**检查 → 还原数据 → 回滚代码**。
+       *
+       * 覆盖数据库不可逆，回滚代码可逆（再回滚一次就回来了）。所以凡是可能失败、
+       * 且失败后不该动任何东西的判断，都要挤在最前面做完 —— 不能出现
+       * "库已经被旧数据覆盖了，然后发现这个提交根本没法回滚"。
+       */
+      const plan = await gitops.planRevert(repoDir, input.sha)
+
+      let restore: PickedSnapshot | null = null
+      if (input.dbRestore) {
+        // 目标提交动了 schema 才值得还原；但用户勾了就该照做 —— 也可能是他知道
+        // 那一版虽然没改 schema，却写坏了数据。所以这里不按 schemaChanged 卡。
+        restore = await pickSnapshot(plan.ancestors, (sha) =>
+          preview.findDatabaseSnapshot(app.id, sha),
+        )
+        if (restore === null) {
+          throw new TenonError(
+            'DB_SNAPSHOT_MISSING',
+            '这一版之前没有可用的数据库快照（只有改过表结构的提交才会存快照），所以数据没有动。' +
+              '取消勾选「连数据一起回滚」可以只回滚代码。',
+            { sha: plan.targetSha },
+          )
+        }
+
+        // 先停预览：还原会销毁 PGlite 实例，Nest 还连着的话会刷一屏断连错误
+        await preview.stop(app.id)
+        await preview.restoreDatabase(app.id, restore.snapshot)
+      }
+
+      const result = await gitops.revert(repoDir, input.sha, { appId: app.id })
+      const commits = await gitops.log(repoDir, 1)
       const commit = commits[0]
       if (commit === undefined) {
         throw new TenonError('GIT_REVERT_FAILED', '回滚提交已写入但读不回来')
       }
       bus.publish({ type: 'git.commit', appId: app.id, sha: result.sha, message: result.message })
-      return { commit }
+      return {
+        commit,
+        data: {
+          requested: input.dbRestore,
+          restored: restore !== null,
+          fromSha: restore?.sha ?? null,
+          skippedCommits: restore?.skipped ?? 0,
+        },
+      }
     },
 
     'settings.get': async () => ({ values: core.settings.all() }),

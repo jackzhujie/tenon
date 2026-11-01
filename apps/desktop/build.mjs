@@ -9,9 +9,17 @@
  *   web/                  ← 渲染器产物（`pnpm build:web` 的 dist）
  * ```
  *
- * 为什么 server 能打成一个文件：M1 的服务端依赖全是纯 JS（产品库是 `node:sqlite`，
- * 生成应用才可能碰 PGlite），**没有任何需要按平台编译的模块** —— 铁律 3 在这里守住。
- * 打包末尾会扫一遍 `dist/`，发现 `.node` 就直接失败，而不是等用户装完才发现。
+ * 为什么 server 能打成一个文件：M1 的服务端依赖恰好全是纯 JS（产品库是 `node:sqlite`，
+ * 生成应用才可能碰 PGlite），所以 esbuild 能把它们全塞进一个 12MB 的文件。
+ *
+ * **这不等于"安装包里不许有原生模块"。** v1.2.13 起这条从铁律降为偏好：
+ * 安装包是**预编译分发**的产物，原生模块在打包机上就编译好了，用户机器上不需要
+ * node-gyp / 编译工具链 —— 原先那条限制要解决的正是这个，而它在分发模型下已经不存在。
+ * 所以现在扫到 `.node` 不失败，而是**列清单 + 体积 + 平台标签**：
+ * 放宽限制不该同时放弃"知道包里装了什么"。要卡住就设 `TENON_STRICT_NATIVE=1`。
+ *
+ * 仍然守住的边界是**生成应用**那边的依赖（模板 `package.json`）：那是用户在自己机器上
+ * `pnpm install`，我们没有替他预编译，所以那里仍然不引入需要按平台编译的包。
  *
  * 两个必须写进配置的细节：
  * 1. `banner` 注入 `createRequire`：isomorphic-git 里有 CJS 依赖，ESM 产物里没有 `require`
@@ -62,15 +70,49 @@ function resolvePgliteDir() {
   return dirname(dirname(req.resolve('@electric-sql/pglite')))
 }
 
-/** 铁律 3：安装包里不许有需要按平台编译的东西 */
-async function findNative(path) {
+/**
+ * 审计安装包里的原生模块 —— 只报不拦（见文件头）。
+ *
+ * 查 `.node` / `binding.gyp` / 平台动态库。**不查 `.wasm`**：PGlite 的 `pglite.wasm`
+ * 是必须随包走的字节码，跨平台、无需编译，跟"原生模块"是两回事。
+ *
+ * 平台标签从路径猜（`reflink.darwin-arm64.node`、`.../win32-x64/...`）：出现非本平台的
+ * 产物说明带了用不上的东西，值得在输出里点出来，但不该因此让构建失败。
+ */
+async function auditNative(path) {
   const found = []
   for (const entry of await readdir(path, { withFileTypes: true })) {
     const child = join(path, entry.name)
-    if (entry.isDirectory()) found.push(...(await findNative(child)))
-    else if (entry.name.endsWith('.node') || entry.name === 'binding.gyp') found.push(child)
+    if (entry.isDirectory()) {
+      found.push(...(await auditNative(child)))
+      continue
+    }
+    const isNative =
+      entry.name.endsWith('.node') ||
+      entry.name === 'binding.gyp' ||
+      /\.(dylib|so|dll)$/.test(entry.name)
+    if (!isNative) continue
+    const rel = relative(dist, child)
+    const platform = /(darwin|win32|linux|freebsd)-(arm64|x64|ia32|arm)/.exec(rel)?.[0] ?? null
+    found.push({ rel, platform, bytes: (await stat(child)).size })
   }
   return found
+}
+
+function reportNatives(natives) {
+  if (natives.length === 0) return ['原生模块      无']
+  const total = natives.reduce((sum, n) => sum + n.bytes, 0)
+  const lines = [`原生模块      ${natives.length} 个 / ${kib(total)}（已放开，仅审计）`]
+  for (const n of natives.sort((a, b) => b.bytes - a.bytes)) {
+    const tag =
+      n.platform === null
+        ? '跨平台'
+        : n.platform === `${process.platform}-${process.arch}`
+          ? '本平台'
+          : '其他平台·不加载'
+    lines.push(`  ${kib(n.bytes).padStart(6)}  ${tag.padEnd(15)} ${n.rel}`)
+  }
+  return lines
 }
 
 async function main() {
@@ -121,9 +163,10 @@ async function main() {
   await cp(pnpmPkg, join(dist, 'server', 'node_modules', 'pnpm'), {
     recursive: true,
     // pnpm 自带 4 个平台的 `reflink.*.node`（copy-on-write 加速，可选依赖）。
-    // 删掉不影响功能（实测验过 `install` 正常），换来「安装包里零原生模块」这条不变量 ——
-    // 它比那点 clone 加速值钱得多，也让跨平台产物只有一份。
-    filter: (src) => !src.endsWith('.map') && !src.endsWith('.node'),
+    // v1.2.12 及以前这里把它们删掉了，为的是守住"零原生模块"；放开之后没必要再削它 ——
+    // 留着能让 `install` 在支持 reflink 的文件系统（APFS / Btrfs / ReFS）上少拷一遍文件。
+    // 非本平台的那几个会在审计输出里标成"其他平台·包内无用"，几百 KB，不影响功能。
+    filter: (src) => !src.endsWith('.map'),
   })
 
   // 3) 模板（真实文件，渲染时逐个读）
@@ -141,9 +184,11 @@ async function main() {
   }
   await cp(webDist, join(dist, 'web'), { recursive: true })
 
-  const natives = await findNative(dist)
-  if (natives.length > 0) {
-    throw new Error(`dist 里出现了需要按平台编译的模块（铁律 3）：\n${natives.map((n) => relative(dist, n)).join('\n')}`)
+  const natives = await auditNative(dist)
+  if (natives.length > 0 && process.env['TENON_STRICT_NATIVE'] === '1') {
+    throw new Error(
+      `TENON_STRICT_NATIVE=1 且 dist 里出现了原生模块：\n${natives.map((n) => n.rel).join('\n')}`,
+    )
   }
 
   const mainSize = (await stat(join(dist, 'main.mjs'))).size
@@ -155,7 +200,7 @@ async function main() {
       `pglite+pnpm   ${kib(await sizeOf(join(dist, 'server', 'node_modules')))}（外部化）/ pnpm ${kib(await sizeOf(join(dist, 'server', 'node_modules', 'pnpm')))}`,
       `templates     ${kib(await sizeOf(join(dist, 'templates')))}`,
       `web           ${kib(await sizeOf(join(dist, 'web')))}`,
-      '原生模块      无 ✅',
+      ...reportNatives(natives),
     ].join('\n') + '\n',
   )
 }

@@ -19,7 +19,7 @@
  */
 import { existsSync } from 'node:fs'
 import { appPaths, scrubEnv, type TenonHome } from '@tenon/core'
-import { DatabaseManager, type DatabaseProvider } from '@tenon/db-provisioner'
+import { DatabaseManager, type DatabaseProvider, type DbSnapshot } from '@tenon/db-provisioner'
 import type {
   LogEntry,
   LogLevel,
@@ -38,11 +38,20 @@ import { findFreePorts } from './ports.js'
 import { startGateway, type Gateway } from './proxy.js'
 import { launchVite, type Launcher } from './vite.js'
 
-/** 只用到这三个方法，测试可以塞一个假实现进来 */
+/**
+ * 只用到这几个方法，测试可以塞一个假实现进来。
+ *
+ * 快照三件套是**可选**的：它们只在"回滚数据"这条路上用到，而绝大多数预览测试
+ * 只关心进程起没起来。做成必选会让每处测试替身都多写三个空函数，
+ * 反而把"这个替身是否支持回滚"这件事变得更模糊。
+ */
 export interface PreviewDatabase {
   acquire(appId: string): Promise<DatabaseProvider>
   release(appId: string): Promise<void>
   closeAll(): Promise<void>
+  snapshot?(appId: string, sha: string): Promise<DbSnapshot | null>
+  findSnapshot?(appId: string, sha: string): Promise<DbSnapshot | null>
+  restoreSnapshot?(appId: string, snapshot: DbSnapshot): Promise<void>
 }
 
 export interface PreviewManagerOptions {
@@ -292,6 +301,36 @@ export class PreviewManager {
     this.closed = true
     await Promise.all([...this.runs.keys()].map((appId) => this.stop(appId)))
     await this.databases.closeAll()
+  }
+
+  // ------------------------------------------------------ 库快照（回滚的数据侧）
+
+  /**
+   * 给应用库打快照。**只在"这次提交改了 schema"时调用**（判据见
+   * `@tenon/core` 的 `hasSchemaChange`）—— 每轮都存不现实。
+   *
+   * 库不存在时返回 `null`（应用从没起过带库的预览），不是错误。
+   */
+  async snapshotDatabase(appId: string, sha: string): Promise<DbSnapshot | null> {
+    return (await this.databases.snapshot?.(appId, sha)) ?? null
+  }
+
+  async findDatabaseSnapshot(appId: string, sha: string): Promise<DbSnapshot | null> {
+    return (await this.databases.findSnapshot?.(appId, sha)) ?? null
+  }
+
+  /**
+   * 用快照覆盖应用库。
+   *
+   * **不自己停预览**：停预览会连带清掉 `run.database`，而这里的 `restore` 之后
+   * 还可能需要同一个 provider 复用它已经占住的端口。由调用方按
+   * 「先 `stop()` → 再 restore → 最后让用户重启预览」的顺序编排。
+   */
+  async restoreDatabase(appId: string, snapshot: DbSnapshot): Promise<void> {
+    if (this.databases.restoreSnapshot === undefined) {
+      throw new TenonError('DB_UNSUPPORTED', '当前数据库实现不支持还原快照')
+    }
+    await this.databases.restoreSnapshot(appId, snapshot)
   }
 
   // ------------------------------------------------------------ 内部

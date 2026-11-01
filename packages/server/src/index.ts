@@ -73,13 +73,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     },
   })
   const bus = new SseBus()
-  const agent = createAgentRuntime({
-    core,
-    env,
-    publish: (event) => {
-      bus.publish(event)
-    },
-  })
+  /*
+   * preview 先于 agent 建：`onSchemaCommit` 要指向 `preview.snapshotDatabase`，
+   * 而 `PreviewManager` 自己只依赖 core（不依赖 agent），换个顺序没有副作用。
+   */
   const preview = new PreviewManager({
     home: core.home,
     env,
@@ -87,6 +84,21 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       bus.publish(event)
     },
     ...(options.preview ?? {}),
+  })
+  const agent = createAgentRuntime({
+    core,
+    env,
+    publish: (event) => {
+      bus.publish(event)
+    },
+    /*
+     * 一轮提交改了 schema 就给库打一份快照（判据在 `@tenon/core` 的 `hasSchemaChange`）。
+     * 这里**吞掉返回值**：调用方只关心"存了没有"，失败会由 ChatService 转成一条 error 事件 ——
+     * 存不了快照不该让一轮对话失败。
+     */
+    onSchemaCommit: async ({ appId, sha }) => {
+      await preview.snapshotDatabase(appId, sha)
+    },
   })
   const server = buildServer({
     core,

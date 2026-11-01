@@ -24,11 +24,18 @@ import {
 export interface DiffPanelProps {
   commits: GitCommit[]
   selectedSha: string | null
-  diff: { commit: GitCommit; files: DiffFile[] } | null
+  diff: {
+    commit: GitCommit
+    files: DiffFile[]
+    /** 这一版动没动表结构 —— 决定要不要给「连数据一起回滚」这个选项 */
+    schemaChanged: boolean
+    /** 这一版自己有没有存库快照（没存的话回滚会退到更早一份） */
+    hasSnapshot: boolean
+  } | null
   loading: boolean
   reverting: boolean
   onSelect(sha: string): void
-  onRevert(sha: string): void
+  onRevert(sha: string, dbRestore: boolean): void
   onClose(): void
 }
 
@@ -142,9 +149,18 @@ export function DiffPanel({
   // 回滚要点两下。不用 window.confirm：Electron 里它会阻塞渲染进程，
   // 而这条链路后面还挂着"回滚完刷新提交列表"的异步动作
   const [confirming, setConfirming] = useState<string | null>(null)
+  /**
+   * 「连数据一起回滚」**默认不勾**。
+   *
+   * 数据比代码贵：`revert` 之后代码还能再回滚一次，被覆盖掉的库却回不来。
+   * 而"我只是想撤掉那段代码"是最常见的意图 —— 让这个勾选框默认打开，
+   * 等于把最容易后悔的那个选择放在手边。
+   */
+  const [dbRestore, setDbRestore] = useState(false)
 
   useEffect(() => {
     setConfirming(null)
+    setDbRestore(false)
   }, [selectedSha])
 
   // 换一版就把内容滚回顶部，否则会停在上一个文件的中段，看起来像"没切换"
@@ -188,31 +204,66 @@ export function DiffPanel({
             </Button>
           )}
           {diff !== null && confirming === diff.commit.sha && (
-            <>
-              <span className="text-[11px] text-warn">
-                回滚会写一条新提交（历史保留），确定？
-              </span>
-              <Button
-                variant="danger"
-                size="sm"
-                disabled={reverting}
-                onClick={() => {
-                  setConfirming(null)
-                  onRevert(diff.commit.sha)
-                }}
-              >
-                {reverting ? '回滚中…' : '确定回滚'}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
-                取消
-              </Button>
-            </>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(null)} disabled={reverting}>
+              取消
+            </Button>
           )}
           <Button variant="ghost" size="sm" className="px-1.5" title="关闭（Esc）" onClick={onClose}>
             ✕
           </Button>
         </span>
       </div>
+
+      {/*
+        确认条单独占一行，不塞进顶栏：勾选框 + 两段说明塞不进 36px 的高度，
+        挤进去的结果是文案被截断 —— 而这条文案正是"会丢数据"的唯一告知。
+      */}
+      {diff !== null && confirming === diff.commit.sha && (
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-warn/30 bg-panel-2/80 px-3 py-2">
+          <span className="text-[11.5px] text-ink/85">
+            回滚 <span className="font-mono text-[11px]">{diff.commit.sha.slice(0, 7)}</span>{' '}
+            会写一条新提交（历史保留，不抹掉）。
+          </span>
+
+          {diff.schemaChanged ? (
+            <label className="flex cursor-pointer items-center gap-1.5 text-[11.5px] text-warn">
+              <input
+                type="checkbox"
+                checked={dbRestore}
+                disabled={reverting}
+                onChange={(event) => setDbRestore(event.target.checked)}
+                className="size-3.5 accent-current"
+              />
+              <span>
+                连数据库一起回到这一版之前
+                <span className="ml-1 text-[10.5px] text-faint">
+                  （{diff.hasSnapshot ? '这一版存过快照' : '这一版没存快照，会退到最近一份'}
+                  ，<span className="text-bad">会丢弃</span>该时点之后写入的数据）
+                </span>
+              </span>
+            </label>
+          ) : (
+            <span className="text-[10.5px] text-faint">
+              这一版没动表结构，只有代码会回滚。
+            </span>
+          )}
+
+          <Button
+            variant="danger"
+            size="sm"
+            className="ml-auto"
+            disabled={reverting}
+            onClick={() => {
+              const restore = diff.schemaChanged && dbRestore
+              setConfirming(null)
+              setDbRestore(false)
+              onRevert(diff.commit.sha, restore)
+            }}
+          >
+            {reverting ? '回滚中…' : dbRestore && diff.schemaChanged ? '回滚代码与数据' : '确定回滚'}
+          </Button>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-56 shrink-0 flex-col border-r border-line-soft bg-panel/40">

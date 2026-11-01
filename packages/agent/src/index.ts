@@ -5,6 +5,7 @@
  * 不直接 import pi：上游一次 minor 升级只在这里修（铁律 3 的落地方式）。
  */
 import type { CoreServices } from '@tenon/core'
+import type { ChatServiceOptions } from './chat.js'
 import { ChatService } from './chat.js'
 import { HarnessPool } from './harness-pool.js'
 import { planModel, resolveModel, type ModelPlan, type ResolvedModel } from './models.js'
@@ -21,6 +22,11 @@ export interface AgentRuntimeOptions {
   core: CoreServices
   publish: (event: SseEventInput) => void
   env?: NodeJS.ProcessEnv
+  /**
+   * 一轮提交动了 schema 时的回调，由 server 接到 `PreviewManager.snapshotDatabase`。
+   * 在这里只是一个可选项 —— 缺省时 agent 照常工作，只是没有可回滚的数据库快照。
+   */
+  onSchemaCommit?: ChatServiceOptions['onSchemaCommit']
 }
 
 export interface AgentRuntime {
@@ -56,6 +62,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     home: options.core.home,
     model,
     publish: options.publish,
+    ...(options.onSchemaCommit === undefined ? {} : { onSchemaCommit: options.onSchemaCommit }),
   })
 
   return {

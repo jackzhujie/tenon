@@ -463,6 +463,43 @@ async function buildDiff(
   return { changes, files, patch: files.map((file) => file.patch).join('') }
 }
 
+export interface RevertPlan {
+  /** 真正要回滚的提交（完整 sha，调用方传的可能是缩写） */
+  readonly targetSha: string
+  /** 回滚之后代码会回到的状态 —— 也就是目标提交的父提交 */
+  readonly parentSha: string
+  /** 从 `parentSha` 起往前的整条链（新 → 旧），用于回溯"最近一份库快照在哪" */
+  readonly ancestors: readonly string[]
+}
+
+/**
+ * 回滚前的可行性检查，**单独导出**是为了让调用方在动手之前就能问"这件事能做吗"。
+ *
+ * 为什么不能"先做了再说"：带数据还原的回滚里，**覆盖数据库是不可逆的**，
+ * 而回滚代码是可逆的（再回滚一次就行）。所以顺序必须是
+ * 「检查 → 还原数据 → 回滚代码」，检查这一步就必须能脱离执行独立调用。
+ *
+ * 两条规则和 `revert()` 共用同一份实现，避免"预览说能做、真做时又报错"。
+ */
+export async function planRevert(dir: string, sha: string): Promise<RevertPlan> {
+  const commits = await git.log({ fs, dir, depth: 200 })
+  const target = commits.find((entry) => entry.oid.startsWith(sha) || entry.oid === sha)
+  if (target === undefined) {
+    throw new TenonError('GIT_REVERT_FAILED', `找不到 commit ${sha}`)
+  }
+  const parent = target.commit.parent[0]
+  if (parent === undefined) {
+    // 根提交的反向应用等于清空仓库，语义可疑；真需要就走「删应用」而不是回滚
+    throw new TenonError('NOT_IMPLEMENTED', '不支持回滚仓库的第一个提交（等于清空仓库）')
+  }
+  const index = commits.findIndex((entry) => entry.oid === target.oid)
+  return {
+    targetSha: target.oid,
+    parentSha: parent,
+    ancestors: commits.slice(index + 1).map((entry) => entry.oid),
+  }
+}
+
 /**
  * 回滚一个 commit：把该 commit 引入的改动反向应用，产生**新** commit。
  * 与 `reset --hard` 的区别是历史保留 —— 这也是 DESIGN §12 的硬性要求。
@@ -472,17 +509,8 @@ export async function revert(
   sha: string,
   trailers?: CommitTrailers,
 ): Promise<CommitResult> {
-  const commits = await git.log({ fs, dir, depth: 200 })
-  const target = commits.find((c) => c.oid.startsWith(sha) || c.oid === sha)
-  if (target === undefined) {
-    throw new TenonError('GIT_REVERT_FAILED', `找不到 commit ${sha}`)
-  }
-  const parent = target.commit.parent[0]
-  if (parent === undefined) {
-    // 根提交的反向应用等于清空仓库，语义可疑；真需要就走「删应用」而不是回滚
-    throw new TenonError('NOT_IMPLEMENTED', '不支持回滚仓库的第一个提交（等于清空仓库）')
-  }
-  const entries = (await treeDiff(dir, parent, target.oid)).map((e) => ({
+  const plan = await planRevert(dir, sha)
+  const entries = (await treeDiff(dir, plan.parentSha, plan.targetSha)).map((e) => ({
     path: e.path,
     fromOid: e.toOid,
     toOid: e.fromOid,
@@ -499,7 +527,7 @@ export async function revert(
     await fs.promises.writeFile(absolute, Buffer.from(blob))
   }
 
-  const shortSha = target.oid.slice(0, 7)
+  const shortSha = plan.targetSha.slice(0, 7)
   const result = await commitAll(
     dir,
     `revert: 回滚 ${shortSha}\n\n本次提交反向应用了 ${shortSha} 的改动（Tenon 回滚不改写历史）。`,

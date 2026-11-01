@@ -44,7 +44,7 @@ Tenon Server（Node 22 + Fastify 5，只绑 127.0.0.1）
 | Tenon 前端 | React 19 · Vite 7 · Tailwind 4 · shadcn/ui · TanStack Query · Monaco |
 | 生成应用前端 | React 19 · Vite 7 · React Router 7 · Tailwind 4 · shadcn/ui · zod |
 | 生成应用后端 | NestJS 11 · TypeORM · **PostgreSQL 18**（本地默认 PGlite，发布切真 PG）|
-| 产品库 | **`node:sqlite`**（Node 内置，零原生模块）—— 单机注册表，与应用库分开 |
+| 产品库 | **`node:sqlite`**（Node 内置）—— 单机注册表，与应用库分开 |
 | 版本 | isomorphic-git（纯 JS）|
 | 协议 | AGPL-3.0（Tenon/Server）+ Apache-2.0（Runtime SDK/模板/生成物）|
 
@@ -54,7 +54,7 @@ Tenon Server（Node 22 + Fastify 5，只绑 127.0.0.1）
 |---|---|
 | M1 | 骨架 + 对话 + harness + SSE + 预览热更新 + Web 模式（mac/win 双平台冒烟）|
 | M2 | 全栈生成（Nest + PostgreSQL 两档供给：pglite/postgres + CRUD）+ 可观测面板 |
-| M3 | 元素/框选精调 + Diff + 回滚（含 pg_dump/pg_restore）+ 发布 |
+| M3 | 元素/框选精调 + Diff + 回滚（代码 + 数据库快照）+ 发布 |
 | M4 | 6 角色子 Agent + E2E 自验收 + 用量预算 + taskGraph 面板 |
 | M5 | chord 组件体系 + 6 个标准插槽 + 首发 3 个官方插件（bundled 内置）|
 | M6 | mac/win 双平台安装包 + 组件 Hub（首期官方独源）+ 开源发布 |

@@ -14,6 +14,7 @@
   "dependencies": {
     "@tenon/agent": "workspace:*",
     "@tenon/core": "workspace:*",
+    "@tenon/db-provisioner": "workspace:*",
     "@tenon/gateway": "workspace:*",
     "@tenon/generator": "workspace:*",
     "@tenon/protocol": "workspace:*",
