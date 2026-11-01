@@ -1,0 +1,22 @@
+{
+  "name": "@tenon/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "生成应用侧的运行时 SDK：页面异常上报 + 渲染期错误边界 + Nest 5xx 过滤器。源码分发 —— 模板铺库时把这些文件拷进应用（scripts/sync-templates.mjs），应用因此不依赖任何平台路径（铁律 2）",
+  "exports": {
+    "./browser/tenon-log": "./src/browser/tenon-log.ts",
+    "./browser/tenon-boundary": "./src/browser/tenon-boundary.tsx",
+    "./nest/tenon-logger": "./src/nest/tenon-logger.ts"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "@nestjs/common": "*"
+  },
+  "devDependencies": {
+    "@nestjs/common": "11.2.8",
+    "@types/react": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

@@ -193,6 +193,20 @@ async function main(): Promise<void> {
       logsBefore.entries.every((entry) => !entry.message.includes('\u001B')),
     )
 
+    /*
+     * 模板里的 Nest 异常过滤器必须真的挂上了。
+     * 前面那个空标题请求打了 400 —— 如果过滤器没接，日志里不会有这一行，
+     * 但"api 来源有日志"照样成立（Nest 自己会打别的）。所以必须认字面格式。
+     */
+    const fourXx = logsBefore.entries.find((entry) =>
+      entry.message.includes('4xx POST /api/items → 400'),
+    )
+    check(
+      'Nest 过滤器生效：4xx 变成一行可读日志',
+      fourXx !== undefined,
+      JSON.stringify(fourXx ?? logsBefore.entries.filter((e) => e.source === 'api').slice(-3)),
+    )
+
     // 页面侧：SDK 用相对路径 POST，网关自己吃掉（不转发给 Vite / Nest）
     const reported = await fetch(`${url}/__tenon/log`, {
       method: 'POST',

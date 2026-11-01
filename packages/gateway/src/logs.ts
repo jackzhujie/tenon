@@ -19,9 +19,24 @@ import type { LogEntry, LogLevel, LogSource } from '@tenon/protocol'
 const DEFAULT_CAP = 400
 /** 同一句日志在这个窗口内合并（毫秒） */
 const DEDUPE_WINDOW_MS = 1000
+/**
+ * 堆栈续行并进上一条的时间窗口。
+ *
+ * 比去重窗口宽得多：摘要行和 `at ...` 之间可能夹着 Nest 自己的输出，
+ * 但它们仍然是同一个异常的一部分。
+ */
+const STACK_WINDOW_MS = 10_000
 /** 单条消息上限，防止一个巨大的 JSON 把界面撑爆 */
 const MAX_MESSAGE = 2000
 const MAX_DETAIL = 8000
+
+/**
+ * 堆栈续行：`    at ItemsController.create (/repo/dist-server/x.js:12:34)`。
+ *
+ * 缩进就是判断依据，所以**必须在去 trim 之前**测 —— `line.trim()` 之后
+ * 每一行都长得像普通日志，那就永远合并不了。
+ */
+const STACK_LINE = /^\s+at\s+\S/
 
 const LEVEL_RANK: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 }
 
@@ -56,6 +71,11 @@ export function classifyLine(line: string, stream: 'stdout' | 'stderr'): LogLeve
 
 function clamp(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…（已截断，原长 ${text.length}）`
+}
+
+/** 这一行是不是堆栈的一部分（`    at foo (...)`） */
+export function isStackLine(line: string): boolean {
+  return STACK_LINE.test(stripAnsi(line))
 }
 
 function messageOfError(err: unknown): string {
@@ -113,8 +133,43 @@ export class LogStore {
     return entry
   }
 
-  /** 从最新往回数 `limit` 条；过滤在服务端做，免得把 500 条全传过去再筛 */
-  list(
+  /**
+   * 吃一行子进程输出（stdout/stderr 的每一行）。
+   *
+   * 和 `add` 的区别只有一条：**堆栈的第二行起不是新日志，是上一条的 detail**。
+   * 不并的话，一个异常会在面板里变成三十条缩进的 `at ...`，真正的那句摘要被冲走 ——
+   * 这也是"日志面板看着有内容却没法排查"的最常见原因。
+   *
+   * 返回的条目 `id` 与上一条相同：前端按 id upsert，界面上还是一条，只是能展开看堆栈。
+   */
+  addLine(
+    appId: string,
+    source: LogSource,
+    level: LogLevel,
+    line: string,
+    now: number = Date.now(),
+  ): LogEntry {
+    if (isStackLine(line)) {
+      const list = this.byApp.get(appId) ?? []
+      const last = list.at(-1)
+      if (
+        last !== undefined &&
+        last.source === source &&
+        LEVEL_RANK[last.level] >= LEVEL_RANK.warn &&
+        now - last.at <= STACK_WINDOW_MS
+      ) {
+        const frame = stripAnsi(line).trim()
+        const detail = last.detail === null ? frame : `${last.detail}\n${frame}`
+        const merged: LogEntry = { ...last, detail: clamp(detail, MAX_DETAIL) }
+        list[list.length - 1] = merged
+        this.byApp.set(appId, list)
+        return merged
+      }
+    }
+    return this.add(appId, { source, level, message: line }, now)
+  }
+
+  /** 从最新往回数 `limit` 条；过滤在服务端做，免得把 500 条全传过去再筛 */  list(
     appId: string,
     options: { limit?: number; sources?: LogSource[]; minLevel?: LogLevel } = {},
   ): LogEntry[] {

@@ -415,11 +415,7 @@ export class PreviewManager {
         ...(apiPort === undefined ? {} : { apiPort }),
         env,
         onLine: (line, stream) => {
-          this.pushLog(run.appId, {
-            source: 'vite',
-            level: classifyLine(line, stream),
-            message: line,
-          })
+          this.pushLine(run.appId, 'vite', classifyLine(line, stream), line)
         },
       })
       run.vite = vite
@@ -451,11 +447,7 @@ export class PreviewManager {
           poolMax: database.poolMax(),
           env,
           onLine: (line, stream) => {
-            this.pushLog(run.appId, {
-              source: 'api',
-              level: classifyLine(line, stream),
-              message: line,
-            })
+            this.pushLine(run.appId, 'api', classifyLine(line, stream), line)
           },
         })
         run.api = api
@@ -582,7 +574,18 @@ export class PreviewManager {
    * id 不变，前端按 id upsert，界面上就是一条 `×N`，不会跳行也不会刷屏。
    */
   private pushLog(appId: string, input: LogInput): void {
-    const entry = this.store.add(appId, input)
+    this.emitLog(appId, this.store.add(appId, input))
+  }
+
+  /**
+   * 子进程的**每一行**。与 `pushLog` 的差别全在 `LogStore.addLine`：
+   * 堆栈续行会并进上一条的 detail，而不是在面板里刷出一堆缩进的 `at ...`。
+   */
+  private pushLine(appId: string, source: LogSource, level: LogLevel, line: string): void {
+    this.emitLog(appId, this.store.addLine(appId, source, level, line))
+  }
+
+  private emitLog(appId: string, entry: LogEntry): void {
     this.options.publish?.({ type: 'app.log', appId, entry })
   }
 

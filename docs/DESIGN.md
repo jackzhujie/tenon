@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.8
+# DESIGN.md — 详细方案设计 v1.2.9
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -644,7 +644,11 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 
 1. **方言一致性是本次选型的第一约束。** PGlite 不是"SQLite 的替代品"，它就是 **PostgreSQL 编译到 WASM** —— 同一份 PG 解析器、同一套类型系统、同一套 SQL 语义。所以「本地 PGlite → 发布到真 PG」**不需要改一行应用代码、不需要重写 migration**，只换连接串。这是纯 SQLite 方案给不了的（见下方"为什么不用纯 SQLite"）。
 2. **端口与生命周期归 App Gateway 管**（见 §9）。Gateway 在应用启动时按 manifest 拉起 DB（PGlite 进程内进程 / PG 用 `pg_isready` 探活）→ 注入连接串 → 起 Nest。DB 崩溃由 Gateway 重启并上报状态，前端能在 readiness 面板看到 `db: down`。
-3. **迁移与快照。** TypeORM migration 是唯一 schema 事实来源。快照分两级：PGlite 用 `dumpDataDir()` 做整库归档（对应 `exports/<releaseId>/db.tar.gz`）；发布档用 `pg_dump --format=custom`（回滚时 `pg_restore`，对应妙搭 `resetArtifactVersion` 的 `dbRestore` 开关）。**跨档迁移**（PGlite → 真 PG）走 `pg_dump` 逻辑导出，因为方言一致所以可以直接导入。
+3. **迁移与快照。** TypeORM migration 是唯一 schema 事实来源。快照分两级：PGlite 用 `dumpDataDir()` 做整库归档（对应 `exports/<releaseId>/db.tar.gz`）；发布档用 `pg_dump --format=custom`（回滚时 `pg_restore`，对应妙搭 `resetArtifactVersion` 的 `dbRestore` 开关）。**跨档迁移**（PGlite → 真 PG）走**纯 JS 逻辑拷贝**（v1.2.9 变更，见下），不走 `pg_dump` 管道。
+
+   > **v1.2.9 方案变更（实测驱动）**：原方案是 `pg_dump --format=custom` → `pg_restore`。落地时发现两个问题：① 本机（2026-11-01）`pg_dump not found`、`docker not found` —— 用户机器上同样不会有；一个「双击装完零安装」的产品让用户先 `brew install postgresql` 才能发布，等于把最难的一步留到最后。② 跨档迁移只需要**数据**，结构由 migrations 在目标库生成（同一份 migration 两档同跑，见 M2 第 1 步），`pg_dump` 连 DDL 一起搬反而要处理 `--no-owner`/`--no-acl`/扩展等一堆无关项。
+   > 现方案 `packages/db-provisioner/src/migrate.ts`：两端都通过 PG 协议连接（PGlite 侧是 pg-gateway 暴露的真协议端），`information_schema` 拿表/列，`pg_constraint` 拿外键做拓扑排序，分批 `insert ... on conflict do nothing`，最后 `setval` 对齐序列并逐表比对 `count(*)`。**零二进制依赖，两档通用。**
+   > `pg_dump` 仍保留在 `PostgresProvider.dump()` 里用于**发布档的整库快照**（那里目标是真 PG，用户本来就有 PG 环境）。
 4. **Docker 导出产物自带 PostgreSQL。** `docker-compose.yml` 里 `db`（postgres:18-alpine + 健康检查 + 命名卷）+ `app`（NestJS 单容器，`depends_on: service_healthy`）。用户 `docker compose up -d` 即上线，不需要外部数据库。
 
 #### 落地形态（v1.2.7，M2 第 1 步实测）
@@ -668,7 +672,7 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 2. **`stop()` 不删库、`start()` 幂等、还原后端口不变。** 停预览 = 关实例；再起来复用同一个 provider，
    端口因此不变，上层缓存的 `DATABASE_URL` 不会失效（`DatabaseManager` 按 appId 缓存 provider，只 stop 不丢）。
 3. **数据库生命周期跟着预览走，不跟着进程走。** 30 个应用不该常驻 30 个 PGlite（每个 38MB + 100MB 内存）。
-4. **`pglite → postgres` 跨档迁移走逻辑导出**（`pg_dump` 自定义格式），不是数据目录拷贝 —— 方言一致是这条能成立的前提。
+4. **`pglite → postgres` 跨档迁移走逻辑拷贝**（纯 JS，v1.2.9 变更），不是数据目录拷贝 —— 方言一致是这条能成立的前提；「只搬数据不搬结构」正是它能做到零二进制依赖的原因。
 
 > **★ 打包注意（v1.2.7）**：PGlite 不是纯 JS 包，`dist/` 里有 `pglite.wasm`（8.7MB）、`pglite.data`（6MB）
 > 和几十个扩展 `.tar.gz`，运行时按 `import.meta.url` 的相对位置读。桌面构建必须把它 **external**
@@ -1466,7 +1470,9 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > （三来源汇流：子进程 stdout/stderr、页面经 `/__tenon/log` 同源上报、平台关键节点）+
 > `app.log` SSE 事件 + `logs.list`/`logs.clear` RPC + 模板侧零依赖上报（`tenon-log.ts` / `tenon-boundary.tsx`）+
 > `apps/web` 的 `LogPanel`（折叠底栏 / 来源筛选 / 错误高亮）。
-> **仍欠：③ 跨档 `pg_dump` 迁移、④ Docker compose 产物、⑤ 的 runtime SDK 半边（收编 `tenon-log` 成 `@tenon/runtime`）。**
+> **③ 已落地（v1.2.9）**：`migrateDatabase()` 纯 JS 逻辑拷贝（外键拓扑排序 / 生成列排除 / `OVERRIDING SYSTEM VALUE` / 序列 `setval` / 逐表 `count(*)` 校验），`pglite → pglite` 全链路实测 10 项（含 TypeORM 生成的表与序列）；**`pglite → 真 PG` 尚未实测（本机无 Docker/无 PG）**。
+> **⑤ 的 runtime SDK 半边已落地（v1.2.9）**：`packages/runtime-sdk`（`@tenon/runtime`）作为源码事实来源，`sync-templates.mjs` + 漂移测试把 `tenon-log` / `tenon-boundary` / `tenon-logger`（Nest 全局异常过滤器）拷进两个模板。
+> **仍欠：④ Docker compose 产物（阻塞：本机无容器运行时）。**
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 
@@ -1491,7 +1497,7 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 | **Windows 无 gondolin 后端** | 中 | 见 §15.3 方案 B（独立子进程 + 权限清单），并明确文档化能力差异 |
 | **社区组件可访问用户应用数据** | **高** | L3 强制独立子进程 + `manifest.permissions` 逐条确认 + 无 `host.serve` 级能力；官方 L2 走签名 |
 | **收费组件被绕过** | 中 | 授权在服务端 `principal` 层，非前端开关；license 用 Ed25519 签名 |
-| PG 迁移耗时（PGlite → 真 PG，数据量大时）| 低 | 后台任务 + 进度条；`pg_dump` 流式管道传参，不落临时文件 |
+| PG 迁移耗时（PGlite → 真 PG，数据量大时）| 低 | 后台任务 + 进度条（`MigrateProgress` 已有 phase/table/done/total）；批量 `insert` 500 行/批，不落临时文件 |
 | 组件插槽被滥用导致 UI 冲突 | 低 | 只开放 6 个标准插槽；同插槽多组件按 `order` 排序并限流 |
 
 ---

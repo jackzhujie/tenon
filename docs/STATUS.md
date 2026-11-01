@@ -1,8 +1,9 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-11-01（**M1 全部 9 步 + M2 第 1、2 步落地**：128 个测试 + 9 项端到端冒烟 + 14 项预览 e2e +
-> 全栈 e2e（含日志链路断言）+ 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通）
+> 最后更新：2026-11-01（**M1 全部 9 步 + M2 第 1~3 步落地（Docker 产物除外）**：159 个测试 + 9 项端到端冒烟 +
+> 14 项预览 e2e + 全栈 e2e（含日志链路与 Nest 过滤器断言）+ 8 项桌面冒烟全绿；`pnpm dev:web`、
+> `pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 唯一未完成项：Docker compose 产物（本机无容器运行时）**）
 
 ---
 
@@ -13,14 +14,16 @@
 
 M1 已经全部落地（一条命令起界面、对话里改代码、iframe 当场热更新、能打成 `Tenon.app` 双击运行）；
 M2 第 1 步把「只有页面」变成「有库、有接口、能 CRUD」；第 2 步把它变成「**出错了看得见**」：
-Vite/Nest 子进程输出、页面异常（含堆栈）都汇进日志面板，预览停了缓冲还在。
+Vite/Nest 子进程输出、页面异常（含堆栈）都汇进日志面板，预览停了缓冲还在；
+第 3 步把「要发布」的两块补齐了 —— **运行时 SDK**（异常上报 / 错误边界 / Nest 5xx 过滤器，源码分发进模板）
+与**跨档数据迁移**（`pglite → postgres` 纯 JS 逻辑拷贝，零二进制依赖）。
 
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 128 项单测 + 集成测试（约 55s）
+pnpm test                       # 159 项单测 + 集成测试（约 80s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 14 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 改文件 → HMR（要联网）
 pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁移 → Vite+Nest 双进程 → CRUD 经网关 → 重启后数据还在
@@ -58,8 +61,14 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
   - 两个模板都装了 `tenon-log.ts`（`window.onerror` / `unhandledrejection`）+
     `tenon-boundary.tsx`（ErrorBoundary）—— **零新依赖**，上报走同源 fetch
   - 界面：`apps/web/src/features/logs/LogPanel.tsx`（折叠底栏、按来源筛选、错误高亮、详情展开、清空）
-- **M2 剩余**：runtime SDK（`@tenon/runtime`，把现在的 `tenon-log` 收编成正式包）、
-  `pg_dump` 跨档迁移到 Docker PG、Docker compose 产物
+- **★ M2 第 3 步（能发布了）**：
+  - `packages/runtime-sdk`（`@tenon/runtime`）：**源码分发** —— `sync-templates.mjs` 把
+    `tenon-log.ts` / `tenon-boundary.tsx` / `tenon-logger.ts`（Nest 全局异常过滤器）拷进两个模板，
+    漂移由测试逐字节拦住。生成应用仍然**零平台依赖**（铁律 2）
+  - 跨档迁移 `migrateDatabase()`：两端走 PG 协议，`information_schema` 取表列、`pg_constraint` 取外键
+    做拓扑排序、分批 `insert … on conflict do nothing`、**`setval` 对齐序列**、逐表 `count(*)` 校验
+  - 日志面板增强：堆栈续行（`    at …`）并进上一条的 `detail`，不再碎成三十条
+- **M2 剩余**：Docker compose 产物（**阻塞：本机无 Docker / podman / colima**）
 
 ---
 
@@ -99,7 +108,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 文件 | 管什么 | 什么时候读 |
 |---|---|---|
 | **`docs/STATUS.md`**（本文件） | 现状、下一步、陷阱 | **每次开工先读** |
-| `docs/DESIGN.md` | **唯一事实来源**，v1.2.7，1700+ 行 | 写涉及架构的代码前，按需读对应章节 |
+| `docs/DESIGN.md` | **唯一事实来源**，v1.2.9，1700+ 行 | 写涉及架构的代码前，按需读对应章节 |
 | **`docs/SPIKES.md`** | 四个 spike 的实测数字与结论（含被推翻的假设）| 碰 DB / pi / 网关 / 定位插件前必读 |
 | `docs/ARCHITECTURE.md` | 一分钟速览 + 四条原则 | 给别人介绍时 |
 | `docs/PI-CHEATSHEET.md` | pi 全生态真实 API（读源码所得）| **写任何 pi 相关代码前必查**（比官方文档全）|
@@ -155,9 +164,9 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 4 | **全栈端到端**：建应用 → 起库 → 迁移 → 双进程就绪 → CRUD 经网关 → 重启数据还在 | ✅ | `scripts/e2e-fullstack.ts` |
 | 5 | 桌面版自带包管理器（不再依赖系统 `pnpm`） | ✅ | `packages/gateway/src/deps.ts` + `apps/desktop/{build.mjs,electron-builder.yml}` |
 | 6a | **日志/错误面板**：LogStore + 三来源汇流 + `app.log` SSE + 模板侧零依赖上报 | ✅ | `packages/gateway/src/logs.ts`、`apps/web/src/features/logs/LogPanel.tsx`、模板 `src/tenon-{log,boundary}` |
-| 6b | runtime SDK（生成应用侧的 `@tenon/runtime`，收编模板里的 `tenon-log`） | ⬜ | 待建 `packages/runtime-sdk` |
-| 7 | 跨档迁移：`pg_dump` → Docker PG，数据零丢失 | ⬜ 下一步 | `packages/db-provisioner` + 发布流程 |
-| 8 | Docker compose 产物（多阶段 + `postgres:18-alpine`） | ⬜ | 模板 `Dockerfile` / `compose.yml` |
+| 6b | **runtime SDK**：`@tenon/runtime` 源码分发（异常上报 / 错误边界 / Nest 过滤器）+ 漂移测试 | ✅ | `packages/runtime-sdk/`（`src/browser`、`src/nest`、`scripts/sync-templates.mjs`） |
+| 7 | **跨档迁移**：`pglite → postgres` 纯 JS 逻辑拷贝（v1.2.9 变更，原 `pg_dump` 方案因用户机器无二进制而废弃） | ✅ 逻辑已验；真 PG 未实测 | `packages/db-provisioner/src/migrate.ts` |
+| 8 | Docker compose 产物（多阶段 + `postgres:18-alpine`） | ⛔ 阻塞（本机无容器运行时） | 模板 `Dockerfile` / `compose.yml` |
 
 ### 4.3 M1 验收（DoD）
 
@@ -202,23 +211,45 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
       → 界面上是一条 ×N，不会跳行）
 - [x] 零新依赖 —— 两个模板的上报实现不引任何包（纯 fetch + 原生事件），不破"锁版本"铁律
 
-### 4.6 下一步具体做什么（M2 第 3 步：runtime SDK + 跨档迁移 + 发布产物）
+### 4.6 M2 第 3 步验收（DoD，能发布的那两块）—— ✅ 已完成（Docker 产物除外）
 
-第 1 步解决「能不能起来」，第 2 步解决「出错了看不看得见」。接下来解决「**能搬去生产**」：
+- [x] **运行时 SDK 成为唯一事实来源** —— `packages/runtime-sdk` 的 `src/browser/tenon-log.ts`、
+      `src/browser/tenon-boundary.tsx`、`src/nest/tenon-logger.ts` 是原件；`scripts/sync-templates.mjs`
+      把它们拷进两个模板；`test/sync.test.ts` **逐字节**比对，改一边忘另一边直接测试红
+- [x] **生成应用仍然零平台依赖** —— 副本是普通 `.ts`/`.tsx` 文件，应用不 import `@tenon/runtime`、
+      不认任何 `TENON_*`（导出成 Docker 也装得起来，铁律 2）
+- [x] **Nest 侧 5xx 有格式** —— `TenonLoggerFilter` 全局挂上（`APP_FILTER`）：5xx 打一行摘要 + 堆栈、
+      4xx 打一行 warn；`pnpm e2e:fullstack` 实测日志里有 `4xx POST /api/items → 400`（**认字面格式**，
+      不是"有日志就算过"）
+- [x] **全局过滤器不会把请求挂死** —— `@Catch()` 接管分发权后必须自己补响应；
+      单测断言 4xx/404/500 三种情况的状态码与响应体（500 不回显内部错误）
+- [x] **跨档迁移数据零丢失** —— `migrateDatabase()` 10 项实测：外键顺序（父表先插）、布尔/时间戳/
+      生成列/`jsonb` 原样搬、**序列 `setval` 后新插入不撞主键**、目标缺表明确报错、可重跑
+      （`on conflict do nothing`）、进度回调、TypeORM 生成的真表也认
+- [x] **零二进制依赖** —— 不用 `pg_dump`/`pg_restore`/`psql`（本机与用户机器都没有）。
+      两端都是 PG 协议连接，纯 SQL
+- [x] **面板里的堆栈不再碎成一堆行** —— `LogStore.addLine` 把 `    at …` 续行并进上一条的 `detail`
+      （id 不变 → 前端 upsert → 界面上还是一条，点开能看全栈）
+- [ ] **Docker compose 产物** —— ⛔ 阻塞：本机无 `docker`/`podman`/`colima`，无法"构建并跑起来"。
+      DoD ④ 不能靠猜收口，故**不产出未验证的 Dockerfile**
 
-1. **`packages/runtime-sdk`（`@tenon/runtime`）**：把两个模板里各自一份的 `tenon-log.ts` /
-   `tenon-boundary.tsx` 收编成正式包（模板改为引用），再加上 HTTP 5xx 拦截（Nest 侧 exception filter）。
-   **注意别踩铁律 2**：SDK 不判断 desktop/web/cloud，只认 `window.__TENON__` 或什么都不认
-   （上报走相对路径，同源天然成立）。
-2. **跨档迁移**：`DatabaseManager` 已有 `dump()`，但 `pglite → postgres` 的**逻辑导出**还没实测
-   （spike 只验了 PGlite 内部快照）。要做的是一条命令：`pglite` 档 `pg_dump --format=custom` →
-   `postgres` 档 `pg_restore`，然后用同一批 `GET /api/items` 断言数据零丢失。这是 DESIGN §17 的 DoD ③。
-3. **Docker compose 产物**：模板里加 `Dockerfile`（多阶段）+ `compose.yml`（自带 `postgres:18-alpine`），
-   构建并跑起来 —— DoD ④。这步同时验证"生成应用真的不感知运行环境"。
+### 4.7 下一步具体做什么（M2 收尾）
 
-> 顺序建议：先 1（收编，趁现在只有两个消费方），再 2（迁移出错时日志面板已经能帮你定位），最后 3。
+只剩一件事：**Docker compose 产物**（DESIGN §17 DoD ④）。它需要一台有容器运行时的机器：
 
-### 4.7 代码地图（只列已落地的）
+1. 模板加 `Dockerfile`（多阶段：`vite build` + `tsc -p tsconfig.server.json` → 运行层只带
+   `dist/`、`dist-server/`、`node_modules` 的生产依赖）
+2. `compose.yml`：app + `postgres:18-alpine`，`DATABASE_URL` 注入，`depends_on` + healthcheck
+   （迁移在 app 启动时跑，所以必须等库真的能连）
+3. 验收：`docker compose up` → `GET /api/items` 空数组 → POST 一条 → 重启容器数据还在；
+   并且**同一份源码在 pglite 档也照常跑**（这才是"不感知环境"的证明）
+
+补完这一项，M2 就齐了（DoD ①~⑤ 全部有实测）。之后进 M3（精调与版本：源码定位、框选、Diff、回滚）。
+
+> 已知欠账（有环境就能补）：`pglite → 真 PG` 的迁移端到端（逻辑已在 pglite→pglite 上验过，
+> 但真 PG 的 `information_schema` 行为、云 PG 的权限差异还没实测）；`pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）。
+
+### 4.8 代码地图（只列已落地的）
 
 ```
 packages/
@@ -245,6 +276,7 @@ packages/
 │       │   └── src/tenon-{log.ts,boundary.tsx}  # ★ 零依赖上报：onerror/unhandledrejection/ErrorBoundary → 同源 POST
 │       ├── nest-api/    # ★ 全栈（M2）：Vite + NestJS 11 + TypeORM + zod 共享层
 │       │   ├── api/     #   main / app.module / db(dataSourceOptions) / migrations / items
+│       │   │            #   tenon-logger.ts（★ 从 runtime-sdk 同步，别手改）
 │       │   ├── shared/  #   schema.ts：zod 契约，前后端同一份
 │       │   ├── src/tenon-{log.ts,boundary.tsx}  # 同 react-vite（模板各自自包含，收编进 runtime-sdk 是 M2-3）
 │       │   └── tsconfig.server.json  # ★ 必须 CommonJS + emitDecoratorMetadata（Nest DI 要）
@@ -253,14 +285,21 @@ packages/
 │   ├── src/types.ts     #   DatabaseProvider 接口；文件头写明 poolMax 恒 1 与未就绪抛错
 │   ├── src/pglite.ts    #   PgliteProvider：pg-gateway 起真 PG 协议端 + dumpDataDir 快照
 │   ├── src/postgres.ts  #   PostgresProvider：只探活；dump/restore 走 pg_dump/pg_restore
-│   ├── src/manager.ts   #   DatabaseManager：按 appId 缓存（只 stop 不丢 → 端口不变）
+│   ├── src/manager.ts   #   DatabaseManager：按 appId 缓存（只 stop 不丢 → 端口不变）+ migrate()
+│   ├── src/migrate.ts   # ★ 跨档逻辑拷贝：外键拓扑排序 / 分批 insert / setval 对齐序列 / count 校验
 │   └── src/index.ts
+├── runtime-sdk/         # ★ 生成应用侧的运行时 SDK（DESIGN §6.4 注 / §17 DoD ⑤）
+│   ├── src/browser/tenon-log.ts       #   window.onerror / unhandledrejection → 同源 POST（零依赖）
+│   ├── src/browser/tenon-boundary.tsx #   ErrorBoundary：兜住渲染期错误 + 自包含降级 UI（inline style）
+│   ├── src/nest/tenon-logger.ts       #   全局 @Catch()：5xx 摘要+堆栈、4xx 一行 warn、补回响应
+│   ├── scripts/sync-templates.mjs     # ★ 源码分发：拷进模板（--check 只校验）
+│   └── test/sync.test.ts              #   漂移闸门：副本与原件逐字节一致
 ├── gateway/             # 预览编排（DESIGN §9.1）
 │   ├── src/proxy.ts     #   HTTP 转发 + upgrade 原样透传（两侧 socket 必须配对销毁）；
 │   │                    #   POST /__tenon/log 在这里被拦下交给 onClientLog（不转发上游）
 │   ├── src/preview.ts   #   PreviewManager：deps → 端口 → 网关 → db → vite → api → 并行探活
-│   ├── src/logs.ts      # ★ LogStore（每应用隔离、1s 同句合并 repeat、上限截断）+
-│   │                    #   stripAnsi / classifyLine / parseClientLog
+│   ├── src/logs.ts      # ★ LogStore（每应用隔离、1s 同句合并 repeat、上限截断、堆栈续行并入 detail）+
+│   │                    #   stripAnsi / classifyLine / parseClientLog / isStackLine
 │   ├── src/deps.ts      #   pnpm install（--prefer-offline，全有超时，失败带最后 20 行）
 │   ├── src/vite.ts      #   spawn(process.execPath, [viteBin])：不依赖 PATH 里有 pnpm
 │   ├── src/api.ts       # ★ 后端半边：resolveApiEntry + tsc --watch → 等产出 → node --watch
@@ -370,6 +409,13 @@ scripts/
 | **`LogStore` 合并后照样要推 SSE** | 去重容易顺手把"重复的那条"也吞了 —— 但合并是 `repeat++` 且 **id 不变**，前端按 id upsert 才能得到"一条 ×N"。吞掉的话界面上计数永远停在 1。`pushLog` = `store.add()` + 无条件 `publish` |
 | **页面异常上报走同源相对路径，别加鉴权头** | 网关本身不校验 Token（它只在回环监听、生命周期跟预览走），上报用 `fetch('/__tenon/log', {keepalive:true})` 就够。想当然带上 `window.__TENON__.token` 反而把平台凭证引进了生成应用的代码 —— 违反"应用不感知平台"的方向 |
 | **SSE 新增事件要过 `event-names.ts` 的穷尽闸门** | `SseEventNames` 是 `satisfies readonly SseEventType[]`，漏登记的类型检查直接红。但**别忘了** `apps/web` 的 `fences.test.ts` / reducer 的 switch 也要有对应 case —— TS 的 exhaustive 检查只覆盖有 discriminated union 的那几处 |
+| **全局 `@Catch()` 过滤器接管了响应分发权** | 只记日志不写响应 = 请求永远挂着（前端只看到转圈，日志里一条异常，看起来"后端卡住"）。必须 `reply.status(status).send(body)` 把等价于 Nest 默认行为的响应补回去；单测断言 4xx/404/500 三种情况都要有响应 |
+| **跨档迁移必须 `setval` 对齐序列** | 不做的后果最阴：迁移报告全绿、行数一致，用户第一次新建记录 → 主键冲突 500。`syncSequences()` 用 `max(col)` 推序列，用 TypeORM 真表跑一遍才能验到 |
+| **`insert` 要排除生成列、`GENERATED ALWAYS AS IDENTITY` 要配 `OVERRIDING SYSTEM VALUE`** | 生成列写进去 → 报错；identity always 不给 overriding → 报"不能显式插入"。两者都按 `information_schema.columns` 的 `is_generated` / `identity_generation` 判断，别按列名猜 |
+| **外键有环时不要"猜一个顺序"** | 猜错的代价是目标库留一半数据 + 中途报错，比一开始就失败难收拾。`orderTables()` 拓扑排序遇到环直接抛并列出环上的表；自引用（树形表）要显式跳过，否则每棵树都被判成环 |
+| **迁移"只搬数据不搬结构"** | 结构由 migrations 在目标库生成（同一份 migration 两档同跑）。所以目标库缺表时**必须报错并指路**（"先让应用在目标档启动一次"），而不是悄悄把表建出来 —— 悄悄建表 = 两套 schema 事实来源 |
+| **运行时 SDK 不能变成应用的 npm 依赖** | `@tenon/runtime` 没发布 npm，应用一旦 `import` 它，导出成 Docker 就装不上（铁律 2 的反面）。所以它是**源码分发**：`sync-templates.mjs` 拷贝 + `test/sync.test.ts` 逐字节拦截漂移。改源文件后别忘了跑同步脚本 |
+| **跨模板共享的组件不能用模板的 css 类名** | 错误边界的降级 UI 一旦写 `className="card"`，两个模板就没法共用同一份代码（各自类名不同）。改成 inline style 才能字节级同步；错误态是兜底不是门面，朴素可接受 |
 
 ---
 
@@ -388,7 +434,7 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：16 个测试文件（128 项，含 LogStore/日志链路）
+pnpm test                  # vitest：20 个测试文件（159 项，含迁移与 runtime-sdk）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
@@ -397,7 +443,11 @@ pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates}
 pnpm pack:desktop          # electron-builder --dir → apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop         # 桌面冒烟（开发态）：真起 Electron，8 项断言
 pnpm smoke:desktop:packaged # 同上，但跑打包后的 Tenon.app
-pnpm typecheck             # 7 个 packages + 2 个 apps + 4 个 spikes + scripts（14 个项目）
+pnpm typecheck             # 8 个 packages + 2 个 apps + 4 个 spikes + scripts（15 个项目）
+
+# 模板里的副本从 runtime-sdk 同步（改了 src/browser 或 src/nest 之后）
+node packages/runtime-sdk/scripts/sync-templates.mjs          # 写入
+node packages/runtime-sdk/scripts/sync-templates.mjs --check  # 只校验（测试也在验）
 ```
 
 spike 复跑入口（历史证据，仍在）：
@@ -415,6 +465,10 @@ pnpm spike:loc      # 定位插件精度
 `TENON_DB_MODE=postgres` + `TENON_DATABASE_URL`（把应用库从 PGlite 切到真 PG；不设就是 `pglite`）。
 
 注入给**生成应用**的只有两个：`DATABASE_URL`（唯一入口，铁律 2）与 `DATABASE_POOL_MAX`（容量参数，PGlite 档恒为 1）。
+
+跨档迁移走 `DatabaseManager.migrate(appId, { mode: 'postgres', connectionString })`：
+源是应用当前在用的库，目标是临时起的（迁完就关）。**目标库必须已经跑过 migrations**（先让应用在目标档启动一次），
+迁移只搬数据不搬结构。
 
 > 桌面版冒烟在**受限环境**（容器 / 无 GPU / 从 IDE 里跑）需要 `--no-sandbox --disable-gpu`，
 > `scripts/smoke-desktop.ts` 已经代劳；产品本身不传这两个开关。
@@ -441,14 +495,15 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.7），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.9），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
-当前阶段：M2 全栈生成。第 1、2 步已完成（db-provisioner + nest-api 模板 + 双进程预览；
-日志/错误面板：LogStore 三来源汇流 + app.log SSE + 模板零依赖上报）。
-128 个测试 + smoke 9 + e2e:preview 14 + e2e:fullstack（含日志断言）+ 桌面包全绿。
-接着做 STATUS.md §4.6：runtime SDK（收编 tenon-log）→ pg_dump 跨档迁移 → Docker compose 产物。
-`pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/后端跑 `pnpm e2e:fullstack`。
+当前阶段：M2 全栈生成，第 1~3 步已完成（db-provisioner 两档供给 + nest-api 模板 + 双进程预览；
+日志/错误面板 + LogStore 三来源汇流；runtime-sdk 源码分发 + 跨档逻辑拷贝迁移）。
+159 个测试 + smoke 9 + e2e:preview 14 + e2e:fullstack（含日志与 Nest 过滤器断言）+ 桌面包全绿。
+**M2 只剩 Docker compose 产物**（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）。
+有 Docker 环境后按 STATUS.md §4.7 补；否则直接进 M3（精调与版本：源码定位、框选、Diff、回滚）。
+`pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`。
 
 三条铁律不要违反：Electron 只做壳 / 生成应用不感知运行环境 / 实验性依赖锁版本 + adapter 包装。
 ```

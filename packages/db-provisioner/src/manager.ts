@@ -11,6 +11,7 @@
  */
 import { appPaths, type TenonHome } from '@tenon/core'
 import { TenonError } from '@tenon/protocol'
+import { migrateDatabase, type MigrateReport } from './migrate.js'
 import { createPgliteProvider } from './pglite.js'
 import { createPostgresProvider } from './postgres.js'
 import type { DatabaseProvider, DbMode } from './types.js'
@@ -86,6 +87,52 @@ export class DatabaseManager {
 
   status(appId: string) {
     return this.providers.get(appId)?.status() ?? null
+  }
+
+  /**
+   * 把应用数据迁到另一个档（发布路径：`pglite` → `postgres`）。
+   *
+   * 两条约束写在这里而不是文档里：
+   * 1. **源永远是当前档在用的那个库**（`acquire` 出来的 provider），目标是**临时**起的，
+   *    迁完就关掉。切换档位靠的是重启进程时改 `TENON_DB_MODE` —— 同一进程里两档并用
+   *    只会让人分不清"现在到底在写哪个库"。
+   * 2. **只搬数据不搬结构**：目标库表不存在时直接报错，并提示先让应用在目标档启动一次
+   *    （TypeORM migrations 会建表）。结构与代码同源是这个产品的前提。
+   */
+  async migrate(
+    appId: string,
+    target: { mode: DbMode; connectionString?: string | null },
+  ): Promise<MigrateReport> {
+    const source = await this.acquire(appId)
+    if (target.mode === source.mode) {
+      throw new TenonError(
+        'DB_UNSUPPORTED',
+        `源和目标都是 ${source.mode} 档，没有可迁的东西。跨档迁移才有意义。`,
+        { mode: source.mode },
+      )
+    }
+
+    const paths = appPaths(this.options.home, appId)
+    const to: DatabaseProvider =
+      target.mode === 'postgres'
+        ? createPostgresProvider({
+            connectionString: target.connectionString ?? this.requirePostgresUrl(),
+            snapshotsDir: paths.exportsDir,
+            ...(this.options.log === undefined ? {} : { log: this.options.log }),
+          })
+        : createPgliteProvider({
+            // 反向迁移（把云 PG 拉回本地）落到兄弟目录，绝不覆盖正在用的数据目录
+            dataDir: `${paths.pgdataDir}-imported`,
+            snapshotsDir: paths.exportsDir,
+            ...(this.options.log === undefined ? {} : { log: this.options.log }),
+          })
+
+    await to.start()
+    try {
+      return await migrateDatabase({ from: source, to })
+    } finally {
+      await to.stop().catch(() => undefined)
+    }
   }
 
   async closeAll(): Promise<void> {

@@ -190,4 +190,22 @@ describe('全栈模板 nest-api', () => {
     expect(db).toContain("process.env['DATABASE_POOL_MAX']")
     expect(db).not.toContain('NODE_ENV')
   })
+
+  it('运行时 SDK 真的接上了（拷了文件却没用上 = 看起来有其实没有）', async () => {
+    await scaffoldApp({ ...VARS, repoDir: repo, templateId: 'nest-api' })
+
+    // 后端：过滤器必须是全局 provider，否则 4xx/5xx 还是走 Nest 默认格式
+    const module = await readFile(join(repo, 'api/app.module.ts'), 'utf8')
+    expect(module).toContain("from './tenon-logger'")
+    expect(module).toContain('APP_FILTER')
+    expect(module).toContain('useClass: TenonLoggerFilter')
+
+    // 前端：全局钩子与错误边界都要挂上
+    const main = await readFile(join(repo, 'src/main.tsx'), 'utf8')
+    expect(main).toContain('installTenonLog()')
+    expect(main).toContain('TenonErrorBoundary')
+
+    // 两模板共用同一份 SDK 源码（漂移由 runtime-sdk/test/sync.test.ts 拦）
+    expect(await collectFiles('react-vite')).toContain('src/tenon-boundary.tsx')
+  })
 })

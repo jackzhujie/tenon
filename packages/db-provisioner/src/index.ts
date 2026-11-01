@@ -21,3 +21,12 @@ export type {
 export { createPgliteProvider, PgliteProvider } from './pglite.js'
 export { createPostgresProvider, PostgresProvider, redactUrl } from './postgres.js'
 export { DatabaseManager, type DatabaseManagerOptions } from './manager.js'
+export {
+  migrateDatabase,
+  orderTables,
+  redact,
+  type MigrateOptions,
+  type MigrateProgress,
+  type MigrateReport,
+  type MigrateTableReport,
+} from './migrate.js'

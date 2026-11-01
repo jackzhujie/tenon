@@ -10,7 +10,7 @@
  * 4. **外部输入要防御性解析**：上报体来自生成应用的源码，可能是坏的。
  */
 import { describe, expect, it } from 'vitest'
-import { classifyLine, LogStore, parseClientLog, stripAnsi } from '../src/logs.js'
+import { classifyLine, isStackLine, LogStore, parseClientLog, stripAnsi } from '../src/logs.js'
 
 const APP_ID = 'app_logs_test'
 
@@ -145,5 +145,58 @@ describe('parseClientLog', () => {
   it('detail 是对象时序列化成字符串，界面才好显示', () => {
     const parsed = parseClientLog({ message: 'x', detail: { a: 1 } })
     expect(parsed?.detail).toBe('{"a":1}')
+  })
+})
+
+describe('addLine：堆栈续行并进上一条', () => {
+  it('isStackLine 只认带缩进的 at 行（去 trim 后就认不出来了）', () => {
+    expect(isStackLine('    at ItemsController.create (/repo/x.js:12:34)')).toBe(true)
+    expect(isStackLine('\u001B[2m    at async Module._compile (x.js:1:1)\u001B[22m')).toBe(true)
+    // 没有缩进的 `at` 只是一句普通日志（比如写给人看的说明）
+    expect(isStackLine('at the end of the day')).toBe(false)
+    // 缩进但不是堆栈
+    expect(isStackLine('    - 提示：这是普通的多行输出')).toBe(false)
+  })
+
+  it('摘要行 + 三帧堆栈 = 一条日志，detail 里能看全', () => {
+    const store = new LogStore()
+    const first = store.addLine(APP_ID, 'api', 'error', '5xx GET /api/items → TypeError: boom')
+
+    let last = first
+    for (const frame of ['    at a (x.js:1:1)', '    at b (y.js:2:2)', '    at c (z.js:3:3)']) {
+      last = store.addLine(APP_ID, 'api', 'info', frame)
+    }
+
+    const entries = store.list(APP_ID)
+    expect(entries).toHaveLength(1)
+    // id 不变：前端按 id upsert，界面上还是一条
+    expect(last.id).toBe(first.id)
+    expect(entries[0]?.detail?.split('\n')).toHaveLength(3)
+    expect(entries[0]?.detail).toContain('at c (z.js:3:3)')
+    expect(entries[0]?.message).toContain('TypeError: boom')
+  })
+
+  it('上一行不是 warn/error 时不并（否则普通缩进输出会被吞掉）', () => {
+    const store = new LogStore()
+    store.addLine(APP_ID, 'vite', 'info', '  VITE v7.1.0  ready in 210 ms')
+    store.addLine(APP_ID, 'vite', 'info', '    at something (x.js:1:1)')
+    expect(store.list(APP_ID)).toHaveLength(2)
+  })
+
+  it('跨来源不并：vite 的 at 行不会跑到 api 那条的 detail 里', () => {
+    const store = new LogStore()
+    store.addLine(APP_ID, 'api', 'error', '5xx GET /api/items → Error: boom')
+    store.addLine(APP_ID, 'vite', 'info', '    at hmr (client.js:1:1)')
+    const entries = store.list(APP_ID)
+    expect(entries).toHaveLength(2)
+    expect(entries[0]?.detail).toBeNull()
+  })
+
+  it('超出时间窗口的 at 行算新的一条（避免把十分钟后的堆栈接到旧错误上）', () => {
+    const store = new LogStore()
+    const t0 = 1_000_000
+    store.addLine(APP_ID, 'api', 'error', '5xx → Error: boom', t0)
+    store.addLine(APP_ID, 'api', 'info', '    at late (x.js:1:1)', t0 + 60_000)
+    expect(store.list(APP_ID)).toHaveLength(2)
   })
 })
