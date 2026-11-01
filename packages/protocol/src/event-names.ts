@@ -23,6 +23,7 @@ export const sseEventTypes = [
   'preview.ready',
   'preview.status',
   'app.log',
+  'taskgraph.update',
   'error',
   'stream.reset',
 ] as const satisfies readonly SseEventType[]

@@ -121,6 +121,55 @@ export const FileNode = z.object({
 })
 export type FileNode = z.infer<typeof FileNode>
 
+// ---------------------------------------------------------------- 任务图
+
+/**
+ * 一个活着的 task（M4 任务图面板）。
+ *
+ * 这是 pi 的 `TaskGraphNode` **归一化之后**的形状，不是它本身：
+ * - `kind` 去掉了 `pi.` 前缀（前端不该知道宿主的命名空间）
+ * - `scope` 是我们加的：这个 task 跑在主对话里，还是跑在被派出去的子会话里
+ * - `role` 也是我们加的：工具 task 的 `args.role`，或者从"谁派生了这个会话"继承
+ *   （pi 的任务树里没有角色这个概念，它只知道 kind）
+ *
+ * ⚠️ 这份图**只描述"现在"**。pi 在静止时回收节点，所以跑完再查是空数组，
+ * 不能拿它当"派过几次活的记录"——那要看会话列表（`ConversationRecord.owner`）。
+ */
+export const TaskGraphNode = z.object({
+  id: z.string(),
+  /** `generation` / `tool` / 宿主自定的其它 kind */
+  kind: z.string(),
+  /** 这个 task 跑在哪个会话里 */
+  conversationId: z.string(),
+  /** root = 主对话；delegated = 子会话（`conversationId !== 根会话`） */
+  scope: z.enum(['root', 'delegated']),
+  /** pi 的原始任务树父节点（`pi.tool` 的 owner 是发起它的那次 generation） */
+  ownerId: z.string().nullable(),
+  /**
+   * 显示用的父节点：优先 `ownerId`，否则"派生出这个会话的那个工具 task"。
+   * 分开两个字段是因为**会话树和任务树不是一个形状**——子会话里的 generation
+   * task 在 pi 眼里没有 owner，但用户看到的是"那个 subagent 工具跑出来的"。
+   */
+  parentId: z.string().nullable(),
+  status: z.enum(['pending', 'running', 'waiting', 'sleeping', 'completing']),
+  /** pi 的细阶段：`prepare` / `request` / `tools` / `call` / `execute`。没有则 null */
+  phase: z.string().nullable(),
+  /** `waiting` 时在等哪些 task */
+  waitingOn: z.array(z.string()),
+  /** 这个 task 拥有的会话 —— 派活时就是子会话 id */
+  spawned: z.array(z.string()),
+  /** 角色 id（`explore` / `librarian` …），不知道则 null */
+  role: z.string().nullable(),
+})
+export type TaskGraphNode = z.infer<typeof TaskGraphNode>
+
+export const TaskGraph = z.object({
+  /** 主对话的会话 id：前端据此把 `delegated` 的那些高亮出来 */
+  rootConversationId: z.string(),
+  nodes: z.array(TaskGraphNode),
+})
+export type TaskGraph = z.infer<typeof TaskGraph>
+
 // ---------------------------------------------------------------- 预览
 
 /** 分维度就绪（DESIGN §9.2）：UI 按这几格显示进度，不要白屏 */

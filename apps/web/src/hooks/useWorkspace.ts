@@ -23,6 +23,7 @@ import type {
   RpcOutput,
   SelectionContext,
   SseEvent,
+  TaskGraph,
   TemplateInfo,
 } from '@tenon/protocol'
 import { rpc, TenonRpcError } from '../lib/rpc.js'
@@ -76,6 +77,11 @@ interface State {
   commits: GitCommit[]
   /** 运行日志（错误面板）。跟 `app.log` 事件增量 + `logs.list` 首拉 */
   logs: LogEntry[]
+  /**
+   * 现在活着的任务（任务图面板）。跟 `taskgraph.update` 事件全量替换 + `taskgraph.get` 首拉。
+   * **跑完就空**：pi 静止时回收节点，所以"空"不是没数据，是没人跑了。
+   */
+  graph: TaskGraph
   /** 精调：从预览里点选的元素/区域。提交时一并交给 Agent，提交后清掉 */
   selection: SelectionContext | null
   /** 改动面板：当前查看的提交内容（`git.show` 的结果） */
@@ -107,6 +113,7 @@ const initialState: State = {
   preview: null,
   commits: [],
   logs: [],
+  graph: { rootConversationId: '', nodes: [] },
   selection: null,
   diff: null,
   viewingSha: null,
@@ -136,6 +143,7 @@ type Action =
   | { kind: 'commits'; commits: GitCommit[] }
   | { kind: 'logs'; logs: LogEntry[] }
   | { kind: 'logs.clear' }
+  | { kind: 'graph'; graph: TaskGraph }
   | { kind: 'preview'; preview: PreviewStatus | null }
   | { kind: 'selection'; selection: SelectionContext | null }
   | { kind: 'diff'; sha: string | null; diff: GitShow | null }
@@ -258,6 +266,14 @@ function reduceEvent(state: State, event: SseEvent): State {
     case 'app.log':
       return { ...state, logs: upsertLog(state.logs, event.entry) }
 
+    /*
+     * 任务图推的是**全量**（一张图就几个节点），所以直接替换。
+     * 带 appId 的判断：切换应用的一瞬间，上一个应用的帧可能还在路上 ——
+     * 不挡会让新应用的面板闪一下别人的任务。
+     */
+    case 'taskgraph.update':
+      return event.appId === state.activeAppId ? { ...state, graph: event.graph } : state
+
     case 'preview.ready':
       return state.preview === null
         ? state
@@ -314,6 +330,7 @@ function reducer(state: State, action: Action): State {
         preview: null,
         commits: [],
         logs: [],
+        graph: { rootConversationId: '', nodes: [] },
         usage: null,
         releases: [],
         status: state.apps.find((app) => app.id === action.appId)?.status ?? null,
@@ -328,6 +345,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, logs: action.logs.slice(-MAX_LOGS) }
     case 'logs.clear':
       return { ...state, logs: [] }
+    case 'graph':
+      return { ...state, graph: action.graph }
     case 'preview':
       return { ...state, preview: action.preview }
     case 'selection':
@@ -481,6 +500,22 @@ export function useWorkspace(): Workspace {
     }
   }, [])
 
+  /**
+   * 首拉任务图。
+   *
+   * 必须拉：SSE 只推"连上之后"的帧，而打开界面时可能正有一轮在跑
+   * （服务端在 `chat.submit` 时就已经把 watch 挂上了，节点是活的）。
+   * 拉失败就当没有任务 —— 面板不出现，比整页报错合理。
+   */
+  const refreshGraph = useCallback(async (appId: string) => {
+    try {
+      const result = await rpc('taskgraph.get', { appId })
+      dispatch({ kind: 'graph', graph: result.graph })
+    } catch {
+      dispatch({ kind: 'graph', graph: { rootConversationId: '', nodes: [] } })
+    }
+  }, [])
+
   useEffect(() => {
     const appId = state.activeAppId
     if (appId === null) return
@@ -493,6 +528,7 @@ export function useWorkspace(): Workspace {
           refreshCommits(appId),
           refreshLogs(appId),
           refreshReleases(appId),
+          refreshGraph(appId),
         ])
         if (!cancelled) dispatch({ kind: 'preview', preview: preview.preview })
       } catch (err) {
@@ -502,7 +538,7 @@ export function useWorkspace(): Workspace {
     return () => {
       cancelled = true
     }
-  }, [state.activeAppId, refreshHistory, refreshCommits, refreshLogs, refreshReleases])
+  }, [state.activeAppId, refreshHistory, refreshCommits, refreshLogs, refreshReleases, refreshGraph])
 
   // ---------------------------------------------------------------- 事件流（先连后发）
 
@@ -534,6 +570,7 @@ export function useWorkspace(): Workspace {
           void refreshHistory(appId).catch(() => {})
           void refreshCommits(appId).catch(() => {})
           void refreshLogs(appId).catch(() => {})
+          void refreshGraph(appId).catch(() => {})
         },
       },
     })
@@ -544,7 +581,7 @@ export function useWorkspace(): Workspace {
       stream.stop()
       if (streamRef.current === stream) streamRef.current = null
     }
-  }, [state.activeAppId, refreshCommits, refreshHistory, refreshLogs])
+  }, [state.activeAppId, refreshCommits, refreshHistory, refreshLogs, refreshGraph])
 
   // ---------------------------------------------------------------- 动作
 

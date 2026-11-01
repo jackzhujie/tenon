@@ -9,6 +9,7 @@ import type { ChatServiceOptions } from './chat.js'
 import { ChatService } from './chat.js'
 import { HarnessPool } from './harness-pool.js'
 import { planModel, resolveModel, type ModelPlan, type ResolvedModel } from './models.js'
+import { TaskGraphService } from './taskgraph.js'
 import type { SseEventInput } from '@tenon/protocol'
 
 export * from './context.js'
@@ -17,6 +18,7 @@ export * from './harness-pool.js'
 export * from './normalize.js'
 export * from './docs.js'
 export * from './roles.js'
+export * from './taskgraph.js'
 export * from './tools/coding.js'
 export * from './tools/search.js'
 export * from './tools/subagent.js'
@@ -39,6 +41,8 @@ export interface AgentRuntime {
   readonly plan: ModelPlan | undefined
   readonly chat: ChatService | undefined
   readonly pool: HarnessPool | undefined
+  /** 任务图（M4）。没配模型时同样是 `undefined` —— 没有 harness 就没有图 */
+  readonly taskGraph: TaskGraphService | undefined
   close(): Promise<void>
 }
 
@@ -54,6 +58,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       plan,
       chat: undefined,
       pool: undefined,
+      taskGraph: undefined,
       async close() {},
     }
   }
@@ -68,14 +73,17 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     publish: options.publish,
     ...(options.onSchemaCommit === undefined ? {} : { onSchemaCommit: options.onSchemaCommit }),
   })
+  const taskGraph = new TaskGraphService({ pool, publish: options.publish })
 
   return {
     model,
     plan,
     chat,
     pool,
+    taskGraph,
     async close() {
       await chat.close()
+      await taskGraph.close()
       await pool.closeAll()
     },
   }

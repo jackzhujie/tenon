@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.15
+# DESIGN.md — 详细方案设计 v1.2.16
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -607,6 +607,46 @@ docs/
 - 用户纠正过一次的错误 → 写进 `learnings.md`（下次自动注入最近 20 条）
 - 发布前检查：`AGENTS.md` 与代码是否一致（`Reviewer` 子 Agent 负责）
 
+### 5.5 任务图：看得见子 Agent 在跑（v1.2.16 落地）
+
+`subagent` 把活派出去之后，界面上只剩一张工具卡片 —— 看不见子会话是活着、在等模型，还是卡住了。
+任务图补上这一层：`harness.watchTaskGraph()` → 归一化（`@tenon/core` 的 `normalizeTaskGraph`）
+→ `taskgraph.update` 事件 → 预览下方的任务条。
+
+**pi 给的图 vs 我们显示的图**（四处必须转译）：
+
+| pi 的字段 | 它的含义 | 为什么要转 |
+|---|---|---|
+| `kind: 'pi.generation' / 'pi.tool'` | 任务类型 | 去掉 `pi.` 前缀 —— 前端不该认识宿主的命名空间 |
+| `owner` | **任务树**的父节点 | 子会话里的 generation `owner` 是空的（它是会话自己的任务）。显示上要按 `conversations` 回挂到"派它的那个工具 task"，否则子会话会浮在最顶层 |
+| `conversations` | 这个 task 拥有的会话 | 派活时就是子会话 id —— **"谁派了谁"的唯一直接证据**，比工具卡片可靠 |
+| （没有角色） | — | 角色在工具 task 的 `checkpoint.arguments.role` 里。`subagent` 在 `phase: 'execute'` 内部才调 `createConversation`，所以**判据是"工具 task 且已经拥有会话"**：那个窗口里 `arguments` 一定齐了 |
+
+查角色一轮对话大约 1 次，结果按 task id 缓存（含"查过但没有"）—— 每帧重查等于把数据库当草稿纸。
+
+**静止即空，不能当历史。** pi 在任务落定后回收节点，跑完再查就是 `{tasks:{}}`（实测：一次派活 17 帧，
+最后两帧节点数归零）。所以面板：
+
+- **图空 → 整个组件不渲染**。它出现本身就是"现在有任务在跑"的信号
+- **不攒历史快照**。攒出来的是"看起来像最近活动"的假象，与真实发生的事没有稳定关系
+- 要回顾"派过几次活" → 看会话（`ConversationRecord.owner` 指向发起它的工具 task），不是这张图
+
+**为什么不轮询**：一帧一次的状态变化，秒级轮询要么漏掉中间态、要么白烧请求。
+`watchTaskGraph` 本身就是 exact-frame 的，且静止时不推。
+
+**面板的样子**（`apps/web/src/features/tasks/TaskGraphPanel.tsx`）：
+
+```
+⌄ 任务  3  [1 个子会话]
+● 主对话  等 1 个子任务
+  ● 派活 Explore  执行中            派 #13
+    ● Explore  等模型                #13
+```
+
+- 层级用 14px 缩进、不画树线：节点最多几个，线条只是噪声
+- `phase` 一律翻成人话（`request` → 等模型、`execute` → 执行中），不让用户读宿主枚举
+- 收起时那一行优先显示**派出去的那个**，而不是"最近变的那个"——那才是用户此刻关心的
+
 ---
 
 ## 6. 数据模型与存储
@@ -809,7 +849,13 @@ data: {"seq":1050,"model":"deepseek/deepseek-v4-pro","inputTokens":18342,"output
 
 event: preview.ready
 data: {"seq":1060,"appId":"...","url":"http://127.0.0.1:41001","readiness":{"deps":"ready","server":"ready","preview":"ready"}}
+
+event: taskgraph.update
+data: {"seq":1065,"appId":"...","graph":{"rootConversationId":"1","nodes":[{"id":"9","kind":"generation","scope":"root","status":"waiting","phase":"tools","waitingOn":["12"],"spawned":[],"role":null,"parentId":null,"ownerId":null,"conversationId":"1"},{"id":"12","kind":"tool","scope":"root","status":"running","phase":"execute","waitingOn":[],"spawned":["13"],"role":"explore","parentId":"9","ownerId":"9","conversationId":"1"},{"id":"21","kind":"generation","scope":"delegated","status":"running","phase":"request","waitingOn":[],"spawned":[],"role":"explore","parentId":"12","ownerId":null,"conversationId":"13"}]}}
 ```
+
+> `taskgraph.update` 推**全量**而不是增量：一张图只有几个节点，推 diff 要维护"哪个 op 对应哪个节点"
+> 的状态机，而它带来的收益抵不上一次算错就显示错节点的代价。图空 = 现在没有任务（静止回收，见 §5.5）。
 
 - **断线重连**：客户端带 `since` 续传；`since` 过旧则下发 `stream.reset` + `chat.history` 全量
 - **背压**：`message.delta` 在服务端按 40ms 合并，避免逐 token 刷屏
@@ -1674,7 +1720,17 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > 定义好了但工具没接（派活明确回"还没接、缺什么"）。③ 工具层补 `ls` / `glob` / `grep`（**自己实现**，
 > 不用 pi 的下载二进制版，理由见 §5.2 的注）。④ faux 改成**按角色分道**的剧本 —— 否则子会话会把父轮的台词吃掉。
 > `pnpm test` 新增 20 项（角色表 13 + 守卫 5 + 集成 7，其中一个断言"只读派活不产生空提交"）。
-> **M4 还欠**：任务图面板（DoD ②）、用量/预算熔断（DoD ③）、E2E 子 Agent 的预览工具（DoD ①）、
+> **M4 第 1 步到此收口**（v1.2.15）。
+
+> **M4 进度（v1.2.16，2026-11-01）**：第 2 步落地 —— **任务图面板，DoD ② 已满足**。
+> ① `packages/core/src/taskgraph.ts`：`normalizeTaskGraph()` 纯函数（kind 去前缀 / 会话派生回挂 /
+> 角色继承 / 按树序压平），`tasksNeedingRole()` 挑出"该去查角色"的工具 task —— 9 项单测。
+> ② `packages/agent/src/taskgraph.ts`：每应用一个 `watchTaskGraph`（不是轮询），归一化后
+> 通过 `taskgraph.update` 推全量；角色从 `checkpoint.arguments` 读一次并缓存。
+> ③ `taskgraph.get` RPC（切应用 / SSE 重连后首拉）+ `taskgraph.update` SSE 事件。
+> ④ `apps/web/src/features/tasks/TaskGraphPanel.tsx`：预览下方的任务条，空闲时整个不渲染。
+> `pnpm test` 新增 13 项（归一化 9 + 集成 4，其中一条断言"派活那一轮里必须出现 delegated 节点"，
+> 另一条断言"跑完就是空图"）。**M4 还欠**：用量/预算熔断（DoD ③）、E2E 子 Agent 的预览工具（DoD ①）、
 > Reviewer 的 `git_diff`/`typecheck`、CodeAct 的 codemode；档位路由也要等设置能存多个 profile。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。

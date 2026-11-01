@@ -2,7 +2,7 @@
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
 > 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
-> + M4 第 1 步（子 Agent 能派活了）**：302 个测试 + 9 项端到端冒烟 +
+> + M4 第 1、2 步（子 Agent 能派活 + 任务图面板）**：315 个测试 + 9 项端到端冒烟 +
 > 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 36 项改动/回滚 e2e + 32 项发布 e2e（系统 git 当裁判：`fsck --strict` + `clone`）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 已收口**）
 
@@ -41,12 +41,25 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 独立工具白名单、独立提示词），只读角色的工具集里连 `write` 都没有，`subagent` 自己也不在里面 ——
 递归派活从工具集上就断了。角色没接好时它会明确回一句「还没接、缺什么」，而不是让模型去撞墙。
 
+**也能看见它在跑（M4 第 2 步）**：预览下方多了一条「任务」。Agent 一开始跑它就出现，
+展开是这棵树（层级用缩进，状态说人话）：
+
+```
+⌄ 任务  3  [1 个子会话]
+● 主对话  等 1 个子任务
+  ● 派活 Explore  执行中            派 #13
+    ● Explore  等模型                #13
+```
+
+关键词是**实时**：`harness.watchTaskGraph()` 逐帧推，不是轮询。而且它**跑完就消失**——
+pi 静止时会回收任务节点，所以"空"不是没数据，是没人跑了；要看"派过几次活"得查会话，不是这张图（§4.10）。
+
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 302 项单测 + 集成测试（约 120s，含 PGlite 冷启动）
+pnpm test                       # 315 项单测 + 集成测试（约 130s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -215,8 +228,8 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | # | 步骤 | 状态 | 落在哪 |
 |---|---|---|---|
 | 1 | **子 Agent 骨架**：角色表（1 主 + 5 子，工具白名单/档位/提示词/可用状态）+ `subagent` 工具（真子会话、幂等复用、递归禁止）+ `ls`/`glob`/`grep` 只读检索 + faux 按角色分道 | ✅ 见 §4.9 | `packages/agent/src/roles.ts`、`tools/subagent.ts`、`tools/search.ts`、`models.ts`（分道）、`harness-pool.ts`（注入 harness） |
-| 2 | 任务图：`harness.taskGraph()` → RPC + SSE + 面板（DoD ②"任务图实时反映子会话"） | ⏳ 下一步 | — |
-| 3 | 用量与预算：`harness.usage()` 累计 + 面板 + 超预算拦截（DoD ③） | ⏳ | — |
+| 2 | **任务图**：`watchTaskGraph` 逐帧归一化 → `taskgraph.update` 事件 + `taskgraph.get` RPC + 预览下方任务条（DoD ②） | ✅ 见 §4.10 | `packages/core/src/taskgraph.ts`、`packages/agent/src/taskgraph.ts`、`features/tasks/TaskGraphPanel.tsx` |
+| 3 | 用量与预算：`harness.usage()` 累计 + 面板 + 超预算拦截（DoD ③） | ⏳ 下一步 | — |
 | 4 | E2E 子 Agent 的预览工具（`preview.open/click/type/assert`）+ 自验收流程（DoD ①） | ⏳ | — |
 | 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ⏳ | — |
 | 6 | CodeAct：`codemode` 沙箱接入 | ⏳ | — |
@@ -396,10 +409,31 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
       越界路径三个工具都拒（各有测试）
 
 使用方式：主角色在需要"这个东西在哪"时调 `subagent({ role: 'explore', task: '…' })`。
-**还没做的**（如实记）：任务图面板（看不到"正在跑哪几个子会话"）、用量/预算、
-以及 `codeact` / `e2e` / `reviewer` 三个角色的工具。
+**还没做的**（如实记）：用量/预算、`codeact` / `e2e` / `reviewer` 三个角色的工具。
+（"看不到子会话在跑"这一条已在 §4.10 补上。）
 
-### 4.10 代码地图（只列已落地的）
+### 4.10 M4 第 2 步验收（任务图）—— ✅ 已完成
+
+- [x] **★ 派活那一轮里，图里真的出现子会话节点** —— 集成测试从 SSE 里挑出 `scope: 'delegated'`
+      的 generation 节点：它跑在子会话 `#13` 上，`role` 是 `explore`，`kind` 是 `generation`
+- [x] **角色是读出来的，不是猜的** —— `tasksNeedingRole()` 只挑「工具 task 且已拥有会话」的那些
+      （那一瞬间 `checkpoint.arguments` 一定齐）。结果按 task id 缓存，**含"查过但没有"** ——
+      否则每帧都去查一次数据库
+- [x] **会话树接进任务树** —— 子会话里的 generation 在 pi 眼里没有 `owner`，显示上 `parentId`
+      指回派它的那个工具 task（单测断言 `child.parentId === tool.id` 且 `tool.spawned` 含子会话 id）
+- [x] **父在子前、同层按数值序** —— 字典序会把 `10` 排在 `9` 前面；有单测钉住这条
+- [x] **★ 跑完就是空图** —— 事件流最后一帧是 `nodes: []`，`taskgraph.get` 也是空。
+      这条是**刻意固化**的认知：不能拿它当派活历史，UI 也因此不攒快照
+- [x] **空闲时不占地方** —— `TaskGraphPanel` 在图空时返回 `null`；截图验了折叠与展开两态
+      （1440×900：三行缩进正确、`派 #13` 与 `#13` 对齐、无重叠无截断）
+- [x] **没有派活的一轮也有帧** —— 主对话自己在跑也是任务（只有 generation 节点，全部 `scope: 'root'`）
+- [x] **切应用不会串台** —— 归约里比对 `event.appId`：上一个应用的帧晚到时不会画到当前应用上
+- [x] **`chat.submit` 之前就把 watch 挂上** —— 否则"没切过布局就直接提交"会漏掉这一轮的全部帧；
+      `app.delete` 时先 `release` 任务图再关 harness（顺序反了会踩到已关闭的 session）
+
+使用方式：Agent 一开始跑，预览下方就出现「任务 3 / 1 个子会话」；点开看谁在跑、跑到哪一步。
+
+### 4.11 代码地图（只列已落地的）
 
 ```
 packages/
@@ -412,6 +446,8 @@ packages/
 │   │                    #   + createReleaseTag（annotated）/ mirrorTo（对象+ref 搬到裸库）/ uncommittedChanges
 │   ├── src/schema-change.ts # ★ 快照触发判据：migrations/ + *.entity.ts + shared/schema.ts（路径约定，7 项测试）
 │   ├── src/release.ts   # ★ 版本号 v<yyyy.MM.dd>-<n>（纯函数，同日递增；记录与 tag 一起参考避免撞号）
+│   ├── src/taskgraph.ts # ★ 任务图归一化：kind 去 pi. 前缀 / 会话派生回挂父节点 / 角色继承 / 按树序压平
+│   │                    #   + tasksNeedingRole（只挑"工具 task 且已拥有会话"的去查角色）
 │   ├── src/secrets.ts   #   AES-256-GCM + 0600 密钥文件（桌面版换 safeStorage）
 │   └── src/stores/      #   apps / releases / settings / providers
 ├── agent/               # pi 生态的唯一入口（铁律 3 的落地点）
@@ -420,6 +456,8 @@ packages/
 │   ├── src/context.ts   #   把 pi 的 BACKGROUND_CONTEXT 导出去，上层不必 import pi
 │   ├── src/harness-pool.ts  # 每应用一个 harness.sqlite + resume() + 装工具扩展（含懒注入的 harness）
 │   ├── src/chat.ts      #   submit/stop/history/plan + watchEvents → SSE（40ms 合帧）
+│   ├── src/taskgraph.ts # ★ 每应用一个 watchTaskGraph（不轮询）→ 归一化 → taskgraph.update 推全量；
+│   │                    #   角色从 tool task 的 checkpoint.arguments 读一次并缓存
 │   ├── src/tools/coding.ts  # read/write/edit/bash ↔ pi-durable 的 adapter（DESIGN §4.3.1）
 │   ├── src/tools/search.ts  # ★ ls / glob / grep：纯 node:fs + 进程内正则（不用 pi 的会下载 rg/fd 的版本）
 │   ├── src/tools/subagent.ts # ★ 派活：真子会话 + 幂等复用 + 白名单；子会话里没有 subagent
@@ -485,6 +523,7 @@ apps/web/                # 渲染器：server 的纯客户端（DESIGN §14.6）
 ├── src/features/logs/LogPanel.tsx  # ★ 运行日志底栏：折叠/按来源筛选/错误高亮/详情展开/清空
 ├── src/features/release/ReleaseDialog.tsx  # ★ 发布：说明写进 tag、成功后给路径与 git clone 命令、历史列表
 ├── src/features/diff/DiffPanel.tsx  # ★ 改动面板：覆盖在预览上（iframe 不卸载）、逐行着色、两步确认回滚
+├── src/features/tasks/TaskGraphPanel.tsx  # ★ 任务条：实时看谁在跑；空闲时整个不渲染（图空=没人跑）
 └── src/features/apps/   #   AppMenu / NewAppDialog（默认选能跑的那个模板）
 
 apps/desktop/            # Electron 壳：只做生命周期（DESIGN §2.2.1）
@@ -612,6 +651,10 @@ scripts/
 | **`faux` 的响应工厂只服务一次请求** | `stream()` 内部是 `pendingResponses.shift()`。用工厂当「万能应答」时必须**先把自己 `appendResponses([router])` 塞回队尾**，否则第二次请求（父轮收尾、或子会话要第二次生成）直接返回 `No more faux responses queued`，表现是「派了活但没干活」 |
 | **父子会话的 faux 剧本必须分道** | 子 Agent 是**另一次 submit**，跟父会话抢同一条队列。父轮剧本 `[tool subagent, text]` 里那句 text 会被子会话先吃掉。现在按 `[TENON-SUBAGENT role=x]` 首行分道（`lanes`），`script([{...} as 'explore'])` 指定道 |
 | **角色 id 里有数字（`e2e`）** | 匹配标记的正则写成 `[a-z]+` 时 `e2e` 永远认不出来 → 它的台词串到 builder 道上。用 `[a-z0-9]+`；这类「名字看着像字母」的枚举，正则要照最宽的那个写 |
+| **pi 的 `owner` 是任务树，不是会话树** | 子会话里那个 generation task 的 `owner` 是**空的**（它是会话自己的任务，不挂在父生成任务下），而工具 task 的 `owner` 指向发起它的那次 generation。所以按 `owner` 画树，子会话会浮在最顶层。真正的"谁派了谁"在 `conversations` 字段：工具 task 派活时那里会出现子会话 id，用它回挂 |
+| **角色不在任务图里** | 图里只有 `kind: 'pi.tool'`，看不出这是 `subagent` 还是 `bash`。角色在 `getTask(id).state.checkpoint.arguments.role`，而 `arguments` **只有 `phase: 'execute'` 之后才写进去**。判据用「工具 task 且已经拥有会话」（`conversations` 非空）—— 那个窗口里两者一定同时成立。查到的结果（包括"没有角色"）要缓存，否则每帧一次 DB 读 |
+| **`watchTaskGraph` 必须早于 `chat.submit` 挂上** | 在 RPC handler 里"查一次"是不够的：一次派活 17 帧，等界面来问的时候前半段已经过去了。而 watch 只在有人 acquire 时才存在 —— 所以 `chat.submit` handler 里先 `taskGraph.ensure(appId)`。反过来 `app.delete` 要先 `release` 任务图再关 harness，顺序反了会踩到已关闭的 session |
+| **本机 `npx electron` 直接 SIGTERM 137 且一个字都不输出** | `node_modules/.bin/electron` 是个**断掉的 symlink**（`no such file or directory`），`npx` 于是找不到可执行文件 —— 表现成"被杀了"而不是"没装"，很误导。真二进制在 `node_modules/.pnpm/electron@<ver>/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`，截图/冒烟脚本一律直接用完整路径 + `--no-sandbox` |
 | **`pi-coding-agent` 的 `grep` / `find` 会下载二进制** | 它们走 `ensureTool()`：首次调用从 GitHub 拉 `rg` / `fd` 到 `~/.pi/bin` 再 spawn。本地优先的产品不能这么干（没网即失败、桌面版偷偷落可执行文件、它还自己解析 cwd 之外的路径）。已改成自己的 `ls` / `glob` / `grep`（纯 `node:fs` + 进程内正则，有上限） |
 
 
@@ -695,12 +738,13 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.14），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.16），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
 当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
-发布 push）。下一步是 M4，先看 §4.8 的"没做的"清单再决定从哪块进。
-277 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:fullstack + 桌面包全绿。
+发布 push）；**M4 第 1、2 步已落地**（子 Agent 能派活 + 任务图面板）。下一步是 M4 第 3 步（用量与预算熔断），
+先看 §4.2 的 M4 表决定从哪块进。
+315 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:fullstack + 桌面包全绿。
 **欠账三笔**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接。

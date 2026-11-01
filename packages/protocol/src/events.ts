@@ -8,7 +8,7 @@
  * - 心跳用 SSE 注释行 `: ping`，不占用 `seq`，也不污染事件缓冲
  */
 import { z } from 'zod'
-import { NormalizedMessage, PlanTaskStatus, AppStatus, LogEntry, PreviewStatus, Readiness } from './domain.js'
+import { NormalizedMessage, PlanTaskStatus, AppStatus, LogEntry, PreviewStatus, Readiness, TaskGraph } from './domain.js'
 
 const Seq = z.number().int().nonnegative()
 
@@ -122,6 +122,22 @@ export const AppLogEvent = z.object({
   entry: LogEntry,
 })
 
+/**
+ * 任务图变了（M4 任务图面板）。
+ *
+ * **推全量而不是增量**：一张图只有几个节点，推 diff 要维护"哪个 op 对应哪个节点"的
+ * 状态机，而它带来的收益（少传几十字节）抵不上一次算错就显示错节点的代价。
+ *
+ * 为什么它必须是事件而不是让前端轮询：`taskGraph` 的帧是 pi 在 commit 时推出来的，
+ * 一次生成十几帧，秒级轮询要么漏掉中间状态、要么白烧请求。
+ */
+export const TaskGraphUpdateEvent = z.object({
+  type: z.literal('taskgraph.update'),
+  seq: Seq,
+  appId: z.string(),
+  graph: TaskGraph,
+})
+
 export const ErrorEvent = z.object({
   type: z.literal('error'),
   seq: Seq,
@@ -149,6 +165,7 @@ export const SseEvent = z.discriminatedUnion('type', [
   PreviewReadyEvent,
   PreviewStatusEvent,
   AppLogEvent,
+  TaskGraphUpdateEvent,
   ErrorEvent,
   StreamResetEvent,
 ])

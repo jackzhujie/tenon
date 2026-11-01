@@ -35,14 +35,14 @@
 |---|---|
 | [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、进度表、下一步拆解、已知陷阱 |
 | [**四个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度的真实数字 |
-| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.15）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
+| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.16）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
 | [逆向工作手册](docs/REVERSE_ENGINEERING.md) | 内部研究用（不随开源发布） |
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.15**；四个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 进行中**：
+M0 逆向研究完成；方案 **v1.2.16**；四个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 进行中**：
 七个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `db-provisioner` / `server`）+ 两个 app
 （渲染器 `apps/web`，浏览器与窗口共用一套代码；壳 `apps/desktop`，只做生命周期）。
 
@@ -70,7 +70,12 @@ M0 逆向研究完成；方案 **v1.2.15**；四个技术 spike 全部跑通。*
 那是**真的另一个会话**（独立 transcript、独立工具白名单、独立提示词）。只读角色的工具集里连 `write`
 都没有，`subagent` 自己也不在里面（递归派活从工具集上就断了）；没接好的角色会明确回一句「还没接、缺什么」。
 
-302 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
+**也看得见它在跑**：Agent 一开始动，预览下方就出现一条「任务」—— 展开是任务树，
+主对话在等模型、哪个工具任务在跑、子会话跑到哪一步（`Explore 执行中` / `派 #13`）。
+它是 `harness.watchTaskGraph()` 逐帧推出来的，不是轮询；**跑完就消失**（pi 会回收任务节点，
+所以那是"没人跑了"而不是"没数据"）。
+
+315 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
 32 项发布 e2e（**用系统 git 当裁判**：`fsck --strict` + `clone`）+ 全栈 e2e + 8 项桌面冒烟全绿。
 安装包默认路径上不带任何需按平台编译的原生模块（打包脚本会审计并打印清单）。
 
@@ -80,7 +85,7 @@ M0 逆向研究完成；方案 **v1.2.15**；四个技术 spike 全部跑通。*
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 302 项单测 / 集成测试（约 120s，含 PGlite 冷启动）
+pnpm test                   # 315 项单测 / 集成测试（约 130s，含 PGlite 冷启动）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
@@ -93,8 +98,8 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**下一步**：M4 继续 —— 任务图面板、用量/预算熔断、E2E 子 Agent 的预览工具。
-M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，M4 第 1 步验收见 §4.9。
+**下一步**：M4 继续 —— 用量/预算熔断（DoD ③）、E2E 子 Agent 的预览工具（DoD ①）。
+M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，M4 验收见 §4.9（子 Agent）/ §4.10（任务图）。
 实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License

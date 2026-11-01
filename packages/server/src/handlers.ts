@@ -82,6 +82,8 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'app.delete': async (input) => {
       await agent.chat?.close()
+      // 任务图的 watch 拽着 session，必须先停 —— 反过来会让 watch 回调踩到已关闭的 harness
+      await agent.taskGraph?.release(input.id)
       await agent.pool?.release(input.id)
       // 预览必须先停：dev server 还在写 node_modules / .vite 时删目录会留下半截图
       await preview.stop(input.id)
@@ -93,6 +95,9 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'chat.submit': async (input) => {
       const chat = requireChat(agent)
+      // 先把任务图看起来：这一轮会产生十几帧，晚挂一步就漏掉开头（也会让面板在
+      // 用户根本没切过布局的情况下一直空着）
+      await agent.taskGraph?.ensure(input.appId)
       const { appId, ...rest } = input
       const result = await chat.submit(appId, rest)
       return result
@@ -149,6 +154,16 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     'plan.get': async (input) => {
       const chat = requireChat(agent)
       return { tasks: await chat.plan(input.appId) }
+    },
+
+    'taskgraph.get': async (input) => {
+      core.apps.require(input.appId)
+      // 没配模型时没有 harness，也就没有图。返回空图而不是报错：
+      // 面板在"还没配模型"的状态下应该安静地不存在，而不是弹一条红色错误
+      if (agent.taskGraph === undefined) {
+        return { graph: { rootConversationId: '', nodes: [] } }
+      }
+      return { graph: await agent.taskGraph.snapshot(input.appId) }
     },
 
     'files.tree': async (input) => {

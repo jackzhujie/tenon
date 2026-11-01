@@ -23,6 +23,7 @@ import {
   PreviewStatus,
   ProviderProfile,
   Release,
+  TaskGraph,
   TemplateInfo,
 } from './domain.js'
 
@@ -213,6 +214,18 @@ export const rpcMethods = {
   'plan.get': {
     input: z.object({ appId: Id }),
     output: z.object({ tasks: z.array(PlanTask) }),
+  },
+
+  /**
+   * 现在这一刻活着哪些 task（M4 任务图）。
+   *
+   * 前端在切应用 / SSE 断线重连之后拉一次，之后靠 `taskgraph.update` 增量。
+   * **返回空数组是正常结果**：pi 静止时回收节点，跑完再看就是空的。
+   * 想看"派过几次活"要查会话（`ConversationRecord.owner`），不是这里。
+   */
+  'taskgraph.get': {
+    input: z.object({ appId: Id }),
+    output: z.object({ graph: TaskGraph }),
   },
 
   'files.tree': {
