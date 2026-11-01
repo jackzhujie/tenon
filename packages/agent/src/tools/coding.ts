@@ -25,6 +25,7 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
 } from '@earendil-works/pi-coding-agent'
+import { createSearchTools } from './search.js'
 
 export const CODING_EXTENSION = 'tenon.coding'
 
@@ -186,11 +187,11 @@ const WORKSPACE_RULES = `You build one web application inside this git repositor
 - Never start a long-running dev server (npm run dev, vite, nest start): Tenon's preview gateway does that.
 - Each turn is committed automatically, so leave the workspace in a runnable state before you stop.`
 
-/** 装到 registry 上的扩展：四个工具 + 一段工作区约定 */
+/** 装到 registry 上的扩展：四个写工具 + 三个只读检索 + 一段工作区约定 */
 export function codingExtension(repoDir: string): Extension {
   return defineExtension({
     name: CODING_EXTENSION,
-    tools: createCodingTools({ repoDir }),
+    tools: [...createCodingTools({ repoDir }), ...createSearchTools({ repoDir })],
     // section 的 key 被限制为 /^[a-z][a-z0-9_-]*$/，点号会让整轮 submit 直接 INTERNAL
     sections: [section('tenon_workspace', () => WORKSPACE_RULES)],
   })

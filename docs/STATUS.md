@@ -1,7 +1,8 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成**：277 个测试 + 9 项端到端冒烟 +
+> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
+> + M4 第 1 步（子 Agent 能派活了）**：302 个测试 + 9 项端到端冒烟 +
 > 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 36 项改动/回滚 e2e + 32 项发布 e2e（系统 git 当裁判：`fsck --strict` + `clone`）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 已收口**）
 
@@ -30,12 +31,22 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 推到本地裸库 `~/.tenon/backups/<appId>.git` —— 标准裸库，`git clone` 出来就是这一版的完整代码。
 `pnpm e2e:release` 用**系统 git 当裁判**（`fsck --strict` + `clone`）验收；产品运行时不依赖任何 git 二进制。
 
+**能派活了（M4 第 1 步）**：`packages/agent/src/roles.ts` 是 1 主 + 5 子的唯一事实来源；
+`subagent` 工具建真子会话、拿回结论。`explore`（定位代码）与 `librarian`（查仓库里的文档与依赖类型定义）
+现在就能用；`codeact` / `e2e` / `reviewer` 的角色与提示词已就位，缺的工具按 M4 后续步骤接。
+同时补了 `ls` / `glob` / `grep` 三个只读检索工具（自己实现，不用 pi 那套会下载 `rg`/`fd` 二进制的）。
+
+**M4 第 1 步：能派活了**。Agent 不再只有一个大脑 —— 主角色（Builder）可以把「这个东西在哪」
+「这个库怎么用」这类只读的活交给子角色，自己专心改代码。子角色是**真的另一个会话**（独立 transcript、
+独立工具白名单、独立提示词），只读角色的工具集里连 `write` 都没有，`subagent` 自己也不在里面 ——
+递归派活从工具集上就断了。角色没接好时它会明确回一句「还没接、缺什么」，而不是让模型去撞墙。
+
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 277 项单测 + 集成测试（约 102s，含 PGlite 冷启动）
+pnpm test                       # 302 项单测 + 集成测试（约 120s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -199,6 +210,18 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 8 | 真机 e2e：三条 git RPC 全部走真 HTTP（含根提交、错误码映射） | ✅ | `scripts/e2e-diff.ts`（`pnpm e2e:diff`，36 项） |
 | 9 | **发布 push**：打 annotated tag（版本说明进正文）+ 镜像到本地裸库 `~/.tenon/backups/<appId>.git` + 记 release；闸门是「不在生成中 / 有提交 / 工作区干净」，推送失败删 tag | ✅ 见 §4.8 | `packages/core/src/release.ts`、`packages/server/src/release.ts`、`features/release/ReleaseDialog.tsx`、`scripts/e2e-release.ts` |
 
+**M4 多 Agent 与可观测增强**
+
+| # | 步骤 | 状态 | 落在哪 |
+|---|---|---|---|
+| 1 | **子 Agent 骨架**：角色表（1 主 + 5 子，工具白名单/档位/提示词/可用状态）+ `subagent` 工具（真子会话、幂等复用、递归禁止）+ `ls`/`glob`/`grep` 只读检索 + faux 按角色分道 | ✅ 见 §4.9 | `packages/agent/src/roles.ts`、`tools/subagent.ts`、`tools/search.ts`、`models.ts`（分道）、`harness-pool.ts`（注入 harness） |
+| 2 | 任务图：`harness.taskGraph()` → RPC + SSE + 面板（DoD ②"任务图实时反映子会话"） | ⏳ 下一步 | — |
+| 3 | 用量与预算：`harness.usage()` 累计 + 面板 + 超预算拦截（DoD ③） | ⏳ | — |
+| 4 | E2E 子 Agent 的预览工具（`preview.open/click/type/assert`）+ 自验收流程（DoD ①） | ⏳ | — |
+| 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ⏳ | — |
+| 6 | CodeAct：`codemode` 沙箱接入 | ⏳ | — |
+| 7 | 发布前质量门禁（typecheck / test 不过不许发） | ⏳ | — |
+
 ### 4.3 M1 验收（DoD）
 
 - [x] `pnpm dev:web` 打开即可对话 —— 浏览器实测：建应用 → 发消息 → 流式回来 → 自动 git 提交 → 版本数 +1
@@ -348,7 +371,35 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 > 端到端（要真起预览装依赖，60s+，没进 CI）。手工验法：建一个全栈应用 → 让 Agent 加一列 →
 > 录两行数据 → 在改动面板点那一版、勾上「连数据库一起回去」→ 确认新列消失、只留快照时那行。
 
-### 4.8 代码地图（只列已落地的）
+### 4.9 M4 第 1 步验收（子 Agent 能派活）—— ✅ 已完成
+
+- [x] **角色表是唯一事实来源** —— `role.tools` 全是全量表里的真名字（拼错会静默给空工具集），
+      有单测逐角色比对；`builder` 不可被派活，五个子角色的 `tools` 里都没有 `subagent`
+- [x] **白名单真的拦得住写工具** —— `explore` 拿到的只有 `read` / `ls` / `glob` / `grep`；
+      就算有人手滑把 `subagent` 写进角色的 tools，`toolsForRole()` 也会剔掉它（有测试造了这个场景）
+- [x] **★ 子 Agent 是真的另一个会话** —— 集成测试 `scanConversations` 数出两个会话，
+      再从子会话的 `agent.tools` 读回工具名：只有四个只读工具，`cwd` 指向同一个 `repo/`，
+      `instructions` 是角色自己的（不是父会话的）
+- [x] **★ 派生一次 = 一个 task 作用域的会话** —— 同一轮派两次活得到两个不同的 `conversationId`
+      （`ownerTaskId` 是这次工具调用的 task，不是根会话）；幂等复用只发生在崩溃重跑时
+- [x] **递归派活在两层上断掉** —— `role` 是字面量枚举，`builder` 在 schema 层就被拒（模型看得到它错在哪）；
+      工具自己还有一层"没有这个子角色"的兜底（重放老输入时会走到）
+- [x] **没接好的角色明确回"还没接、缺什么"** —— `e2e` 的报错文本里带着要等的 `preview` 工具；
+      不做这件事的话，模型会开始自己猜文件内容
+- [x] **一轮一 commit 没被打破** —— 子 Agent 只读 → 这一轮没有文件变化 → **不产生空提交**（测试断言只有建应用那一个）；
+      子 Agent 也无法改动工作区（测试前后比对 `package.json` 字节一致）
+- [x] **子 Agent 的结论带子会话编号** —— `Explore 的结论（子会话 #13）：…`，出了问题能顺着编号去查 transcript
+- [x] **faux 能演示完整链路** —— 剧本按角色分道（`script([{...} as 'explore'])`），
+      父轮与子轮各走各的队列；不做这件事时子会话会把父轮收尾的台词吃掉
+- [x] **只读检索是自己的实现** —— `ls` / `glob` / `grep` 走 `node:fs` + 进程内正则，
+      有上限（100 条默认 / 单文件 512KB / 扫 4000 文件 / 单行 300 字符），跳过 `node_modules`、`dist`、`.git`，
+      越界路径三个工具都拒（各有测试）
+
+使用方式：主角色在需要"这个东西在哪"时调 `subagent({ role: 'explore', task: '…' })`。
+**还没做的**（如实记）：任务图面板（看不到"正在跑哪几个子会话"）、用量/预算、
+以及 `codeact` / `e2e` / `reviewer` 三个角色的工具。
+
+### 4.10 代码地图（只列已落地的）
 
 ```
 packages/
@@ -364,10 +415,14 @@ packages/
 │   ├── src/secrets.ts   #   AES-256-GCM + 0600 密钥文件（桌面版换 safeStorage）
 │   └── src/stores/      #   apps / releases / settings / providers
 ├── agent/               # pi 生态的唯一入口（铁律 3 的落地点）
-│   ├── src/models.ts    #   faux / BYOK(openai-compatible, 自建 provider)；faux 可用 script() 驱动工具
-│   ├── src/harness-pool.ts  # 每应用一个 harness.sqlite + resume() + 装工具扩展
+│   ├── src/models.ts    #   faux / BYOK(openai-compatible, 自建 provider)；faux 剧本**按角色分道**
+│   ├── src/roles.ts     # ★ 角色表：1 主 + 5 子的工具白名单/档位/提示词/可用状态（唯一事实来源）
+│   ├── src/context.ts   #   把 pi 的 BACKGROUND_CONTEXT 导出去，上层不必 import pi
+│   ├── src/harness-pool.ts  # 每应用一个 harness.sqlite + resume() + 装工具扩展（含懒注入的 harness）
 │   ├── src/chat.ts      #   submit/stop/history/plan + watchEvents → SSE（40ms 合帧）
 │   ├── src/tools/coding.ts  # read/write/edit/bash ↔ pi-durable 的 adapter（DESIGN §4.3.1）
+│   ├── src/tools/search.ts  # ★ ls / glob / grep：纯 node:fs + 进程内正则（不用 pi 的会下载 rg/fd 的版本）
+│   ├── src/tools/subagent.ts # ★ 派活：真子会话 + 幂等复用 + 白名单；子会话里没有 subagent
 │   └── src/docs.ts      #   tenon.app / tenon.plan（defineDoc）
 ├── generator/           # 模板铺进 repo（DESIGN §8.7）
 │   ├── src/scaffold.ts  #   scaffoldApp：渲染模板 → 写文件；已有 package.json 就拒绝
@@ -552,6 +607,12 @@ scripts/
 | **`app.create` 自带一个初始提交** | 「chore: 初始化应用」。所以"仓库里没有提交"这个分支没法用新建应用造出来，测试里要先删 `.git` 再 `initRepo` 造空仓库 —— 否则会以为那条闸门失效了 |
 | **发布失败要把刚打的 tag 删掉** | 否则留下"有 tag、没记录"的半成品：下次 `nextVersion` 看到 tag 就算出 `-2`，用户会以为少发了一版。`publishRelease` 在 `mirrorTo` 失败时 `deleteTag` 再抛 `RELEASE_FAILED` |
 | **`.gitignore` 里的 `release/` 会让 Tailwind 扫不到 `features/release/`** | Tailwind v4 的自动内容扫描**跳过 `.gitignore` 命中的路径**。`release/` 本意是 electron-builder 的产物目录，但它把 `apps/web/src/features/release/` 也一起盖住了 → 新写的类名（`max-w-lg`、`min-h-[76px]`、`bg-ok/5`）**不生成 CSS**，界面上只有"这一处新样式失效"，别处全正常，查起来像见鬼。已改成精确路径 `/apps/desktop/release/`。判断办法：`grep 类名 apps/web/dist/assets/*.css` |
+| **`api.conversation(id)` 拿到的句柄没有 `configure()`** | 它只有 `submit` / `abort` / `waitForIdle`。想「先建子会话再配模型/工具/指令」会拿到一个**什么都没配**的会话（模型用默认工具集瞎猜），而且不报错。子会话的 `agent` 必须在 `harness.createConversation({ ownership, agent })` 那一刻给全 —— 工具因此要拿到 Harness，用闭包懒注入（`getHarness`） |
+| **`ConversationRecord` 上的字段叫 `owner` 不是 `ownership`** | `{ conversationId, taskId }`，根会话没有它。查「这个应用有哪些子会话」按 `owner !== undefined` 过滤；写成 `record.ownership.kind` 会得到 `undefined is not an object` |
+| **`faux` 的响应工厂只服务一次请求** | `stream()` 内部是 `pendingResponses.shift()`。用工厂当「万能应答」时必须**先把自己 `appendResponses([router])` 塞回队尾**，否则第二次请求（父轮收尾、或子会话要第二次生成）直接返回 `No more faux responses queued`，表现是「派了活但没干活」 |
+| **父子会话的 faux 剧本必须分道** | 子 Agent 是**另一次 submit**，跟父会话抢同一条队列。父轮剧本 `[tool subagent, text]` 里那句 text 会被子会话先吃掉。现在按 `[TENON-SUBAGENT role=x]` 首行分道（`lanes`），`script([{...} as 'explore'])` 指定道 |
+| **角色 id 里有数字（`e2e`）** | 匹配标记的正则写成 `[a-z]+` 时 `e2e` 永远认不出来 → 它的台词串到 builder 道上。用 `[a-z0-9]+`；这类「名字看着像字母」的枚举，正则要照最宽的那个写 |
+| **`pi-coding-agent` 的 `grep` / `find` 会下载二进制** | 它们走 `ensureTool()`：首次调用从 GitHub 拉 `rg` / `fd` 到 `~/.pi/bin` 再 spawn。本地优先的产品不能这么干（没网即失败、桌面版偷偷落可执行文件、它还自己解析 cwd 之外的路径）。已改成自己的 `ls` / `glob` / `grep`（纯 `node:fs` + 进程内正则，有上限） |
 
 
 ---

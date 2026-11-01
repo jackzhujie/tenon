@@ -151,7 +151,17 @@ describe('工具层（write / edit / bash）', () => {
 
     running = await boot()
     const session = await running.agent.pool?.acquire(app.id)
-    expect(session?.tools.map((tool) => tool.name).sort()).toEqual(['bash', 'edit', 'read', 'write'])
+    // M4 第 1 步把工具补齐了：四个写工具 + 三个只读检索（ls/glob/grep）+ 编排（subagent）
+    expect(session?.tools.map((tool) => tool.name).sort()).toEqual([
+      'bash',
+      'edit',
+      'glob',
+      'grep',
+      'ls',
+      'read',
+      'subagent',
+      'write',
+    ])
 
     // 光有工具对象不够：还要确认它在真跑的这条路上确实能被调用
     running.agent.model?.script([

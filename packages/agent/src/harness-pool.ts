@@ -16,7 +16,8 @@ import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite
 import type { TenonHome } from '@tenon/core'
 import { appPaths } from '@tenon/core'
 import type { ModelChoice, ResolvedModel } from './models.js'
-import { CODING_EXTENSION, codingExtension } from './tools/coding.js'
+import { codingExtension } from './tools/coding.js'
+import { subagentExtension } from './tools/subagent.js'
 
 const ctx = BACKGROUND_CONTEXT
 
@@ -81,16 +82,28 @@ export class HarnessPool {
     const storage = await openNodeSqliteStorage(paths.harnessDb, { prefix: 'pi_' })
 
     // 工具挂在扩展上：装进 registry 之后，会话才能用名字选中它们
-    const extension: Extension = codingExtension(paths.repoDir)
-    const tools = extension.tools === undefined ? [] : [...extension.tools]
+    const coding = codingExtension(paths.repoDir)
+    // `subagent` 需要 Harness（子会话的模型/工具只能在创建那一刻定），而扩展必须在
+    // `Harness.open` 之前建好 —— 所以给一个懒读取器，调用发生时它一定已经有值。
+    let harnessRef: Harness | undefined
+    const tools: ToolRegistration[] = [...(coding.tools ?? [])]
+    const subagent = subagentExtension({
+      getHarness: () => harnessRef,
+      getTools: () => tools,
+    })
+    tools.push(...(subagent.tools ?? []))
+    const extensions: Extension[] = [coding, subagent]
+
     const registry = createRegistry()
-    registry.install(extension)
+    registry.install(coding)
+    registry.install(subagent)
 
     const harness = await Harness.open(
       storage,
       { models: this.options.model.models, registry },
       ctx,
     )
+    harnessRef = harness
 
     // ★ 崩溃恢复的唯一开关
     const resumed: unknown = harness.resume()
@@ -104,7 +117,7 @@ export class HarnessPool {
     const wanted = {
       model: { provider: choice.provider, modelId: choice.modelId },
       // 扩展与工具都显式选定：不依赖宿主默认，避免"升级后老应用拿不到新工具"
-      extensions: [extension],
+      extensions,
       tools,
       cwd: paths.repoDir,
     }
@@ -118,7 +131,9 @@ export class HarnessPool {
       currentModel.modelId !== choice.modelId ||
       currentModel.provider !== choice.provider
     const toolsDrifted = !sameTools(agent.tools, tools)
-    const extensionDrifted = !agent.extensions.some((item) => item.name === CODING_EXTENSION)
+    const extensionDrifted = extensions.some(
+      (item) => !agent.extensions.some((current) => current.name === item.name),
+    )
     if (modelDrifted || toolsDrifted || extensionDrifted || agent.cwd !== paths.repoDir) {
       await root.configure(wanted, ctx)
     }

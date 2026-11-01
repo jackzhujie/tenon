@@ -17,6 +17,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-work
 import { TenonError } from '@tenon/protocol'
 import type { CoreServices } from '@tenon/core'
 import { SETTING_KEYS } from '@tenon/core'
+import { roleOfPrompt, type RoleId } from './roles.js'
 
 export const FAUX_PROVIDER_ID = 'faux'
 export const FAUX_MODEL_ID = 'faux-mini'
@@ -33,9 +34,13 @@ export interface ModelChoice {
  * faux 的剧本一步。刻意用**自己的**窄类型而不是 pi 的 `AssistantMessage`：
  * 调用方（测试、演示脚本）不该为了写一句台词去 import pi（铁律 3）。
  */
-export type ScriptStep =
+export type ScriptStep = (
   | { readonly text: string }
   | { readonly tool: string; readonly args: Record<string, unknown> }
+) & {
+  /** 这一步是给哪个角色准备的（缺省 = builder）。子 Agent 有自己的队列 */
+  readonly as?: RoleId
+}
 
 export interface ResolvedModel {
   readonly mode: 'faux' | 'openai-compatible'
@@ -56,6 +61,12 @@ export interface ResolvedModel {
 interface FauxHandle {
   appendResponses(messages: unknown[]): void
   setResponses(messages: unknown[]): void
+}
+
+/** faux 路由器看到的上下文（只用到这两栏） */
+interface FauxMessage {
+  readonly role?: string
+  readonly content?: unknown
 }
 
 function readParams(paramsJson: string | null): { contextWindow?: number; maxTokens?: number } {
@@ -81,29 +92,64 @@ function buildFaux(): ResolvedModel {
   const models = createModels()
   models.setProvider(faux.provider)
   const handle = faux as unknown as FauxHandle
-  // script() 换过剧本后，下一次 primeTurn 不能再追加默认台词，否则会排在剧本后面
-  let scripted = false
+
+  /**
+   * 分道队列：`builder` 与各子角色各一条。
+   *
+   * 为什么必须分道（踩过）：子 Agent 是**另一次 submit**，跟父会话抢同一条队列。
+   * 父轮剧本 `[tool subagent, text]` 里那句 text 会被子会话先吃掉，
+   * 父轮收尾就撞上 "No more faux responses queued" —— 表现是"派了活但没干活"。
+   *
+   * 为什么路由器要**把自己塞回队尾**：`faux` 的 `stream()` 是 `pendingResponses.shift()`，
+   * 一个工厂只服务一次请求。不重入的话第二次请求（父轮收尾、或子会话的第二次生成）直接报错。
+   */
+  const lanes = new Map<string, Array<() => unknown>>()
+
+  const laneOf = (messages: readonly FauxMessage[]): string => {
+    const lastUser = [...messages].reverse().find((message) => message.role === 'user')
+    const text = typeof lastUser?.content === 'string' ? lastUser.content : ''
+    return roleOfPrompt(text) ?? 'builder'
+  }
+
+  const router = (context: { messages: readonly FauxMessage[] }): unknown => {
+    handle.appendResponses([router as never])
+    const lane = laneOf(context.messages)
+    const queue = lanes.get(lane) ?? []
+    const step = queue.shift()
+    lanes.set(lane, queue)
+    if (step !== undefined) return step()
+    if (lane !== 'builder') {
+      return fauxAssistantMessage(`【faux · ${lane}】子 Agent 收到了任务，但没有为它写剧本。`)
+    }
+    const lastUser = [...context.messages].reverse().find((message) => message.role === 'user')
+    const excerpt = (typeof lastUser?.content === 'string' ? lastUser.content : '').replace(/\s+/g, ' ').slice(0, 40)
+    return fauxAssistantMessage(
+      `【开发模式 · faux 模型】收到：「${excerpt}」。\n\n` +
+        '这条回复来自 pi-ai 的本地假模型，用来验证「提交 → 流式 → 落库 → SSE」这条链路。' +
+        '要接真模型，请在设置里添加提供商（OpenAI 兼容）并填入 API Key，然后把 agent.activeProviderId 指向它。',
+    )
+  }
+
+  handle.setResponses([router as never])
+  lanes.set('builder', [])
+
   return {
     mode: 'faux',
     choice: { provider: FAUX_PROVIDER_ID, modelId: FAUX_MODEL_ID },
     models,
-    primeTurn(userText: string) {
-      if (scripted) {
-        scripted = false
-        return
-      }
-      const excerpt = userText.replace(/\s+/g, ' ').slice(0, 40)
-      handle.appendResponses([
-        fauxAssistantMessage(
-          `【开发模式 · faux 模型】收到：「${excerpt}」。\n\n` +
-            '这条回复来自 pi-ai 的本地假模型，用来验证「提交 → 流式 → 落库 → SSE」这条链路。' +
-            '要接真模型，请在设置里添加提供商（OpenAI 兼容）并填入 API Key，然后把 agent.activeProviderId 指向它。',
-        ),
-      ])
+    primeTurn(_userText: string) {
+      // 默认台词由路由器在"该道空了"时给，这里无事可做。
+      // 剧本（script）优先：有台词就先消耗台词，空档才落回默认台词。
     },
     script(steps: readonly ScriptStep[]) {
-      handle.setResponses(steps.map(toFauxStep))
-      scripted = true
+      // 换剧本 = 清空所有道（包括子角色），避免上一轮的残留台词串到这一轮
+      lanes.clear()
+      for (const step of steps) {
+        const lane = step.as ?? 'builder'
+        const queue = lanes.get(lane) ?? []
+        queue.push(() => toFauxStep(step))
+        lanes.set(lane, queue)
+      }
     },
   }
 }

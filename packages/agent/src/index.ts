@@ -11,11 +11,15 @@ import { HarnessPool } from './harness-pool.js'
 import { planModel, resolveModel, type ModelPlan, type ResolvedModel } from './models.js'
 import type { SseEventInput } from '@tenon/protocol'
 
+export * from './context.js'
 export * from './models.js'
 export * from './harness-pool.js'
 export * from './normalize.js'
 export * from './docs.js'
+export * from './roles.js'
 export * from './tools/coding.js'
+export * from './tools/search.js'
+export * from './tools/subagent.js'
 export { ChatService } from './chat.js'
 
 export interface AgentRuntimeOptions {
