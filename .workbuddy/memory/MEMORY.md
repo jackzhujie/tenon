@@ -7,7 +7,7 @@
 ⚠️ `LM Studio` 是第三方产品名，全局改名时必须保护。
 
 ## 当前状态（2026-11-01）
-**M1 全部 9 步 + M2 第 1、2 步完成** → DESIGN **v1.2.8**。七个包 + 两个 app（`apps/web` 渲染器、`apps/desktop` 壳）。
+**M1 全部 9 步 + M2 第 1~3 步完成（Docker 产物除外）** → DESIGN **v1.2.9**。八个包 + 两个 app（`apps/web` 渲染器、`apps/desktop` 壳）。
 服务能起、能对话（SSE 流式）、能落库、每轮自动 git 提交、崩溃后续跑；
 Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮的 commit；
 `pnpm dev:web` 一条命令起界面，改 `repo/src/App.tsx` → iframe 当场变（HMR 经网关）；
@@ -17,11 +17,16 @@ Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮�
 `preview.start` 双进程（网关按 `/api` 最长前缀分流）；应用侧只认 `DATABASE_URL`（+ 容量参数 `DATABASE_POOL_MAX`）。
 **M2-2：可观测了** —— `gateway/src/logs.ts` 的 `LogStore` 三来源汇流（子进程行钩子 / 页面经
 `POST /__tenon/log` 网关拦截不上传 / 平台节点），`app.log` SSE + `logs.list|clear` RPC，
-模板零依赖上报（`tenon-log.ts` + `tenon-boundary.tsx`），`apps/web` 有 `LogPanel` 底栏；
-日志跟应用走不跟预览跑（停预览缓冲还在）。
-`pnpm typecheck` 14 project + `pnpm test` 128 项 + `smoke` 9 + `e2e:preview` 14 + `e2e:fullstack`（含日志断言）+ `smoke:desktop(:packaged)` 8 全绿。
-**下一步**：M2 第 3 步 —— runtime SDK（收编 `tenon-log` 成 `@tenon/runtime`）→ `pg_dump` 跨档迁移到 Docker PG → Docker compose 产物。
-**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.5 M2-2 验收 / §4.6 下一步拆解 / §4.7 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`。
+模板侧上报（`tenon-log.ts` + `tenon-boundary.tsx`），`apps/web` 有 `LogPanel` 底栏；
+日志跟应用走不跟预览跑（停预览缓冲还在）；堆栈续行并进上一条 `detail`。
+**M2-3：能发布了** —— `packages/runtime-sdk`（`@tenon/runtime`）**源码分发**：`sync-templates.mjs` 拷进两模板，
+漂移测试逐字节拦；含 Nest 全局 `TenonLoggerFilter`（5xx 摘要+堆栈 / 4xx 一行 warn / 必须补响应）。
+跨档迁移 `migrateDatabase()` **纯 JS 逻辑拷贝**（v1.2.9 废弃 `pg_dump` 方案）：外键拓扑排序 / 生成列排除 /
+`OVERRIDING SYSTEM VALUE` / `setval` 对齐序列 / 逐表 `count(*)` 校验，零二进制依赖。
+`pnpm typecheck` 15 project + `pnpm test` **159 项** + `smoke` 9 + `e2e:preview` 14 + `e2e:fullstack`（含日志与 Nest 过滤器断言）+ `smoke:desktop(:packaged)` 8 全绿。
+**M2 只剩 Docker compose 产物** —— ⛔ 阻塞：本机无 docker/podman/colima（`which` 全 not found）。
+没有验证就不产出 Dockerfile（不想假收口）。有容器运行时后按 STATUS §4.7 补；或直接进 M3。
+**开工入口：`docs/STATUS.md`**（§4.2 进度表 / §4.4~4.6 各步 DoD / §4.7 下一步 / §4.8 代码地图 / §5 陷阱）；方案：`docs/DESIGN.md`。
 
 ## 三条铁律
 1. **Electron 只做壳**，业务全在本地 HTTP Server（否则 Web 模式 / Agent 自调试 / SaaS 化全废）
@@ -103,6 +108,17 @@ Agent 有 read/write/edit/bash 四个工具，写完的文件进得了这一轮�
 - **tsc 编译报错归 `api` 来源**（它同样意味着"后端起不来"），别单独开 `tsc` 来源
 - **页面上报不带任何平台凭证**：同源相对路径 + `keepalive` 就够；往上报里塞 `window.__TENON__.token` 是把平台凭证引进生成应用（违反铁律 2 方向）
 - **SSE 新增事件三处要同步**：`events.ts` 的 union、`event-names.ts`（穷尽闸门）、前端 reducer 的 case（TS exhaustive 只盖有 discriminated union 的地方）
+
+## 发布与迁移硬约束（v1.2.9，M2 第 3 步实测）
+- **跨档迁移不用 `pg_dump`/`pg_restore`**：用户机器上没有（本机也没有）。`migrate.ts` 走纯 JS —— 两端 PG 协议连接 + 普通 SQL，零二进制依赖
+- **迁移必须 `setval` 对齐序列**：不做的话迁移全绿、行数一致，用户第一次新建就主键冲突 500（最阴的坑）
+- **`insert` 排除生成列（`is_generated='ALWAYS'`），`GENERATED ALWAYS AS IDENTITY` 要 `OVERRIDING SYSTEM VALUE`**：都按 `information_schema.columns` 判断，别按列名猜
+- **外键有环别猜顺序**：拓扑排序遇环直接抛（猜错会在目标库留一半数据）；自引用外键要显式跳过
+- **迁移只搬数据不搬结构**：结构由 migrations 在目标库生成；目标缺表时**报错并指路**，不偷偷建表（否则两套 schema 事实来源）
+- **全局 `@Catch()` 过滤器接管响应分发权**：只记日志不写响应 = 请求永远挂着。必须 `reply.status().send()` 补回去
+- **`@tenon/runtime` 不能变成生成应用的 npm 依赖**（没发布 npm，导出 Docker 就装不上）→ **源码分发** + `sync-templates.mjs` + 逐字节漂移测试
+- **跨模板共享的组件不能用模板 css 类名**：错误边界降级 UI 用 inline style，才能两模板字节级共用
+- **本机无 Docker/pg_dump**（2026-11-01 实测）：Docker compose 产物（DoD ④）与 `pglite → 真 PG` 端到端都要等有环境
 
 ## 已定决策 v1.2
 - 桌面 **Electron 39.x**（内置 Node 22.22.1 ≥ pi 要求 22.19）；`ELECTRON_RUN_AS_NODE` spawn server 子进程
