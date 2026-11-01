@@ -10,6 +10,7 @@ import { ChatService } from './chat.js'
 import { HarnessPool } from './harness-pool.js'
 import { planModel, resolveModel, type ModelPlan, type ResolvedModel } from './models.js'
 import { TaskGraphService } from './taskgraph.js'
+import { UsageService } from './usage.js'
 import type { SseEventInput } from '@tenon/protocol'
 
 export * from './context.js'
@@ -19,6 +20,7 @@ export * from './normalize.js'
 export * from './docs.js'
 export * from './roles.js'
 export * from './taskgraph.js'
+export * from './usage.js'
 export * from './tools/coding.js'
 export * from './tools/search.js'
 export * from './tools/subagent.js'
@@ -43,6 +45,8 @@ export interface AgentRuntime {
   readonly pool: HarnessPool | undefined
   /** 任务图（M4）。没配模型时同样是 `undefined` —— 没有 harness 就没有图 */
   readonly taskGraph: TaskGraphService | undefined
+  /** 用量与预算（M4）。没配模型时是 `undefined` */
+  readonly usage: UsageService | undefined
   close(): Promise<void>
 }
 
@@ -59,18 +63,21 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       chat: undefined,
       pool: undefined,
       taskGraph: undefined,
+      usage: undefined,
       async close() {},
     }
   }
 
   const model = resolveModel(options.core, { env: options.env })
   const pool = new HarnessPool({ home: options.core.home, model })
+  const usage = new UsageService({ pool, core: options.core, publish: options.publish })
   const chat = new ChatService({
     pool,
     apps: options.core.apps,
     home: options.core.home,
     model,
     publish: options.publish,
+    usage,
     ...(options.onSchemaCommit === undefined ? {} : { onSchemaCommit: options.onSchemaCommit }),
   })
   const taskGraph = new TaskGraphService({ pool, publish: options.publish })
@@ -81,9 +88,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     chat,
     pool,
     taskGraph,
+    usage,
     async close() {
       await chat.close()
       await taskGraph.close()
+      await usage.close()
       await pool.closeAll()
     },
   }

@@ -78,6 +78,9 @@ export function App() {
         activeApp={workspace.activeApp}
         model={state.model}
         stream={state.stream}
+        usage={state.usage}
+        budgetStopped={state.budgetStopped}
+        onSetBudget={workspace.setBudget}
         onSelectApp={workspace.selectApp}
         onCreate={() => setCreating(true)}
         onRelease={() => setReleaseOpen(true)}

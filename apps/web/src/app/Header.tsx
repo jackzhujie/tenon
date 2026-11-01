@@ -1,9 +1,10 @@
-import type { App } from '@tenon/protocol'
+import type { App, BudgetDimension, UsageSnapshot } from '@tenon/protocol'
 import { AppMenu } from '../features/apps/AppMenu.js'
+import { UsagePanel } from '../features/usage/UsagePanel.js'
 import { PlusIcon } from '../components/icons.js'
 import { Button } from '../components/ui/Button.js'
 import { cn } from '../lib/cn.js'
-import type { ActiveModel } from '../hooks/useWorkspace.js'
+import type { ActiveModel, Outcome } from '../hooks/useWorkspace.js'
 import type { StreamState } from '../lib/stream.js'
 
 const STREAM_LABEL: Record<StreamState, string> = {
@@ -55,6 +56,10 @@ export interface HeaderProps {
   activeApp: App | null
   model: ActiveModel | null
   stream: StreamState
+  usage: UsageSnapshot | null
+  /** 这一轮被额度掐了是哪个维度（null = 没被掐） */
+  budgetStopped: BudgetDimension | null
+  onSetBudget(maxCostUsd: number | null, maxTokens: number | null): Promise<Outcome>
   onSelectApp(appId: string): void
   onCreate(): void
   /** 打开发布对话框 */
@@ -66,6 +71,9 @@ export function Header({
   activeApp,
   model,
   stream,
+  usage,
+  budgetStopped,
+  onSetBudget,
   onSelectApp,
   onCreate,
   onRelease,
@@ -89,6 +97,12 @@ export function Header({
 
       <div className="ml-auto flex items-center gap-3">
         <ModelTag model={model} />
+        <UsagePanel
+          usage={usage}
+          stopped={budgetStopped}
+          disabled={activeApp === null}
+          onSetBudget={onSetBudget}
+        />
         <StreamDot state={stream} />
         <Button
           variant="outline"

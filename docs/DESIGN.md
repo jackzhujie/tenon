@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.16
+# DESIGN.md — 详细方案设计 v1.2.17
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。 + **v1.2.17 补充（M4 第 3 步用量与预算：`harness.usage()` 是**会话账本**，跨重启不丢、且天然把子 Agent 与压缩摘要算进去 —— 前端累加必然少一半，所以逐条 `usage` 事件换成了全量的 `usage.update`；熔断不是"预测下一笔"，pi 没有 pre-request 钩子，只能"花超了就停" —— §5.6）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -394,7 +394,7 @@ export function buildModels(profiles: ProviderProfile[]): Models {
 
 每档可指定「提供商 + modelId + 参数」，**未配置的档位回退到 `comprehensive`**，全空则引导进入设置向导。
 
-**成本与预算**：`harness.usage()` 给出按模型/工具聚合的用量，落 `tenon.usage` 文档；设置里可配「每应用每日 token/金额上限」，超限时在 `submit` 前拦截并提示。
+**成本与预算**：`harness.usage()` 给出按模型/工具聚合的用量（session 账本，每个会话的 `pi.usage` 求和），直接读、不另写文档；额度按应用存在设置里（`budget.app.<appId>` = `{maxCostUsd, maxTokens}`），超限时在 `submit` 前拦截、跑到一半还会 abort —— 细节见 §5.6。
 
 ### 4.3 持久化 Harness（每应用一个）
 
@@ -647,6 +647,58 @@ docs/
 - `phase` 一律翻成人话（`request` → 等模型、`execute` → 执行中），不让用户读宿主枚举
 - 收起时那一行优先显示**派出去的那个**，而不是"最近变的那个"——那才是用户此刻关心的
 
+### 5.6 用量与预算：花了多少、不许再花（v1.2.17 落地）
+
+子 Agent 一开，一个问题可能同时跑三个会话。**钱是按 token 算的，而用户看不见任何数字** ——
+这一层补上：看得见花了多少、能设一条线、顶到线就停。
+
+**真值只有一处：`harness.usage()`。** 它是 session 账本（每个会话的 `pi.usage` 求和），
+三个性质决定了别的做法都不成立：
+
+| 性质 | 意味着什么 |
+|---|---|
+| 跨重启不丢（存在 `harness.sqlite` 里） | 额度也是跨重启的，否则"重启一下就重置"等于没设 |
+| 含**所有**会话 | 子 Agent 的花费在它自己的会话里，父会话的事件流里根本没有 |
+| 含**压缩摘要** | 摘要那次调用不产生 transcript entry，只进账本 |
+
+所以 `usage` 事件从"逐条响应的量"改成了 **`usage.update` 推全量快照**：
+前端累加不但会漏掉上面两项，还会在断线重连（`since` 重放）时把同一笔算两遍。
+旧的 delta 事件当时也没人渲染 —— 一个"只写不读"的累加器比没有更危险。
+
+**两个维度都要拦。** `cost.total` 在真模型上是钱，在 `faux` 上恒为 0（本地假模型不报价）；
+`totalTokens` 两边都有。只按钱拦 → 本地一条熔断都验不了；只按 token 拦 → 对不上用户的账单。
+所以 `Budget = { maxCostUsd, maxTokens }`，任一条顶到就拦，两条都不设就不拦。
+
+**两个拦截点，缺一个都留不住钱：**
+
+| 时机 | 手段 | 用户看到 |
+|---|---|---|
+| 开跑前（额度已经用完） | `chat.submit` 抛 `BUDGET_EXCEEDED`（**402**，不是 409 —— 这不是"等等再试"） | 错误条一句话：已用多少、上限多少、该调哪 |
+| 跑到一半（一轮冲爆额度） | 每次模型响应后重算，顶到就 `abort` | `budget.exceeded` 事件 → 横幅 + 那一轮停下 |
+
+**横幅看的是 `snapshot.exceeded`，不只认事件。** `budget.exceeded` 只在"跑到一半真被掐"时来；
+用户手动把上限调到低于已用量那一刻没有任何人被打断，但那时确实已经发不出去了 —— 所以面板取
+`stopped ?? snapshot.exceeded`，事件带来的维度优先（它指明是谁先撞的线）。
+
+**没有 pre-request 钩子**：`hook()` 只挂在 task 的 `handlers` 上（`GenerationTask` 只有 `onYield`），
+没有"发请求之前"这个点。所以熔断的语义是**「花超了就停」**，不是「预测下一笔会超就不发」——
+代价是可能停在工具调用中间，与用户按停止键完全一样。
+
+**额度按应用存**（`budget.app.<appId>`，settings 里一条 JSON）。
+花超的永远是**某一个**应用的一轮（模型绕圈、反复读大文件），全局额度既解释不了"贵在哪"，
+也没法只停掉那一个。**缺口（如实记）**：N 个应用各有一份额度，没有总闸；
+真要"这个月最多 20 美元"得再叠一层按月的账 —— 现在没做。
+
+**`turn` 是差值不是计数器。** 本轮开始时记下累计，之后 `now - base`（逐项 `max(0, …)`）。
+这样"这一轮"里也包含子 Agent 与压缩摘要的花费 —— 而它们恰恰是最容易被漏掉的部分。
+
+**读失败退回"不设限"，而不是"锁死"。** 拿不到账本就拦住所有请求的后果是"整个应用打不开"，
+比多花几分钱严重得多。反过来 `0` 是**真的**关掉（`>=` 比较，用满即没有余额），
+这条在测试里单独钉了一格 —— 用 `>` 会让"上限设 0"变成"不设限"。
+
+**面板放顶栏，不放预览下方。** 它跟任务条不是一类东西：任务条空闲时不渲染（"没人跑"才是常态），
+而"这个应用一共花了多少"随时都可能想看。点开是账 + 额度表单（在这里设上限，比另开设置页少三步）。
+
 ---
 
 ## 6. 数据模型与存储
@@ -710,7 +762,6 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 | `tenon.spec` | root | 功能规格（模块/实体/接口/验收标准） | rewindable |
 | `tenon.plan` | root | 任务列表：id/title/status/owner(子会话)/commit | rewindable |
 | `tenon.selection` | root | 最近一次点选/框选的上下文（供 UI 与 Agent 共用） | latest |
-| `tenon.usage` | root | token/成本累计、预算 | latest |
 | `tenon.preview` | root | 端口、readiness、最近错误摘要 | latest |
 
 `rewindable` 的意义：任意历史时刻的规格与计划都可读回（对应妙搭的 spec 版本）。
@@ -844,8 +895,11 @@ data: {"seq":1030,"toolCallId":"t1","stream":"stdout","text":"..."}
 event: task.update
 data: {"seq":1040,"taskId":"task_3","status":"completed","title":"生成 dishes 模块"}
 
-event: usage
-data: {"seq":1050,"model":"deepseek/deepseek-v4-pro","inputTokens":18342,"outputTokens":2210,"costUsd":0.0361}
+event: usage.update
+data: {"seq":1050,"appId":"...","snapshot":{"appId":"...","totals":{"input":18342,"output":2210,"cacheRead":0,"cacheWrite":0,"totalTokens":20552,"costUsd":0.0361},"models":{"deepseek/deepseek-v4-pro":{"input":18342,"output":2210,"cacheRead":0,"cacheWrite":0,"totalTokens":20552,"costUsd":0.0361}},"tools":{},"turn":{"input":18342,"output":2210,"cacheRead":0,"cacheWrite":0,"totalTokens":20552,"costUsd":0.0361},"budget":{"maxCostUsd":5,"maxTokens":null},"level":"ok","exceeded":null}}
+
+event: budget.exceeded
+data: {"seq":1052,"appId":"...","dimension":"cost","snapshot":{"...":"同上，level 为 over"}}
 
 event: preview.ready
 data: {"seq":1060,"appId":"...","url":"http://127.0.0.1:41001","readiness":{"deps":"ready","server":"ready","preview":"ready"}}
@@ -1730,8 +1784,20 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > ③ `taskgraph.get` RPC（切应用 / SSE 重连后首拉）+ `taskgraph.update` SSE 事件。
 > ④ `apps/web/src/features/tasks/TaskGraphPanel.tsx`：预览下方的任务条，空闲时整个不渲染。
 > `pnpm test` 新增 13 项（归一化 9 + 集成 4，其中一条断言"派活那一轮里必须出现 delegated 节点"，
-> 另一条断言"跑完就是空图"）。**M4 还欠**：用量/预算熔断（DoD ③）、E2E 子 Agent 的预览工具（DoD ①）、
-> Reviewer 的 `git_diff`/`typecheck`、CodeAct 的 codemode；档位路由也要等设置能存多个 profile。
+> 另一条断言"跑完就是空图"）。
+
+> **M4 进度（v1.2.17，2026-11-01）**：第 3 步落地 —— **用量与预算熔断，DoD ③ 已满足**。
+> ① `packages/core/src/usage.ts`：账本求和 / 本轮差值 / `breached` / `levelOf`（13 项单测，
+> 含"上限设 0 等于关掉"与"两条线都不设就永不拦"）。② `packages/protocol/src/usage-format.ts`：
+> `formatTokens` / `formatCost` / `budgetMessage` —— **放 protocol 是因为服务端与浏览器都要用**，
+> core 带 `node:sqlite` 进不了前端产物。③ `packages/agent/src/usage.ts`：每应用一份
+> `UsageService`（`harness.usage()` 读真值 → 推 `usage.update` 全量），`startTurn()` 顺手判额度。
+> ④ 拦截两个点：`chat.submit` 抛 `BUDGET_EXCEEDED`（402）；每次模型响应后重算，顶到就 abort。
+> ⑤ `usage.get` / `budget.set` RPC（额度存 `budget.app.<appId>`）+ 顶栏 `UsagePanel`（账 + 额度表单）。
+> `pnpm test` 新增 29 项（core 13 + protocol 5 + 集成 11，其中一条断言"重启之后账本不变"、
+> 一条断言"删掉一个应用别的应用还能跑"）。**M4 还欠**：E2E 子 Agent 的预览工具（DoD ①）、
+> Reviewer 的 `git_diff`/`typecheck`、CodeAct 的 codemode；档位路由要等设置能存多个 profile；
+> 额度没有跨应用的**总闸**（见 §5.6 的缺口）。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 

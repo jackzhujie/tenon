@@ -6,11 +6,21 @@
  * 防止「handler 返回了契约外的形状」这种更隐蔽的漂移。
  */
 import type { CoreServices } from '@tenon/core'
-import { appPaths, files, gitops, isSchemaChange } from '@tenon/core'
+import {
+  ZERO_USAGE,
+  appPaths,
+  breached,
+  budgetKey,
+  files,
+  gitops,
+  isSchemaChange,
+  levelOf,
+  readBudget,
+} from '@tenon/core'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { listTemplates } from '@tenon/generator'
-import type { RpcArgs, RpcMethod, RpcMethods, RpcOutput } from '@tenon/protocol'
+import type { RpcArgs, RpcMethod, RpcMethods, RpcOutput, UsageSnapshot } from '@tenon/protocol'
 import { TenonError } from '@tenon/protocol'
 import { pickSnapshot, type PickedSnapshot } from './revert-data.js'
 import { publishRelease } from './release.js'
@@ -35,6 +45,26 @@ function requireChat(agent: AgentRuntime): NonNullable<AgentRuntime['chat']> {
     )
   }
   return agent.chat
+}
+
+/**
+ * 没配模型时的账本：用量为零，但**额度照读**。
+ *
+ * 关键在于额度是设置而不是账本 —— 用户完全可以先设好上限，再把 provider 配上。
+ * 这里返回 level 也算出来，是因为拦截文案与面板都吃这一份形状，少一个字段前端就要分支。
+ */
+async function zeroUsage(appId: string, core: CoreServices): Promise<UsageSnapshot> {
+  const budget = readBudget(core.settings, appId)
+  return {
+    appId,
+    totals: ZERO_USAGE,
+    models: {},
+    tools: {},
+    turn: ZERO_USAGE,
+    budget,
+    level: levelOf(ZERO_USAGE, budget),
+    exceeded: breached(ZERO_USAGE, budget),
+  }
 }
 
 export function createHandlers(deps: ServerDeps): HandlerMap {
@@ -81,9 +111,13 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     },
 
     'app.delete': async (input) => {
-      await agent.chat?.close()
+      // 只停这一个应用的 watcher。这里**不能**调 `chat.close()` ——
+      // 那会把 closed 置上，之后所有应用的 `app.status` 都不再落库也不再推事件
+      // （表现：删掉一个应用之后，别的应用对话照跑，但界面永远转圈）
+      await agent.chat?.detach(input.id)
       // 任务图的 watch 拽着 session，必须先停 —— 反过来会让 watch 回调踩到已关闭的 harness
       await agent.taskGraph?.release(input.id)
+      await agent.usage?.release(input.id)
       await agent.pool?.release(input.id)
       // 预览必须先停：dev server 还在写 node_modules / .vite 时删目录会留下半截图
       await preview.stop(input.id)
@@ -164,6 +198,26 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         return { graph: { rootConversationId: '', nodes: [] } }
       }
       return { graph: await agent.taskGraph.snapshot(input.appId) }
+    },
+
+    'usage.get': async (input) => {
+      core.apps.require(input.appId)
+      // 同 taskgraph：没模型时给一份零账本，面板不显示、也不报错
+      if (agent.usage === undefined) {
+        return { snapshot: await zeroUsage(input.appId, core) }
+      }
+      return { snapshot: await agent.usage.snapshot(input.appId) }
+    },
+
+    'budget.set': async (input) => {
+      core.apps.require(input.appId)
+      const budget = { maxCostUsd: input.maxCostUsd, maxTokens: input.maxTokens }
+      if (agent.usage === undefined) {
+        // 没模型也能设额度（配好模型之后立刻生效），只是这里没有账本可读
+        core.settings.set({ [budgetKey(input.appId)]: budget })
+        return { snapshot: await zeroUsage(input.appId, core) }
+      }
+      return { snapshot: await agent.usage.setBudget(input.appId, budget) }
     },
 
     'files.tree': async (input) => {

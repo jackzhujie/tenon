@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import type {
   App,
   AppStatus,
+  BudgetDimension,
   GitCommit,
   LogEntry,
   NormalizedMessage,
@@ -25,9 +26,12 @@ import type {
   SseEvent,
   TaskGraph,
   TemplateInfo,
+  UsageSnapshot,
 } from '@tenon/protocol'
 import { rpc, TenonRpcError } from '../lib/rpc.js'
 import { EventStream, type StreamState } from '../lib/stream.js'
+// 走 `/browser` 子路径：主入口会把整张 zod 表带进产物
+import { budgetMessage } from '@tenon/protocol/browser'
 
 export interface ToolActivity {
   toolCallId: string
@@ -59,12 +63,8 @@ export type PublishOutcome =
   | { ok: true; result: PublishResult }
   | { ok: false; message: string }
 
-export interface UsageInfo {
-  model: string
-  inputTokens: number
-  outputTokens: number
-  costUsd: number
-}
+/** 只关心成不成的动作：失败原因交给就地显示的地方，不弹全局错误条 */
+export type Outcome = { ok: true } | { ok: false; message: string }
 
 interface State {
   apps: App[]
@@ -94,7 +94,16 @@ interface State {
   releases: Release[]
   publishing: boolean
   stream: StreamState
-  usage: UsageInfo | null
+  /**
+   * 这个应用的账（`usage.get` 首拉 + `usage.update` 全量替换）。
+   * 空 = 还没拉到；**不是**"没花钱"。真值在服务端会话账本里，跨重启不丢。
+   */
+  usage: UsageSnapshot | null
+  /**
+   * 这一轮被额度掐了（`budget.exceeded`）。只用来解释"为什么突然停了"，
+   * 下一次提交或改了额度就清掉 —— 它不是历史，留着会变成一条永远不消失的红字。
+   */
+  budgetStopped: BudgetDimension | null
   model: ActiveModel | null
   error: string | null
   /** 首次加载（应用列表还没回来） */
@@ -123,6 +132,7 @@ const initialState: State = {
   publishing: false,
   stream: 'stopped',
   usage: null,
+  budgetStopped: null,
   model: null,
   error: null,
   booting: true,
@@ -144,6 +154,8 @@ type Action =
   | { kind: 'logs'; logs: LogEntry[] }
   | { kind: 'logs.clear' }
   | { kind: 'graph'; graph: TaskGraph }
+  | { kind: 'usage'; snapshot: UsageSnapshot }
+  | { kind: 'budget.set'; snapshot: UsageSnapshot }
   | { kind: 'preview'; preview: PreviewStatus | null }
   | { kind: 'selection'; selection: SelectionContext | null }
   | { kind: 'diff'; sha: string | null; diff: GitShow | null }
@@ -283,16 +295,25 @@ function reduceEvent(state: State, event: SseEvent): State {
       // 列表靠 `git.log` 重拉，这里只用来触发刷新（由调用方处理）
       return state
 
-    case 'usage':
-      return {
-        ...state,
-        usage: {
-          model: event.model,
-          inputTokens: event.inputTokens,
-          outputTokens: event.outputTokens,
-          costUsd: event.costUsd,
-        },
-      }
+    case 'usage.update':
+      return event.appId === state.activeAppId ? { ...state, usage: event.snapshot } : state
+
+    /*
+     * 这一轮被额度掐了。快照跟着换（那一刻的数就是"用超了"的证据），
+     * 并记下是哪个维度 —— 横幅要说清是 token 不够还是钱不够，两者该调的东西不一样。
+     *
+     * 同时塞进全局错误条：中断发生在对话正中间，用户的眼睛在左边那一栏，
+     * 顶栏一个小圆点变红是看不见的。
+     */
+    case 'budget.exceeded':
+      return event.appId === state.activeAppId
+        ? {
+            ...state,
+            usage: event.snapshot,
+            budgetStopped: event.dimension,
+            error: budgetMessage(event.snapshot.totals, event.snapshot.budget, event.dimension),
+          }
+        : state
 
     case 'error':
       return { ...state, error: event.message }
@@ -332,6 +353,7 @@ function reducer(state: State, action: Action): State {
         logs: [],
         graph: { rootConversationId: '', nodes: [] },
         usage: null,
+        budgetStopped: null,
         releases: [],
         status: state.apps.find((app) => app.id === action.appId)?.status ?? null,
         error: null,
@@ -347,6 +369,11 @@ function reducer(state: State, action: Action): State {
       return { ...state, logs: [] }
     case 'graph':
       return { ...state, graph: action.graph }
+    case 'usage':
+      return { ...state, usage: action.snapshot }
+    case 'budget.set':
+      // 改了额度就把"被掐"的横幅收起来：用户刚做完处理，再摆一句红字像是在骂他
+      return { ...state, usage: action.snapshot, budgetStopped: null }
     case 'preview':
       return { ...state, preview: action.preview }
     case 'selection':
@@ -362,9 +389,15 @@ function reducer(state: State, action: Action): State {
     case 'publishing':
       return { ...state, publishing: action.publishing }
     case 'optimistic':
-      return { ...state, messages: [...state.messages, action.message], submitting: true, error: null }
+      return {
+        ...state,
+        messages: [...state.messages, action.message],
+        submitting: true,
+        error: null,
+        budgetStopped: null,
+      }
     case 'submit.start':
-      return { ...state, submitting: true, error: null }
+      return { ...state, submitting: true, error: null, budgetStopped: null }
     case 'submit.done':
       return { ...state, submitting: false }
     case 'stream':
@@ -410,6 +443,11 @@ export interface Workspace {
   revertCommit(sha: string, dbRestore?: boolean): Promise<void>
   /** 发布（`release.publish`）。失败的原因返回给调用方，由对话框就地显示 */
   publish(notes: string): Promise<PublishOutcome>
+  /**
+   * 设额度（`budget.set`）。两个值一起传：空 = 这条不设限，0 = 这个应用不许再花。
+   * 失败返回原因，由额度面板就地显示 —— 那里才知道用户刚输了什么。
+   */
+  setBudget(maxCostUsd: number | null, maxTokens: number | null): Promise<Outcome>
   clearError(): void
 }
 
@@ -516,6 +554,21 @@ export function useWorkspace(): Workspace {
     }
   }, [])
 
+  /**
+   * 首拉用量。
+   *
+   * 必须拉：账本在服务端的会话里，页面上没有任何本地账可以累加（子 Agent 与压缩摘要
+   * 的消耗都不经过父会话的事件流）。拉失败就空着 —— 少一个数字比整页报错好。
+   */
+  const refreshUsage = useCallback(async (appId: string) => {
+    try {
+      const result = await rpc('usage.get', { appId })
+      dispatch({ kind: 'usage', snapshot: result.snapshot })
+    } catch {
+      /* 用量拉不到不阻塞任何操作：它只是显示 */
+    }
+  }, [])
+
   useEffect(() => {
     const appId = state.activeAppId
     if (appId === null) return
@@ -529,6 +582,7 @@ export function useWorkspace(): Workspace {
           refreshLogs(appId),
           refreshReleases(appId),
           refreshGraph(appId),
+          refreshUsage(appId),
         ])
         if (!cancelled) dispatch({ kind: 'preview', preview: preview.preview })
       } catch (err) {
@@ -538,7 +592,7 @@ export function useWorkspace(): Workspace {
     return () => {
       cancelled = true
     }
-  }, [state.activeAppId, refreshHistory, refreshCommits, refreshLogs, refreshReleases, refreshGraph])
+  }, [state.activeAppId, refreshHistory, refreshCommits, refreshLogs, refreshReleases, refreshGraph, refreshUsage])
 
   // ---------------------------------------------------------------- 事件流（先连后发）
 
@@ -571,6 +625,7 @@ export function useWorkspace(): Workspace {
           void refreshCommits(appId).catch(() => {})
           void refreshLogs(appId).catch(() => {})
           void refreshGraph(appId).catch(() => {})
+          void refreshUsage(appId).catch(() => {})
         },
       },
     })
@@ -581,7 +636,7 @@ export function useWorkspace(): Workspace {
       stream.stop()
       if (streamRef.current === stream) streamRef.current = null
     }
-  }, [state.activeAppId, refreshCommits, refreshHistory, refreshLogs, refreshGraph])
+  }, [state.activeAppId, refreshCommits, refreshHistory, refreshLogs, refreshGraph, refreshUsage])
 
   // ---------------------------------------------------------------- 动作
 
@@ -779,6 +834,25 @@ export function useWorkspace(): Workspace {
     [refreshReleases],
   )
 
+  /**
+   * 设额度。成功之后服务端会推一次 `usage.update`，这里也直接用返回值换掉快照 ——
+   * 不等那一条事件，用户点完「保存」应当立刻看到输入框解锁。
+   */
+  const setBudget = useCallback(
+    async (maxCostUsd: number | null, maxTokens: number | null): Promise<Outcome> => {
+      const appId = activeAppIdRef.current
+      if (appId === null) return { ok: false, message: '还没有选中应用' }
+      try {
+        const result = await rpc('budget.set', { appId, maxCostUsd, maxTokens })
+        dispatch({ kind: 'budget.set', snapshot: result.snapshot })
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, message: messageOf(err) }
+      }
+    },
+    [],
+  )
+
   const clearError = useCallback(() => dispatch({ kind: 'error', message: null }), [])
   const setSelection = useCallback(
     (selection: SelectionContext | null) => dispatch({ kind: 'selection', selection }),
@@ -805,5 +879,6 @@ export function useWorkspace(): Workspace {
     showCommit,
     revertCommit,
     publish,
+    setBudget,
   }
 }

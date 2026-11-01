@@ -11,13 +11,14 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { AgentEvent, AgentEventStream } from '@earendil-works/pi-durable'
 import { watchEvents } from '@earendil-works/pi-durable'
 import type { ChatSubmitInput, SseEventInput } from '@tenon/protocol'
-import { composeWithSelection, TenonError } from '@tenon/protocol'
+import { budgetMessage, composeWithSelection, TenonError } from '@tenon/protocol'
 import type { AppStore, TenonHome } from '@tenon/core'
 import { appPaths, gitops, hasSchemaChange } from '@tenon/core'
 import type { HarnessPool, RootConversation } from './harness-pool.js'
 import type { PlanDocTask } from './docs.js'
 import { PlanDoc } from './docs.js'
 import type { ResolvedModel } from './models.js'
+import type { UsageService } from './usage.js'
 import { assistantText, normalizeEntries, normalizeEntry, usageOf, type RawEntry } from './normalize.js'
 
 const ctx = BACKGROUND_CONTEXT
@@ -46,6 +47,14 @@ export interface ChatServiceOptions {
    * 而让一轮对话因为存不了快照而失败是不可接受的。
    */
   onSchemaCommit?: (input: { appId: string; sha: string; changed: string[] }) => Promise<void>
+  /**
+   * 用量与预算（M4 第 3 步）。缺省时不拦 —— agent 的单元测试不需要一个真账本。
+   *
+   * 拦截分两个时刻，缺一个都留不住钱：**开跑前**（额度已经用完了不许再发）与
+   * **跑到一半**（一轮里把额度冲爆了，立刻停）。前者给用户一句明确的拒绝，
+   * 后者靠 abort 复用「用户点停止」那条路。
+   */
+  usage?: UsageService
 }
 
 /** 按 app 合并文本增量，40ms 或遇到 message_end 时下发 */
@@ -92,6 +101,8 @@ class DeltaCoalescer {
 export class ChatService {
   private readonly inflight = new Map<string, SubmissionHandle>()
   private readonly watchers = new Map<string, AgentEventStream>()
+  /** 这一轮已经被预算掐掉的：防止几个 message_end 同时把 stop() 打成两次 */
+  private readonly halted = new Set<string>()
   private readonly deltas: DeltaCoalescer
   private closed = false
 
@@ -127,9 +138,7 @@ export class ChatService {
           this.options.publish({ type: 'message.end', appId, message })
         }
         const usage = usageOf(entry)
-        if (usage !== undefined) {
-          this.options.publish({ type: 'usage', appId, ...usage })
-        }
+        if (usage !== undefined) this.checkBudget(appId)
         return
       }
       case 'tool_execution_start': {
@@ -198,6 +207,41 @@ export class ChatService {
     }
   }
 
+  /**
+   * 一次模型响应之后：重算账，顶到上限就停。
+   *
+   * 为什么不在这里就地累加：`usageOf(entry)` 只看得见**根会话**这一条 entry。
+   * 子 Agent 的花费在它自己的会话里、压缩摘要根本不产生 entry —— 那一半钱
+   * 只有在 `harness.usage()` 里才看得到。宁可多读一次账本，也别漏掉那一半。
+   *
+   * 为什么用 abort 而不是"拒绝下一次请求"：pi 没有 pre-request 钩子
+   * （`hook()` 只挂在 task 的 handlers 上）。所以熔断的语义是「花超了就停」，
+   * 不是「预测下一笔会超就不发」。代价是可能停在工具调用中间 —— 与用户按停止键一样。
+   */
+  private checkBudget(appId: string): void {
+    const usage = this.options.usage
+    if (usage === undefined || this.closed || this.halted.has(appId)) return
+    void usage
+      .refresh(appId)
+      .then(async (snapshot) => {
+        if (snapshot.exceeded === null) return
+        // 已经跑完了（最后一帧晚到）：不用停，下一次 submit 会被拦住
+        if (this.closed || this.halted.has(appId) || !this.inflight.has(appId)) return
+        this.halted.add(appId)
+        this.options.publish({
+          type: 'budget.exceeded',
+          appId,
+          snapshot,
+          dimension: snapshot.exceeded,
+        })
+        await this.stop(appId)
+      })
+      .catch((err: unknown) => {
+        // 记账失败不该影响对话本身：这一轮照跑，下一轮 submit 还会再判一次
+        console.error(`[tenon] 预算检查失败（${appId}）：`, err)
+      })
+  }
+
   async submit(appId: string, input: Omit<ChatSubmitInput, 'appId'>): Promise<{ submissionId: string }> {
     const app = this.options.apps.require(appId)
     if (input.content.trim() === '') {
@@ -206,6 +250,20 @@ export class ChatService {
     if (this.inflight.has(appId) && input.whenBusy === 'reject') {
       throw new TenonError('CHAT_BUSY', '这个应用正在生成中，稍等一下再发', { appId })
     }
+
+    // 额度判在**取 harness 之后**（账本在 harness 里），但在**改状态之前** ——
+    // 拒绝了就不该让前端看到一次 running。
+    if (this.options.usage !== undefined) {
+      const { snapshot, exceeded } = await this.options.usage.startTurn(appId)
+      if (exceeded !== null) {
+        throw new TenonError('BUDGET_EXCEEDED', budgetMessage(snapshot.totals, snapshot.budget, exceeded), {
+          dimension: exceeded,
+          totals: snapshot.totals,
+          budget: snapshot.budget,
+        })
+      }
+    }
+    this.halted.delete(appId)
 
     const session = await this.options.pool.acquire(appId)
     await this.ensureWatcher(appId, session)
@@ -234,6 +292,15 @@ export class ChatService {
         // 先提交再放 idle：前端看到「空闲」时版本列表必须已经是新的
         try {
           await this.commitTurn(app, submission.id, settled.status)
+          /*
+           * 收尾再读一次账：子 Agent 的花费可能在上一次检查之后才落账，
+           * 少了这一次，面板会一直差着子会话那一段。
+           *
+           * **必须挡住 `closed`**：进程正在退出时这一轮可能刚好 settle 完，
+           * 而 harness 已经在关了。这时去读 `harness.usage()` 会把 sqlite 拽住，
+           * 表现为"测试清理临时目录时 ENOTEMPTY"（真实症状：退出时残留半截文件）。
+           */
+          if (!this.closed) await this.options.usage?.refresh(appId).catch(() => {})
         } finally {
           this.setStatus(appId, 'idle')
         }
@@ -315,6 +382,27 @@ export class ChatService {
 
   isBusy(appId: string): boolean {
     return this.inflight.has(appId)
+  }
+
+  /**
+   * 应用被删：只断这一个应用。
+   *
+   * 早先这里调的是 `close()`，而 `close()` 会把 `closed` 置上 ——
+   * 于是删掉一个应用之后，**所有**应用的 `app.status` 都不再落库也不再推事件，
+   * 界面永远转圈。这个 bug 很安静：日志里什么都不报，只有"卡住"。
+   */
+  async detach(appId: string): Promise<void> {
+    this.inflight.delete(appId)
+    this.halted.delete(appId)
+    this.deltas.flushNow(appId)
+    const stream = this.watchers.get(appId)
+    this.watchers.delete(appId)
+    if (stream === undefined) return
+    try {
+      await stream.stop()
+    } catch {
+      // 拆一个已关闭的 session 的订阅失败，不值得把删除流程带崩
+    }
   }
 
   async history(appId: string, limit = 200): Promise<{ messages: ReturnType<typeof normalizeEntries>; nextCursor: null }> {

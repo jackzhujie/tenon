@@ -2,7 +2,7 @@
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
 > 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
-> + M4 第 1、2 步（子 Agent 能派活 + 任务图面板）**：315 个测试 + 9 项端到端冒烟 +
+> + M4 第 1、2、3 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断）**：344 个测试 + 9 项端到端冒烟 +
 > 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 36 项改动/回滚 e2e + 32 项发布 e2e（系统 git 当裁判：`fsck --strict` + `clone`）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 已收口**）
 
@@ -31,11 +31,6 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 推到本地裸库 `~/.tenon/backups/<appId>.git` —— 标准裸库，`git clone` 出来就是这一版的完整代码。
 `pnpm e2e:release` 用**系统 git 当裁判**（`fsck --strict` + `clone`）验收；产品运行时不依赖任何 git 二进制。
 
-**能派活了（M4 第 1 步）**：`packages/agent/src/roles.ts` 是 1 主 + 5 子的唯一事实来源；
-`subagent` 工具建真子会话、拿回结论。`explore`（定位代码）与 `librarian`（查仓库里的文档与依赖类型定义）
-现在就能用；`codeact` / `e2e` / `reviewer` 的角色与提示词已就位，缺的工具按 M4 后续步骤接。
-同时补了 `ls` / `glob` / `grep` 三个只读检索工具（自己实现，不用 pi 那套会下载 `rg`/`fd` 二进制的）。
-
 **M4 第 1 步：能派活了**。Agent 不再只有一个大脑 —— 主角色（Builder）可以把「这个东西在哪」
 「这个库怎么用」这类只读的活交给子角色，自己专心改代码。子角色是**真的另一个会话**（独立 transcript、
 独立工具白名单、独立提示词），只读角色的工具集里连 `write` 都没有，`subagent` 自己也不在里面 ——
@@ -54,12 +49,18 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 关键词是**实时**：`harness.watchTaskGraph()` 逐帧推，不是轮询。而且它**跑完就消失**——
 pi 静止时会回收任务节点，所以"空"不是没数据，是没人跑了；要看"派过几次活"得查会话，不是这张图（§4.10）。
 
+**看得见花了多少（M4 第 3 步）**：顶栏多了一个小数字 —— 点开是这个应用的账
+（累计多少 token / 多少钱、这一轮多少、按模型分几档），以及额度表单。额度顶到线之后
+**发都发不出去**（`BUDGET_EXCEEDED`），跑在中途冲过线会被当场掐掉（`budget.exceeded`）。
+真值来自 `harness.usage()` 的会话账本：**跨重启不丢**，而且把子 Agent 与压缩摘要都算进去 ——
+这两块恰恰是前端自己累加永远算不到的（§4.11 / DESIGN §5.6）。
+
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 315 项单测 + 集成测试（约 130s，含 PGlite 冷启动）
+pnpm test                       # 344 项单测 + 集成测试（约 145s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -229,8 +230,8 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 |---|---|---|---|
 | 1 | **子 Agent 骨架**：角色表（1 主 + 5 子，工具白名单/档位/提示词/可用状态）+ `subagent` 工具（真子会话、幂等复用、递归禁止）+ `ls`/`glob`/`grep` 只读检索 + faux 按角色分道 | ✅ 见 §4.9 | `packages/agent/src/roles.ts`、`tools/subagent.ts`、`tools/search.ts`、`models.ts`（分道）、`harness-pool.ts`（注入 harness） |
 | 2 | **任务图**：`watchTaskGraph` 逐帧归一化 → `taskgraph.update` 事件 + `taskgraph.get` RPC + 预览下方任务条（DoD ②） | ✅ 见 §4.10 | `packages/core/src/taskgraph.ts`、`packages/agent/src/taskgraph.ts`、`features/tasks/TaskGraphPanel.tsx` |
-| 3 | 用量与预算：`harness.usage()` 累计 + 面板 + 超预算拦截（DoD ③） | ⏳ 下一步 | — |
-| 4 | E2E 子 Agent 的预览工具（`preview.open/click/type/assert`）+ 自验收流程（DoD ①） | ⏳ | — |
+| 3 | **用量与预算**：`harness.usage()` 会话账本 → `usage.update` 全量快照 + `usage.get`/`budget.set` RPC + 顶栏用量面板 + 两个拦截点（开跑前 402 / 半路 abort，DoD ③） | ✅ 见 §4.11 | `packages/core/src/usage.ts`、`packages/agent/src/usage.ts`、`packages/protocol/src/usage-format.ts`、`features/usage/UsagePanel.tsx` |
+| 4 | E2E 子 Agent 的预览工具（`preview.open/click/type/assert`）+ 自验收流程（DoD ①） | ⏳ 下一步 | — |
 | 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ⏳ | — |
 | 6 | CodeAct：`codemode` 沙箱接入 | ⏳ | — |
 | 7 | 发布前质量门禁（typecheck / test 不过不许发） | ⏳ | — |
@@ -433,12 +434,46 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 
 使用方式：Agent 一开始跑，预览下方就出现「任务 3 / 1 个子会话」；点开看谁在跑、跑到哪一步。
 
-### 4.11 代码地图（只列已落地的）
+### 4.11 M4 第 3 步验收（用量与预算熔断）—— ✅ 已完成
+
+- [x] **★ 账本是"会话级真值"，不是前端累加** —— 集成测试断言：跑完一轮 `totals.totalTokens > 0`，
+      且 `models` 桶的键是 `provider/modelId`（`faux/faux-mini`）。前端一条 delta 都没在累加
+- [x] **★ 跨重启不丢** —— 同一个 `TENON_HOME` 杀掉再起，`usage.get` 的数**一模一样**；
+      "这一轮"归零（本轮是相对起点的差值）。只按内存计数器做的话这条必然挂
+- [x] **钱和 token 两条线都能拦** —— `Budget = {maxCostUsd, maxTokens}`，任一条顶到就 `over`。
+      集成测试一律用 token 验，因为 **`faux` 的 `cost.total` 恒为 0**（本地假模型不报价）——
+      这也正是产品里两个维度都要的原因
+- [x] **`>=` 而不是 `>`** —— "用满就是没有余额"；顺带钉住"上限设 0 = 这个应用不许再花"，
+      写成 `>` 会让 0 变成"不设限"
+- [x] **★ 开跑前就拦** —— 额度用完之后 `chat.submit` 抛 `BUDGET_EXCEEDED`（**402**），
+      且应用状态没有被改成 `running`（测试断言 `app.list` 里还是 `idle`）
+- [x] **★ 半路也能刹住** —— 给一个"刚好还差 1 token"的额度，再跑一轮四次模型调用的活：
+      事件流里出现 `budget.exceeded`，而且**它必须在 `app.status: idle` 之前到**（先解释、再放开输入框）
+- [x] **调高上限马上能用** —— 不需要重启，`budget.set` 之后同一个应用下一轮正常跑完
+- [x] **没有额度时不会误触** —— 跑完整一轮也不出现 `budget.exceeded`
+- [x] **横幅有两条来源** —— "跑到一半被掐"由 `budget.exceeded` 解释；而手动把上限调到低于已用量时
+      没有任何人被掐，面板也得说一句（取 `stopped ?? snapshot.exceeded`）。只认事件的话，用户看到的
+      只有一个红点，不知道自己现在发不出去（Electron 真截图验过这一态）
+- [x] **额度跟着应用走** —— `app.delete` 之后 `budget.app.<id>` 这条设置也没了
+- [x] **★ 删掉一个应用，别的应用还能跑** —— 这条钉住一个真 bug：`app.delete` 早先调的是
+      `chat.close()`，那会把 `closed` 置上，之后**所有**应用的 `app.status` 都不再落库也不再推事件
+      （界面永远转圈，日志里一个字都没有）。现在是 `chat.detach(appId)`
+- [x] **读坏额度不会把应用锁死** —— 负数 / NaN 一律当"没设"（`readBudget`）；读账本抛错时沿用上一次的值。
+
+使用方式：顶栏那个小数字点开就是账；额度表单留空 = 这条不设限。
+
+**还没做的**（如实记）：额度没有跨应用的**总闸**（N 个应用各有一份额度，"这个月最多 20 美元"要再叠一层按月的账）；
+`usage()` 只给按模型/工具的聚合，**看不出"哪个子角色花了多少"**（子会话的账在它自己的桶里，
+要按角色分摊得自己扫会话读 `pi.usage`，现在没做）。
+
+### 4.12 代码地图（只列已落地的）
 
 ```
 packages/
 ├── protocol/            # ★ 契约：errors(ErrorCode) / domain / rpc(方法表) / events(SSE) / result(信封)
-│   └── src/rpc.ts       #   一张表三种用途：服务端校验、前端取类型、覆盖率测试断言
+│   ├── src/rpc.ts       #   一张表三种用途：服务端校验、前端取类型、覆盖率测试断言
+│   └── src/usage-format.ts # ★ formatTokens / formatCost / budgetMessage —— 服务端与浏览器共用同一套口径
+│                        #   （走 `@tenon/protocol/browser`，core 带 node:sqlite 进不了前端产物）
 ├── core/                # 领域服务，不认识 HTTP
 │   ├── src/paths.ts     #   TENON_HOME 布局（唯一算路径的地方）
 │   ├── src/db.ts        #   node:sqlite + PRAGMA user_version 线性迁移
@@ -448,6 +483,8 @@ packages/
 │   ├── src/release.ts   # ★ 版本号 v<yyyy.MM.dd>-<n>（纯函数，同日递增；记录与 tag 一起参考避免撞号）
 │   ├── src/taskgraph.ts # ★ 任务图归一化：kind 去 pi. 前缀 / 会话派生回挂父节点 / 角色继承 / 按树序压平
 │   │                    #   + tasksNeedingRole（只挑"工具 task 且已拥有会话"的去查角色）
+│   ├── src/usage.ts     # ★ 用量算术：账本求和、本轮差值（夹到 0）、breached（>= 语义）/ levelOf
+│   ├── src/setting-keys.ts # 额度键 `budget.app.<appId>` + readBudget（读坏 / 负数一律当"不设限"）
 │   ├── src/secrets.ts   #   AES-256-GCM + 0600 密钥文件（桌面版换 safeStorage）
 │   └── src/stores/      #   apps / releases / settings / providers
 ├── agent/               # pi 生态的唯一入口（铁律 3 的落地点）
@@ -458,6 +495,8 @@ packages/
 │   ├── src/chat.ts      #   submit/stop/history/plan + watchEvents → SSE（40ms 合帧）
 │   ├── src/taskgraph.ts # ★ 每应用一个 watchTaskGraph（不轮询）→ 归一化 → taskgraph.update 推全量；
 │   │                    #   角色从 tool task 的 checkpoint.arguments 读一次并缓存
+│   ├── src/usage.ts     # ★ 每应用一份账：harness.usage() 读真值 → usage.update 推全量；
+│   │                    #   startTurn() 顺手判额度；读失败沿用上一次（不把应用锁死）
 │   ├── src/tools/coding.ts  # read/write/edit/bash ↔ pi-durable 的 adapter（DESIGN §4.3.1）
 │   ├── src/tools/search.ts  # ★ ls / glob / grep：纯 node:fs + 进程内正则（不用 pi 的会下载 rg/fd 的版本）
 │   ├── src/tools/subagent.ts # ★ 派活：真子会话 + 幂等复用 + 白名单；子会话里没有 subagent
@@ -524,6 +563,7 @@ apps/web/                # 渲染器：server 的纯客户端（DESIGN §14.6）
 ├── src/features/release/ReleaseDialog.tsx  # ★ 发布：说明写进 tag、成功后给路径与 git clone 命令、历史列表
 ├── src/features/diff/DiffPanel.tsx  # ★ 改动面板：覆盖在预览上（iframe 不卸载）、逐行着色、两步确认回滚
 ├── src/features/tasks/TaskGraphPanel.tsx  # ★ 任务条：实时看谁在跑；空闲时整个不渲染（图空=没人跑）
+├── src/features/usage/UsagePanel.tsx      # ★ 顶栏用量：账 + 额度表单；数字全来自服务端快照，前端不累加
 └── src/features/apps/   #   AppMenu / NewAppDialog（默认选能跑的那个模板）
 
 apps/desktop/            # Electron 壳：只做生命周期（DESIGN §2.2.1）
@@ -588,6 +628,11 @@ scripts/
 | **测试闸门不能等 `git.commit`** | 这一轮没有文件改动就不会产生提交，等它会一直挂到超时。等 `app.status: idle`（它在提交之后发）|
 | **`startGateway` 不传 `port` = HMR 永远不工作** | 端口是**先占后告诉**的：`findFreePorts` 占下 `gwPort` → 写进 `TENON_GATEWAY_PORT` → 模板用它做 `server.hmr.clientPort`。网关若自己再随机挑一个，浏览器就被指去那个没人监听的端口。**页面照常打开、日志干净、连 `url` 的探针也能连上**，只有热更新永远不来。断言要落在「`url` 的端口 === `gatewayPort`」 |
 | **`.bin/<cli>` 是 shell 包装，不能用 `node` 跑** | `spawn(process.execPath, ['.bin/tsx'])` 会得到 `SyntaxError: missing ) after argument list`（那是 `sh` 脚本）。要读包自己的 `package.json.bin` 拿 `.js/.mjs` 入口再交给 node —— `scripts/dev-web.ts` 的 `resolvePackageBin()` |
+| **`app.delete` 不能调 `chat.close()`** | `close()` 会把 `closed` 置上，那是**全局**开关 —— 之后所有应用的 `app.status` 都不再落库也不再推事件，界面永远转圈，日志里一个字都不报。删应用要用 `chat.detach(appId)`（只停这一个的 watcher / inflight / 合帧缓冲） |
+| **`faux` 的 `cost.total` 恒为 0** | 本地假模型不报价，但它**会**报 token。所以"只按美元做预算"在本地一条测试都验不了；反过来只按 token 又对不上真模型的账单。两个维度都要，且测试用 token 验 |
+| **用量不能在前端累加** | `pi.usage` 是**会话级**的：子 Agent 的花费记在它自己的会话里（父会话的事件流里根本没有），压缩摘要那次调用连 entry 都不产生。加上断线重连会按 `since` 重放事件，累加器还会把同一笔算两遍。真值只问 `harness.usage()` |
+| **进程开始关之后别再碰 harness** | 这一轮 settle 晚于 `close()` 时去读 `harness.usage()`，会把 sqlite 拽住 —— 症状不是报错，而是测试清理临时目录时 `ENOTEMPTY: directory not empty`。所有"收尾再做点什么"的地方都要先 `if (this.closed) return`（`commitTurn` 早就是这么写的） |
+| **`harness.usage()` 只给按模型/工具的聚合** | 想回答"哪个子角色花了多少"它答不了：子会话的账在它自己的桶里，聚合层看不见归属。要分摊只能自己扫会话读 `pi.usage` —— 现在没做，面板只报总数与按模型的账 |
 | **浏览器别 import `@tenon/protocol` 主入口** | 主入口的 `z.object(...)` 全在模块顶层求值，rollup 无法 tree-shake。实测 356KB → 256KB（146 → 48 个模块）。前端只 import `@tenon/protocol/browser` |
 | **flex 子项少了 `flex-1` 会静默塌成 0 高** | 两栏根节点是 `<section class="flex flex-col">` 的子项，不给增长就退回内容高度，里面的 `flex-1 overflow-y-auto` 连带塌掉。症状像"数据没回来"，DOM 里文字却都在 |
 | **默认模板不能取 `templates[0]`** | `blank` 排在最前（最简单），但建完是空目录 → 预览必然以「没有 package.json」失败，用户第一眼是红字。默认取 `react-vite`；`entry === null` 的模板不自动起预览 |
@@ -738,13 +783,13 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.16），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.17），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
 当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
-发布 push）；**M4 第 1、2 步已落地**（子 Agent 能派活 + 任务图面板）。下一步是 M4 第 3 步（用量与预算熔断），
-先看 §4.2 的 M4 表决定从哪块进。
-315 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:fullstack + 桌面包全绿。
+发布 push）；**M4 第 1、2、3 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断）。
+下一步是 M4 第 4 步（E2E 子 Agent 的预览工具，DoD ①），先看 §4.2 的 M4 表决定从哪块进。
+344 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:fullstack + 桌面包全绿。
 **欠账三笔**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接。

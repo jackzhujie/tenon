@@ -25,6 +25,7 @@ import {
   Release,
   TaskGraph,
   TemplateInfo,
+  UsageSnapshot,
 } from './domain.js'
 
 const Id = z.string().min(1)
@@ -226,6 +227,30 @@ export const rpcMethods = {
   'taskgraph.get': {
     input: z.object({ appId: Id }),
     output: z.object({ graph: TaskGraph }),
+  },
+
+  /**
+   * 现在这一刻的用量与额度（M4 第 3 步）。
+   *
+   * 前端在切应用 / SSE 重连之后拉一次，之后靠 `usage.update` 增量刷新。
+   * 真值来自 `harness.usage()`（会话账本），**跨重启不丢** —— 所以这个数
+   * 也是"这个应用一共花了多少"，不是"这次打开花了多少"。
+   */
+  'usage.get': {
+    input: z.object({ appId: Id }),
+    output: z.object({ snapshot: UsageSnapshot }),
+  },
+  /**
+   * 设额度。两个字段**每次都传**（空就是 `null` = 这条不设限），
+   * 不做"只传要改的那个"—— 半更新的语义在布尔/零值上会歧义（`0` 是关掉还是没改？）。
+   */
+  'budget.set': {
+    input: z.object({
+      appId: Id,
+      maxCostUsd: z.number().nonnegative().nullable().default(null),
+      maxTokens: z.number().int().nonnegative().nullable().default(null),
+    }),
+    output: z.object({ snapshot: UsageSnapshot }),
   },
 
   'files.tree': {

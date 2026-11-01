@@ -170,6 +170,65 @@ export const TaskGraph = z.object({
 })
 export type TaskGraph = z.infer<typeof TaskGraph>
 
+// ---------------------------------------------------------------- 用量与预算
+
+/**
+ * 一份用量计数（M4 第 3 步）。
+ *
+ * 单位是 token 与美元，**不折算**：用户的账单是按美元出的，token 是能对上
+ * 上下文窗口的那个数 —— 少报一个都会让"为什么这一轮这么贵"没法解释。
+ */
+export const UsageTotals = z.object({
+  input: z.number(),
+  output: z.number(),
+  cacheRead: z.number(),
+  cacheWrite: z.number(),
+  totalTokens: z.number(),
+  /** pi 的 `cost.total`。faux 恒为 0（本地假模型不报价），所以拦截不能只看钱 */
+  costUsd: z.number(),
+})
+export type UsageTotals = z.infer<typeof UsageTotals>
+
+/**
+ * 一个应用的额度。两个维度都可不设（`null` = 这条不设限），都不设就等于不拦。
+ *
+ * 为什么两个维度都要：真模型上只有钱有意义，而 `faux` 报 0 美元 —— 只设钱的话
+ * 本地一条测试都验不了熔断。反过来只设 token 又对不上用户看到的账单。
+ */
+export const Budget = z.object({
+  maxCostUsd: z.number().nonnegative().nullable(),
+  maxTokens: z.number().int().nonnegative().nullable(),
+})
+export type Budget = z.infer<typeof Budget>
+
+/** `over` = 顶到某条线（该拦了）；`warn` = 已用八成（还没拦，先让人看见） */
+export const UsageLevel = z.enum(['ok', 'warn', 'over'])
+export type UsageLevel = z.infer<typeof UsageLevel>
+
+export const BudgetDimension = z.enum(['cost', 'tokens'])
+export type BudgetDimension = z.infer<typeof BudgetDimension>
+
+/**
+ * 用量快照 —— **推全量**，跟任务图一个道理：几个数字，推增量要维护
+ * "哪个 delta 该加到哪个桶"的状态机，算错一次就长期显示错的余额。
+ */
+export const UsageSnapshot = z.object({
+  appId: z.string(),
+  /** 这个应用**所有会话**的累计（根会话 + 子 Agent + 压缩摘要），跨重启不丢 */
+  totals: UsageTotals,
+  /** `provider/modelId` → 各自的量。子 Agent 的花费记在它自己会话的桶里，已计入 `totals`，不在这一层 */
+  models: z.record(z.string(), UsageTotals),
+  /** 工具自身的花费（pi 的 `tools` 桶）。同样已计入 `totals` */
+  tools: z.record(z.string(), UsageTotals),
+  /** 当前这一轮的量（距本轮开始）。空闲时保留上一轮的，方便回答"刚才那道题花了多少" */
+  turn: UsageTotals,
+  budget: Budget,
+  level: UsageLevel,
+  /** 顶到的是哪条线（`over` 时才有值），拦截文案用它 */
+  exceeded: BudgetDimension.nullable(),
+})
+export type UsageSnapshot = z.infer<typeof UsageSnapshot>
+
 // ---------------------------------------------------------------- 预览
 
 /** 分维度就绪（DESIGN §9.2）：UI 按这几格显示进度，不要白屏 */

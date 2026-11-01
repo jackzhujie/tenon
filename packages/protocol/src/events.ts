@@ -8,7 +8,17 @@
  * - 心跳用 SSE 注释行 `: ping`，不占用 `seq`，也不污染事件缓冲
  */
 import { z } from 'zod'
-import { NormalizedMessage, PlanTaskStatus, AppStatus, LogEntry, PreviewStatus, Readiness, TaskGraph } from './domain.js'
+import {
+  NormalizedMessage,
+  PlanTaskStatus,
+  AppStatus,
+  BudgetDimension,
+  LogEntry,
+  PreviewStatus,
+  Readiness,
+  TaskGraph,
+  UsageSnapshot,
+} from './domain.js'
 
 const Seq = z.number().int().nonnegative()
 
@@ -61,14 +71,33 @@ export const TaskUpdateEvent = z.object({
   title: z.string().optional(),
 })
 
-export const UsageEvent = z.object({
-  type: z.literal('usage'),
+/**
+ * 用量变了（M4 第 3 步）。
+ *
+ * 取代了原来的逐条 `usage` 事件：那条带的是**单次响应**的量，前端要么自己累加
+ * （累加就会漏掉子 Agent 与压缩摘要，还会被重放事件加成两次），要么只用来显示
+ * "最后一句花了多少"。现在推的是**全量快照**，真值来自 `harness.usage()`
+ * （会话账本，跨重启不丢），四条消费路径（面板 / 拦截 / 预算编辑 / 首拉）看同一份数。
+ */
+export const UsageUpdateEvent = z.object({
+  type: z.literal('usage.update'),
   seq: Seq,
   appId: z.string(),
-  model: z.string(),
-  inputTokens: z.number(),
-  outputTokens: z.number(),
-  costUsd: z.number(),
+  snapshot: UsageSnapshot,
+})
+
+/**
+ * 这一轮被预算掐了。
+ *
+ * 单独一种事件而不是复用 `error`：这不是故障 —— 模型、工具、文件都没问题，
+ * 是我们主动停的。用 `error` 会让人去查日志找 bug，用这条能直接给出"调高上限还是算了"。
+ */
+export const BudgetExceededEvent = z.object({
+  type: z.literal('budget.exceeded'),
+  seq: Seq,
+  appId: z.string(),
+  snapshot: UsageSnapshot,
+  dimension: BudgetDimension,
 })
 
 export const AppStatusEvent = z.object({
@@ -159,7 +188,8 @@ export const SseEvent = z.discriminatedUnion('type', [
   ToolStartEvent,
   ToolOutputEvent,
   TaskUpdateEvent,
-  UsageEvent,
+  UsageUpdateEvent,
+  BudgetExceededEvent,
   AppStatusEvent,
   GitCommitEvent,
   PreviewReadyEvent,

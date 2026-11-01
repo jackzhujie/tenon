@@ -33,6 +33,7 @@ export const ErrorCode = z.enum([
 
   'AGENT_NO_MODEL',
   'AGENT_UNAVAILABLE',
+  'BUDGET_EXCEEDED',
 
   'TEMPLATE_UNKNOWN',
   'TEMPLATE_VAR_MISSING',
@@ -85,6 +86,8 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['GIT_DIRTY_WORKTREE', 409],
   ['AGENT_NO_MODEL', 409],
   ['AGENT_UNAVAILABLE', 503],
+  // 402 而不是 409：这不是"状态冲突，等等再试"，是"钱用完了，得先动预算"
+  ['BUDGET_EXCEEDED', 402],
   ['TEMPLATE_UNKNOWN', 404],
   ['TEMPLATE_VAR_MISSING', 500],
   ['TEMPLATE_VAR_LEFT', 500],

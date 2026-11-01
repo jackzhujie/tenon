@@ -45,4 +45,9 @@ export class SettingsStore {
     })
     return this.all()
   }
+
+  /** 删一条。目前只有「应用被删了，它的额度也该走」用得上 */
+  remove(key: string): void {
+    this.db.run('DELETE FROM settings WHERE key = ?', key)
+  }
 }

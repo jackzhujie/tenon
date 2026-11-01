@@ -1,3 +1,4 @@
+import type { Budget } from '@tenon/protocol'
 import type { SettingsStore } from './stores/settings.js'
 
 /** 产品级设置键（拼写集中在这里，避免各路由各写一份字符串） */
@@ -10,5 +11,35 @@ export const SETTING_KEYS = {
 } as const
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS]
+
+/**
+ * 预算按应用存：`budget.app.<appId>`。
+ *
+ * 为什么不放进 `SETTING_KEYS` 常量表：键里带 id，写不进那张常量表。
+ * 为什么按应用而不是全局：花超的永远是**某一个**应用的一轮（模型绕圈、反复读大文件）；
+ * 全局额度既解释不了"贵在哪"，也没法只停掉那一个。
+ * （代价是 N 个应用各有一个额度、没有总闸 —— 这条记在 DESIGN §5.6 的缺口里。）
+ */
+export function budgetKey(appId: string): string {
+  return `budget.app.${appId}`
+}
+
+/** 不设限的额度。没配过、或者配置被写坏时用它 */
+export const NO_BUDGET: Budget = { maxCostUsd: null, maxTokens: null }
+
+/** 读一个应用的额度。**任何异常都退回"不设限"** —— 读坏一格不该把应用锁死 */
+export function readBudget(settings: SettingsStore, appId: string): Budget {
+  const raw = settings.get<Partial<Budget>>(budgetKey(appId))
+  if (raw === null || typeof raw !== 'object') return NO_BUDGET
+  return {
+    maxCostUsd: positiveOrNull(raw.maxCostUsd),
+    maxTokens: positiveOrNull(raw.maxTokens),
+  }
+}
+
+/** 负数与 NaN 一律当"没设"：它们只会让比较永远成立，变成一个关不掉的应用 */
+function positiveOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
 
 export type { SettingsStore }

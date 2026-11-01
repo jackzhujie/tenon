@@ -3,7 +3,7 @@
 本地优先、可自托管的**对话式 AI 全栈应用搭建平台**（桌面 + Web 同构）。产品名 Tenon，作用域 `@tenon/*`。
 隐喻：应用靠标准组件咬合，Agent 只做设计。⚠️ `LM Studio` 是第三方名，全局改名须保护。
 
-**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 80 条**）；方案 `docs/DESIGN.md`（v1.2.16）。
+**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 80 条**）；方案 `docs/DESIGN.md`（v1.2.17）。
 这里只留「不知道就会走错方向」的，细节查 STATUS §5，别重复。
 
 ## 三条铁律
@@ -12,16 +12,18 @@
 3. **pi 全家与 PGlite 是实验性 API** → `save-exact` 锁版本 + adapter 包一层
 
 ## 状态（2026-11-01）
-M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1、2 步** → DESIGN **v1.2.16**。
+M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1、2、3 步** → DESIGN **v1.2.17**。
 八个包 + `apps/web`（渲染器）+ `apps/desktop`（壳）。
-全绿基线：typecheck 15 project / test **315** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
-e2e:diff **36** / e2e:release **32** / e2e:fullstack / smoke:desktop:packaged 8 / build:web 286KB。
+全绿基线：typecheck 15 project / test **344** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
+e2e:diff **36** / e2e:release **32** / e2e:fullstack / smoke:desktop:packaged 8 / build:web 293KB。
 M3 已通：定位注入 → 反查 → Alt+Click → 跨源回传 → 逐行差异 → 代码回滚 → 数据回滚 → 发布（tag + 本地裸库）。
 M4 第 1 步：**子 Agent 能派活**（`roles.ts` 是 1 主 + 5 子的唯一事实来源；`subagent` 建真子会话、
 只读白名单、递归从工具集上断；`explore`/`librarian` 可用，其余三角色待接工具）。
 M4 第 2 步：**任务图面板**（`watchTaskGraph` 逐帧 → 归一化 → SSE 推全量 → 预览下方任务条，DoD ②）。
-**下一步：M4 第 3 步 = 用量与预算熔断**（`harness.usage()` + 面板 + 超预算拦截，DoD ③）。
-欠账：Docker compose 产物、真远端 push、发布质量门禁、真模型下的"改样式自验"。
+M4 第 3 步：**用量与预算熔断**（`harness.usage()` 会话账本 → `usage.update` 推全量快照 + `budget.set`
+按应用设额度 → `submit` 402 拦 / 跑到一半超线 `budget.exceeded` + abort，DoD ③）。
+**下一步：M4 第 4 步 = E2E 子 Agent 的预览工具**（DoD ①），先看 §4.2 的 M4 表决定从哪块进。
+欠账：Docker compose 产物、真远端 push、发布质量门禁、真模型下的"改样式自验"、额度无跨应用总闸。
 
 ## 已定的架构选择（推翻要重做很多）
 - 两边都 **Fastify 5 + TS ESM**（server 与生成应用后端是 NestJS 11 + TypeORM + PG 方言）
@@ -52,6 +54,11 @@ M4 第 2 步：**任务图面板**（`watchTaskGraph` 逐帧 → 归一化 → S
 - **pi 的 `owner` 是任务树不是会话树**：子会话的 generation 没有 owner，"谁派了谁"看 `conversations`；
   角色只在 `getTask().state.checkpoint.arguments` 里，且 `phase:'execute'` 之后才写进去
 - **任务图静止即空**（节点被回收）：不能当派活历史，要历史看 `ConversationRecord.owner`
+- **用量绝不在前端累加**：子 Agent 的消耗不经过父会话事件流、压缩摘要连 entry 都没有 → 只认
+  `harness.usage()` 的全量快照（`usage.update` 推全量，逐条增量必然少一半）。熔断判 `>=` 不是 `>`
+  （否则"上限设 0"等于"不设限"）；pi 没有 pre-request 钩子，所以是"花超了就停"不是"预测着不发"
+- **`chat.close()` 是全局开关**：删一个应用会掐掉**所有**应用的 `app.status` → 删应用用 `chat.detach(appId)`；
+  且 `close()` 之后再读 `harness.usage()` 会拽住 sqlite（症状：测试清理临时目录 `ENOTEMPTY`）
 - **`.gitignore` 的 `release/` 会让 Tailwind 跳过 `features/release/`**（v4 不扫 gitignore 命中路径）
 
 ## 本机环境
@@ -62,3 +69,6 @@ Node v22.22.2 / pnpm 9.15.9。**所有命令都要** `env -u NODE_OPTIONS -u ELE
 `node_modules/.pnpm/electron@<ver>/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`。
 `docs/PI-CHEATSHEET.md` 是 pi 全生态真实 API，写代码前必查。`docs/reverse/`、`*.har` 仅内部研究，
 **clean-room 红线：不得搬运其代码 / 文案 / 提示词**。
+**改完前端必须重启 server 再截图**：它启动时把 `apps/web/dist` 读进内存，否则截到的是旧 UI
+（诊断法：量 `getComputedStyle(el).right`，别靠看截图猜）。临时截图脚本要从仓库根跑
+（`pnpm --filter <pkg> exec` 会把 `process.cwd()` 变成包目录，`webDir` 就解析错）。

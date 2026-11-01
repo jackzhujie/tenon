@@ -23,11 +23,12 @@ export * as gitops from './git.js'
 export * from './schema-change.js'
 export * from './release.js'
 export * from './taskgraph.js'
+export * from './usage.js'
 export * from './stores/apps.js'
 export * from './stores/providers.js'
 export * from './stores/releases.js'
 export * from './stores/settings.js'
-export { SETTING_KEYS } from './setting-keys.js'
+export { SETTING_KEYS, budgetKey, readBudget, NO_BUDGET } from './setting-keys.js'
 export type { SettingKey } from './setting-keys.js'
 
 export interface CoreServices {
