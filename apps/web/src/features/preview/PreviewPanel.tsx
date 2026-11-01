@@ -9,6 +9,7 @@ import {
   RestartIcon,
 } from '../../components/icons.js'
 import { cn } from '../../lib/cn.js'
+import { INSPECTOR_HASH_KEY } from '../../lib/selection.js'
 
 type StageState = Readiness['deps']
 
@@ -60,6 +61,8 @@ export interface PreviewPanelProps {
   appId: string | null
   preview: PreviewStatus | null
   fullscreen: boolean
+  /** 精调 inspector 的会话 token（拼进 iframe 的 hash，见 useInspectorSelection） */
+  inspectorToken: string | null
   onStart(restart?: boolean): void
   onToggleFullscreen(): void
 }
@@ -68,6 +71,7 @@ export function PreviewPanel({
   appId,
   preview,
   fullscreen,
+  inspectorToken,
   onStart,
   onToggleFullscreen,
 }: PreviewPanelProps) {
@@ -207,7 +211,11 @@ export function PreviewPanel({
            */
           <iframe
             key={reloadKey}
-            src={url}
+            /*
+             * token 走 hash 不走 query：query 会进网关与 dev server 的访问日志，
+             * hash 只在浏览器里存在。应用侧的 inspector 从 `location.hash` 读它。
+             */
+            src={inspectorToken === null ? url : `${url}#${INSPECTOR_HASH_KEY}=${inspectorToken}`}
             title="应用预览"
             className="size-full border-0 bg-white"
           />

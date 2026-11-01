@@ -28,26 +28,47 @@ import {
 const Id = z.string().min(1)
 const WhenBusy = z.enum(['follow-up', 'steer', 'reject'])
 
-/** 点选/框选上下文（DESIGN §10.2），M1 先留出形状，M3 才真正注入 */
+/**
+ * 点选/框选上下文（DESIGN §10.2）。
+ *
+ * `loc.kind` 的三档含义：
+ * - `usage`：用户**写这一行**的地方（callsite 命中），改这里就是改"我在这页这样用了它"
+ * - `element`：页面里的原生标签
+ * - `component-impl`：组件库实现内部 —— 改动影响全局，UI 上要提示
+ */
+export const SelectionLoc = z.object({
+  file: z.string().min(1),
+  line: z.number().int().positive(),
+  column: z.number().int().positive(),
+  kind: z.enum(['usage', 'element', 'component-impl']).default('element'),
+})
+export type SelectionLoc = z.infer<typeof SelectionLoc>
+
+export const SelectionImpl = z.object({
+  file: z.string().min(1),
+  line: z.number().int().positive(),
+  column: z.number().int().positive(),
+})
+
 export const SelectionContext = z.object({
   kind: z.enum(['element', 'region', 'error']),
   route: z.string().optional(),
-  loc: z
-    .object({
-      file: z.string(),
-      line: z.number(),
-      column: z.number(),
-      kind: z.enum(['element', 'callsite', 'component-impl']),
-    })
-    .optional(),
-  callsite: z
-    .object({ file: z.string(), line: z.number(), column: z.number() })
-    .optional(),
-  componentStack: z.array(z.string()).optional(),
-  text: z.string().optional(),
+  loc: SelectionLoc.optional(),
+  /** callsite 命中时的组件实现位置，供 Agent 判断改动影响面 */
+  impl: SelectionImpl.optional(),
+  selector: z.string().optional(),
   rect: z
     .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
     .optional(),
+  /** 元素文本，截断到 500 字（再多只是把 token 烧给噪声） */
+  text: z.string().max(500).optional(),
+  /** 只记与父级**不同**的关键样式，省得把整份 computed style 塞进上下文 */
+  styles: z.record(z.string(), z.string()).optional(),
+  elements: z
+    .array(z.object({ selector: z.string(), loc: SelectionLoc.optional() }))
+    .max(50)
+    .optional(),
+  viewport: z.object({ width: z.number(), height: z.number(), dpr: z.number() }).optional(),
 })
 export type SelectionContext = z.infer<typeof SelectionContext>
 

@@ -8,3 +8,4 @@
  */
 export * from './transport.js'
 export * from './event-names.js'
+export * from './selection-text.js'

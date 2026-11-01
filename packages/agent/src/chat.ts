@@ -11,7 +11,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { AgentEvent, AgentEventStream } from '@earendil-works/pi-durable'
 import { watchEvents } from '@earendil-works/pi-durable'
 import type { ChatSubmitInput, SseEventInput } from '@tenon/protocol'
-import { TenonError } from '@tenon/protocol'
+import { composeWithSelection, TenonError } from '@tenon/protocol'
 import type { AppStore, TenonHome } from '@tenon/core'
 import { appPaths, gitops } from '@tenon/core'
 import type { HarnessPool, RootConversation } from './harness-pool.js'
@@ -202,7 +202,13 @@ export class ChatService {
     this.options.model.primeTurn(input.content)
 
     const submission = await session.root.submit(
-      { type: 'input', content: input.content, requestId: input.requestId },
+      {
+        type: 'input',
+        // 点选上下文（DESIGN §10.3）拼在正文第一行 —— `pi-durable` 的 submit 只吃纯文本，
+        // 没有结构化附件入口。前端渲染用户气泡时用 `stripSelectionBlock` 把它剥掉。
+        content: composeWithSelection(input.content, input.selection),
+        requestId: input.requestId,
+      },
       ctx,
     )
     this.inflight.set(appId, submission)

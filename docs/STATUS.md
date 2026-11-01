@@ -1,9 +1,9 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 第 1~2 步**：187 个测试 + 9 项端到端冒烟 +
-> 16 项预览 e2e（含"编译期定位真的注入了"的硬断言）+ 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、
-> `pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 在做 inspector 交互**）
+> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 第 1~2 步**：226 个测试 + 9 项端到端冒烟 +
+> 16 项预览 e2e + 12 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、
+> `pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 前五步完成（点选链路通了）**）
 
 ---
 
@@ -18,18 +18,21 @@ Vite/Nest 子进程输出、页面异常（含堆栈）都汇进日志面板，�
 第 3 步把「要发布」的两块补齐了 —— **运行时 SDK**（异常上报 / 错误边界 / Nest 5xx 过滤器，源码分发进模板）
 与**跨档数据迁移**（`pglite → postgres` 纯 JS 逻辑拷贝，零二进制依赖）。
 
-**M3 已经开始了**：模板里的每个 JSX 现在都带着 `data-tenon-loc` / `data-tenon-callsite`
-（编译期 Babel 插件注入，只 dev 生效），`resolveTarget()` 能把点中的 DOM 反查回 `src/App.tsx:25:3`。
-下一步是把它变成「按住 Alt 点一下就能改」。
+**M3 前半段完成**：模板里的每个 JSX 都带着 `data-tenon-loc` / `data-tenon-callsite`（编译期注入，只 dev 生效）；
+在预览里**按住 Alt** 就能描边高亮，**Alt+点一下**把元素反查回 `src/App.tsx:25:3` 并跨源送回平台，
+Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Agent。整条链路在 Electron 的真 Chromium
+里跑通（`pnpm e2e:inspector` 12 项，父页面与网关**跨源**，token 与 origin 都是真校验）。
+下一步是 Diff 视图与回滚。
 
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 187 项单测 + 集成测试（约 83s，含 PGlite 冷启动）
+pnpm test                       # 226 项单测 + 集成测试（约 137s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
+pnpm e2e:inspector               # ★ 12 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
 pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁移 → Vite+Nest 双进程 → CRUD 经网关 → 重启后数据还在
 pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界面、退出后不留孤儿进程
@@ -178,10 +181,12 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 |---|---|---|---|
 | 1 | **编译期源码定位注入**：Babel 插件给原生标签标 `data-tenon-loc`、给组合组件标 `data-tenon-callsite`（callsite 优先，`loc` 留作 secondary）；只 dev 生效 | ✅ | `packages/runtime-sdk/src/vite/tenon-loc.ts` → 模板 `src/tenon-loc-plugin.ts` + `vite.config.ts` 的 `react({ babel: { plugins } })` |
 | 2 | **反查解析器**：DOM 元素 → `{file,line,column,kind}`，`kind` 区分 usage / element / component-impl，自身没属性向上找 | ✅ | `packages/runtime-sdk/src/browser/tenon-loc.ts` → 模板 `src/tenon-loc.ts` |
-| 3 | inspector 交互（Alt+Hover 高亮、Alt+Click 选中、Alt+Drag 框选、ESC 退出） | 待做 | 模板注入的客户端脚本 + `apps/web` 精调面板 |
-| 4 | `SelectionContext` + `postMessage` 回父窗口（校验 origin + 一次性 token） | 待做 | `packages/protocol` + `apps/web` |
-| 5 | Diff 视图（一轮改了什么，逐文件、逐 hunk） | 待做 | `apps/web` + `packages/core/src/git.ts` |
-| 6 | 回滚（`git revert` + 数据库快照回放，代码与数据一致） | 待做 | `packages/core` + `packages/db-provisioner` |
+| 3 | **inspector 交互**：Alt+Hover 描边+跟随标签、Alt+Click 选中、Alt+Drag 框选（只收最内层，上限 50）、ESC 退出；overlay `pointer-events:none`；capture 阶段吃掉 click | ✅ | `packages/runtime-sdk/src/browser/tenon-inspector.ts` → 模板 `src/tenon-inspector.ts`（dev 动态 import，生产被摇掉） |
+| 4 | **跨源回传**：iframe hash 带 token → `postMessage` → 父窗口校验 `origin` + `source` + `token` → Composer 顶部 chip → `chat.submit` 带上 `selection` | ✅ | `apps/web/src/lib/selection.ts`、`hooks/useInspectorSelection.ts`、`packages/protocol/src/selection-text.ts` |
+| 4.5 | **送到 Agent**：拼成 `[TENON-SELECTION] {json}` 首行（`pi-durable` 的 submit 只吃纯文本），渲染用户气泡时用 `stripSelectionBlock` 剥回原文 | ✅ 链路已通；"改样式并自验"仍需真模型（faux 做不到） | `packages/agent/src/chat.ts`、`MessageList.tsx` |
+| 5 | **真机 e2e**：Electron 开真 Chromium，父页面在**另一个源**，模拟 Alt+Click，用平台自己的校验函数过一遍 | ✅ | `scripts/e2e-inspector.ts`（`pnpm e2e:inspector`，12 项） |
+| 6 | Diff 视图（一轮改了什么，逐文件、逐 hunk） | 待做 | `apps/web` + `packages/core/src/git.ts` |
+| 7 | 回滚（`git revert` + 数据库快照回放，代码与数据一致） | 待做 | `packages/core` + `packages/db-provisioner` |
 
 ### 4.3 M1 验收（DoD）
 
@@ -248,28 +253,27 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 - [ ] **Docker compose 产物** —— ⛔ 阻塞：本机无 `docker`/`podman`/`colima`，无法"构建并跑起来"。
       DoD ④ 不能靠猜收口，故**不产出未验证的 Dockerfile**
 
-### 4.7 下一步具体做什么（M3 第 3 步：inspector 交互）
+### 4.7 下一步具体做什么（M3 第 6 步：Diff 视图与回滚）
 
-**M2 已收口**（第 8 步 Docker 产物按用户决定跳过，记为欠账）。M3 第 1、2 步已落地：
-模板里的 JSX 现在真的带着 `data-tenon-loc`（`pnpm e2e:preview` 里那条断言就是证据），
-`resolveTarget()` 能把点中的元素反查回源码行。**还差"能点"这一层**：
+M3 的前半段（定位 → 点选 → 回传 → 进对话）已经通了，`pnpm e2e:inspector` 在真 Chromium 里
+跑通 12 项。**还差"看得见改了什么、能退回去"**：
 
-1. **注入 inspector 客户端**（模板 `src/tenon-inspector.ts`，dev 才装，`main.tsx` 里挂）
-   - `Alt+Hover` 高亮 + 跟随标签（组件名 · `file:line` · 尺寸）
-   - `Alt+Click` 选中 → 收集 selector / rect / text / styles / props
-   - `Alt+Drag` 框选 → 矩形内的元素按面积排序
-   - `ESC` 退出检查模式
-2. **`SelectionContext` 回传**：`postMessage` 给父窗口（`apps/web`），
-   **必须校验 `event.origin` + 一次性 token**；父窗口写进对话上下文（DESIGN §10.2 / §10.3）
-3. **验收**：`pnpm e2e:preview` 加一段 —— 在页面里 `dispatchEvent` 模拟 Alt+Click，
-   断言父窗口收到的 `SelectionContext.loc.file` 是 `src/App.tsx`、行号落在 `<h1>` 那一行
+1. **Diff 视图**：`git.log` 已有每轮 commit，缺的是"这一轮改了哪几行"
+   - `packages/core/src/git.ts` 加 `git.diff({ appId, sha })`：用 isomorphic-git 的 `readBlob`
+     取 `sha` 与父提交的树，逐文件做行级 diff（**不要**拉 `git diff` 文本解析，node 侧没有 git 二进制）
+   - 协议加 `git.diff` RPC；`apps/web` 的提交列表点进去看逐文件 hunk（Monaco 的 diff editor 已在依赖里）
+2. **回滚**：`git revert`（不是 `reset --hard`）+ 数据库快照回放
+   - 快照已经在 `db-provisioner` 里有 `dumpDataDir` / `restoreDataDir` 的基础，
+     要对齐"这个 commit 时的库"：迁移执行过的 commit 才需要回放
+   - 验收：改一轮 → 回滚 → 代码与数据都回到那一轮之前，且**历史还在**（`revert` 产生新 commit）
+3. **截图**：`SelectionContext.screenshot` 字段留了但没填 —— 用 Electron 的 `capturePage`
+   或 iframe 里 `html2canvas` 都行，属于增强，卡在 3 之后做
 
-> 两个坑先说在前面：① inspector **只在 dev 装配**（和 Babel 插件同一个判断），生产产物里不该有它；
-> ② 高亮 overlay 必须 `pointer-events: none`，否则鼠标永远命中高亮层、再也点不到页面元素。
+> 一条现实约束：`faux` provider 只能验证链路，验证不了"点选后真的把样式改对了"。
+> M3 DoD ① 的最后一厘米要等有真模型 key 时手动过一遍，别在文档里写成已验证。
 
 > 已知欠账（有环境就能补）：Docker compose 产物（M2 第 8 步）；
-> `pglite → 真 PG` 的迁移端到端（逻辑已在 pglite→pglite 上验过，但真 PG 的 `information_schema`
-> 行为、云 PG 的权限差异还没实测）；`pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）。
+> `pglite → 真 PG` 的迁移端到端；`pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）。
 
 ### 4.8 代码地图（只列已落地的）
 
@@ -441,6 +445,12 @@ scripts/
 | **定位注入失效是"静默"的** | Babel 插件没挂上时页面照常打开、控制台干净、HMR 正常，只是点元素永远定位不到源码。所以 `pnpm e2e:preview` 里有一条硬断言：抓 `/src/App.tsx` 拿 Vite 吐的 JS，正则找 `data-tenon-loc": "src/App.tsx:行:列`。同理，这类"没生效但不报错"的机制必须有一条落在真实产物上的断言 |
 | **Babel 的列号是 0 起，行号是 1 起** | `loc.start.column` 直接写进属性会整体左移一格（编辑器打开能看出来，代码里看不出来）。注入时 `column + 1`，测试里专门有一条盯这个 |
 | **插件文件不能 import `@babel/core` 的类型** | 它要被拷进生成应用（源码分发），而模板刻意不装 `@babel/core`（`@vitejs/plugin-react` 自带 Babel），一 import 应用自己的 `tsc --noEmit` 就红。AST 形状在本地声明 + 运行时校验，一个 babel 包都不引；模板里传插件用 `as unknown as never[]` 过类型关 |
+| **inspector 是动态 import 装上去的，比首屏晚几十毫秒** | `main.tsx` 用 `if (import.meta.env.DEV) void import('./tenon-inspector')`，生产构建才摇得掉。副作用：页面渲染出来之后还有一小段时间「按 Alt 没反应」。真实用户碰不到，**但 e2e 会** —— 所以 `e2e:inspector` 必须先轮询 overlay 节点数再点击，否则得到的是假失败（我第一次就栽在这儿，白查了半天） |
+| **iframe 传 token 用 hash，不用 query** | query 会进网关与 dev server 的访问日志（等于把会话凭证写进日志）。hash 只在浏览器里存在。应用侧从 `location.hash` 读，`startsWith` 判断第一行即可 |
+| **`postMessage` 的 targetOrigin 只能写 `*`** | 子页面在网关源、父窗口在平台源，子页面**不知道父窗口是谁**，写死就等于永远发不出去。所以防护全部落在父窗口侧：`event.origin` + `data.source` + `data.token` 三道，缺一不可（`apps/web/src/lib/selection.ts`，纯函数，16 项测试） |
+| **`loc.file` 必须当成不可信输入** | 它会原样进 Agent 上下文。校验里明确拒掉绝对路径、`..`、盘符、反斜杠 —— 否则生成应用（用户和 Agent 都能改那份代码）发一条 `{loc:{file:"../../tenon.db"}}` 就等于给了一条"去读平台库"的指令注入 |
+| **overlay 必须 `pointer-events: none`** | 否则鼠标永远命中高亮层，`event.target` 永远是 overlay，"什么都选不中"。同理，选中那一下要在 **capture 阶段** `preventDefault + stopPropagation`，否则生成应用自己的 onClick 会跟着触发（按钮提交表单、链接跳走） |
+| **框选的元素上限要"先过滤再截断"** | `slice(0,50)` 写在过滤之前，塞几条垃圾进去就能把真元素挤掉。同理，框选只留**最内层**元素：把 `<main>` 这类容器交给 Agent 只会让它把改动面放大 |
 
 ---
 
@@ -459,7 +469,7 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：22 个测试文件（187 项，含迁移、runtime-sdk 与定位）
+pnpm test                  # vitest：25 个测试文件（226 项，含迁移、runtime-sdk、定位与点选校验）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
@@ -525,7 +535,7 @@ pnpm spike:loc      # 定位插件精度
 
 当前阶段：M2 全栈生成，第 1~3 步已完成（db-provisioner 两档供给 + nest-api 模板 + 双进程预览；
 日志/错误面板 + LogStore 三来源汇流；runtime-sdk 源码分发 + 跨档逻辑拷贝迁移）。
-187 个测试 + smoke 9 + e2e:preview 16 + e2e:fullstack（含日志与 Nest 过滤器断言）+ 桌面包全绿。
+226 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 12 + e2e:fullstack + 桌面包全绿。
 **M2 只剩 Docker compose 产物**（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）。
 有 Docker 环境后按 STATUS.md §4.7 补；否则直接进 M3（精调与版本：源码定位、框选、Diff、回滚）。
 `pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`。

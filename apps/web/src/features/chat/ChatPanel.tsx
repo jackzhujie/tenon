@@ -1,4 +1,4 @@
-import type { App, AppStatus, GitCommit, NormalizedMessage } from '@tenon/protocol'
+import type { App, AppStatus, GitCommit, NormalizedMessage, SelectionContext } from '@tenon/protocol'
 import { Composer } from './Composer.js'
 import { MessageList } from './MessageList.js'
 import type { LiveTurn } from '../../hooks/useWorkspace.js'
@@ -58,9 +58,11 @@ export interface ChatPanelProps {
   stream: StreamState
   submitting: boolean
   hasApps: boolean
+  selection: SelectionContext | null
   onSend(content: string): void
   onStop(): void
   onCreate(): void
+  onClearSelection(): void
 }
 
 export function ChatPanel({
@@ -72,9 +74,11 @@ export function ChatPanel({
   stream,
   submitting,
   hasApps,
+  selection,
   onSend,
   onStop,
   onCreate,
+  onClearSelection,
 }: ChatPanelProps) {
   if (!hasApps) return <EmptyState onCreate={onCreate} />
   if (app === null) return <NoAppSelected />
@@ -130,8 +134,10 @@ export function ChatPanel({
         disabled={app === null}
         submitting={submitting || status === 'running'}
         stream={stream}
+        selection={selection}
         onSend={onSend}
         onStop={onStop}
+        onClearSelection={onClearSelection}
       />
     </div>
   )

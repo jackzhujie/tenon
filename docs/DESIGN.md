@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.10
+# DESIGN.md — 详细方案设计 v1.2.11
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -1029,6 +1029,26 @@ Vite 插件 `tenon-inspector-plugin`（仅 dev 生效）做两件事：
 `vite.config.ts` 用 `react({ babel: { plugins: [[tenonLoc, { appRoot: import.meta.dirname }]] } })` 挂上，
 且只 `command === 'serve'` 才挂（生产产物不写源码路径）。
 
+**点选客户端（v1.2.11 落地）**：`packages/runtime-sdk/src/browser/tenon-inspector.ts`，同样源码分发进模板，
+由 `main.tsx` 在 `if (import.meta.env.DEV)` 里**动态 import**（生产构建才摇得掉）。
+Alt 按住进检查模式 → `event.target` 命中元素 → overlay 描边 + 跟随标签 → Alt+Click 组上下文 →
+`postMessage` 给父窗口。四条实测约束：
+
+- **overlay 必须 `pointer-events: none`**，否则鼠标永远命中 overlay 自己，"什么都选不中"
+- **选中那一下要在 capture 阶段 `preventDefault + stopPropagation`**，否则生成应用自己的 onClick 会跟着触发
+- **只走 `event.target`，不用 `document.elementFromPoint`**：后者在 jsdom 里没有实现，而 target 两边都有
+- **安装是异步的**（动态 import），比首屏晚几十毫秒 —— 真实用户碰不到，e2e 必须先轮询 overlay 节点再点击
+
+传输设计：token 由父窗口生成、经 **iframe 的 hash** 下发（`#tenon-inspector=<token>`；query 会进访问日志），
+子页面 `postMessage(msg, '*')` —— **targetOrigin 只能写 `*`**，因为子页面在网关源、不知道父窗口是谁。
+防护因此全部落在父窗口侧（`apps/web/src/lib/selection.ts`）：`event.origin` + `data.source` + `data.token` 三道，
+并且把 `loc.file` 当**不可信输入**（拒绝对路径 / `..` / 盘符）—— 它会原样进 Agent 上下文，
+一条 `{"loc":{"file":"../../tenon.db"}}` 就是指令注入。
+
+**送进模型**：`pi-durable` 的 `submit()` 只吃纯文本，没有结构化附件入口。所以 `chat.ts` 把上下文压成
+首行 `[TENON-SELECTION] {json}`（`packages/protocol/src/selection-text.ts` 的 `composeWithSelection`），
+渲染用户气泡时再用 `stripSelectionBlock` 剥回原文 —— 两个函数成对使用，往返恒等有测试锁住。
+
 三个约束是实测撞出来的：
 - **插件文件不许 import `@babel/core` 的类型** —— 模板里没有这个包（Babel 由 `@vitejs/plugin-react` 自带），
   一 import 应用自己的 `tsc --noEmit` 就红。AST 形状在本地声明 + 运行时校验，一个 babel 包都不引
@@ -1516,11 +1536,12 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > 无法实测就不产出未验证的 Dockerfile；`templates/nest-api` 的 `Dockerfile` 与 `compose.yml` 记为已知欠账，
 > 进 M3 之前不补。真 PG 端到端同理）。**M2 其余 DoD 均有实测。**
 
-> **M3 进度（v1.2.10，2026-11-01）**：第 1 步「编译期源码定位注入」与第 2 步「反查解析器」已落地 ——
-> 模板 JSX 带 `data-tenon-loc` / `data-tenon-callsite`（`pnpm e2e:preview` 断言真实转译产物），
-> `resolveTarget()` 把 DOM 元素反查为 `{file,line,column,kind}`（callsite 优先、组件库标 `component-impl`）。
-> **下一步是第 3 步 inspector 交互**：Alt+Hover 高亮 / Alt+Click 选中 / Alt+Drag 框选 / ESC 退出，
-> 以及 `SelectionContext` 经 `postMessage`（校验 origin + 一次性 token）回到 `apps/web`。
+> **M3 进度（v1.2.11，2026-11-01）**：前五步落地 —— ① 编译期注入 `data-tenon-loc` / `data-tenon-callsite`；
+> ② `resolveTarget()` 反查；③ inspector 交互（Alt+Hover 描边、Alt+Click 选中、Alt+Drag 框选只收最内层、ESC 退出）；
+> ④ 跨源回传（hash 带 token + 父窗口三道校验 + Composer chip + `chat.submit` 带 `selection`）；
+> ⑤ 真机 e2e（`pnpm e2e:inspector`，Electron 真 Chromium，父页面与网关跨源，12 项）。
+> **下一步：Diff 视图与回滚**（`git.diff` 用 isomorphic-git 的 `readBlob` 逐文件做行级 diff，不解析 `git diff` 文本 ——
+> node 侧没有 git 二进制）。M3 DoD ① 的"改样式并自验"要等真模型 key 才能验，`faux` 只能验链路。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 

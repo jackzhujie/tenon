@@ -19,6 +19,7 @@ import type {
   LogEntry,
   NormalizedMessage,
   PreviewStatus,
+  SelectionContext,
   SseEvent,
   TemplateInfo,
 } from '@tenon/protocol'
@@ -63,6 +64,8 @@ interface State {
   commits: GitCommit[]
   /** 运行日志（错误面板）。跟 `app.log` 事件增量 + `logs.list` 首拉 */
   logs: LogEntry[]
+  /** 精调：从预览里点选的元素/区域。提交时一并交给 Agent，提交后清掉 */
+  selection: SelectionContext | null
   stream: StreamState
   usage: UsageInfo | null
   model: ActiveModel | null
@@ -83,6 +86,7 @@ const initialState: State = {
   preview: null,
   commits: [],
   logs: [],
+  selection: null,
   stream: 'stopped',
   usage: null,
   model: null,
@@ -106,6 +110,7 @@ type Action =
   | { kind: 'logs'; logs: LogEntry[] }
   | { kind: 'logs.clear' }
   | { kind: 'preview'; preview: PreviewStatus | null }
+  | { kind: 'selection'; selection: SelectionContext | null }
   | { kind: 'optimistic'; message: NormalizedMessage }
   | { kind: 'submit.start' }
   | { kind: 'submit.done' }
@@ -292,6 +297,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, logs: [] }
     case 'preview':
       return { ...state, preview: action.preview }
+    case 'selection':
+      return { ...state, selection: action.selection }
     case 'optimistic':
       return { ...state, messages: [...state.messages, action.message], submitting: true, error: null }
     case 'submit.start':
@@ -331,6 +338,7 @@ export interface Workspace {
   stop(): Promise<void>
   startPreview(restart?: boolean): Promise<void>
   clearLogs(): Promise<void>
+  setSelection(selection: SelectionContext | null): void
   clearError(): void
 }
 
@@ -339,6 +347,9 @@ export function useWorkspace(): Workspace {
   const streamRef = useRef<EventStream | null>(null)
   const activeAppIdRef = useRef<string | null>(null)
   activeAppIdRef.current = state.activeAppId
+  // 同理由：submit 是 useCallback([]) 的，读 state.selection 会拿到首次渲染的闭包
+  const selectionRef = useRef<SelectionContext | null>(null)
+  selectionRef.current = state.selection
   // 同样的道理：回调里要读模板清单判断「这个模板能不能跑」，但不想让它进依赖数组
   const templatesRef = useRef<TemplateInfo[]>([])
   templatesRef.current = state.templates
@@ -521,6 +532,7 @@ export function useWorkspace(): Workspace {
     if (appId === null) return
     const text = content.trim()
     if (text === '') return
+    const selection = selectionRef.current
 
     const requestId = newRequestId()
     // 乐观插入：服务端不为用户 entry 推 `message.end`，不插就得等下一轮历史刷新才看得到自己说的话
@@ -536,7 +548,14 @@ export function useWorkspace(): Workspace {
     })
 
     try {
-      await rpc('chat.submit', { appId, content: text, requestId })
+      await rpc('chat.submit', {
+        appId,
+        content: text,
+        requestId,
+        ...(selection === null ? {} : { selection }),
+      })
+      // 点选上下文是"这一轮"的，发出去就消耗掉；留着会让下一轮莫名其妙带上前一个元素
+      if (selection !== null) dispatch({ kind: 'selection', selection: null })
     } catch (err) {
       dispatch({ kind: 'error', message: messageOf(err) })
     }
@@ -576,6 +595,11 @@ export function useWorkspace(): Workspace {
 
   const clearError = useCallback(() => dispatch({ kind: 'error', message: null }), [])
 
+  const setSelection = useCallback(
+    (selection: SelectionContext | null) => dispatch({ kind: 'selection', selection }),
+    [],
+  )
+
   const activeApp = useMemo(
     () => state.apps.find((app) => app.id === state.activeAppId) ?? null,
     [state.apps, state.activeAppId],
@@ -592,5 +616,6 @@ export function useWorkspace(): Workspace {
     startPreview,
     clearLogs,
     clearError,
+    setSelection,
   }
 }

@@ -1,16 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../../components/ui/Button.js'
+import type { SelectionContext } from '@tenon/protocol'
+import { selectionLabel } from '../../lib/selection.js'
 import type { StreamState } from '../../lib/stream.js'
 
 export interface ComposerProps {
   disabled: boolean
   submitting: boolean
   stream: StreamState
+  /** 从预览里点选的元素/区域；非空时在输入框上方显示一个可删除的 chip */
+  selection: SelectionContext | null
   onSend(content: string): void
   onStop(): void
+  onClearSelection(): void
 }
 
-export function Composer({ disabled, submitting, stream, onSend, onStop }: ComposerProps) {
+export function Composer({
+  disabled,
+  submitting,
+  stream,
+  selection,
+  onSend,
+  onStop,
+  onClearSelection,
+}: ComposerProps) {
   const [value, setValue] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   /** IME 组合中按 Enter 是「确认候选词」，不是「发送」。中文输入必须挡住这一下 */
@@ -42,6 +55,23 @@ export function Composer({ disabled, submitting, stream, onSend, onStop }: Compo
     <div className="border-t border-line-soft bg-panel/60 px-4 py-3">
       <div className="mx-auto max-w-3xl">
         <div className="rounded-xl border border-line bg-panel-2 px-3 py-2 focus-within:border-brand/40">
+          {selection !== null && (
+            <div className="mb-1.5 flex items-center gap-2 border-b border-line-soft pb-1.5">
+              <span className="flex max-w-full items-center gap-1.5 rounded-md bg-brand-dim/70 px-1.5 py-0.5 text-[11px] text-brand-soft">
+                <span className="shrink-0">◱</span>
+                <span className="truncate font-mono">{selectionLabel(selection)}</span>
+                <button
+                  type="button"
+                  title="不带这个上下文"
+                  onClick={onClearSelection}
+                  className="shrink-0 text-brand-soft/60 hover:text-brand-soft"
+                >
+                  ✕
+                </button>
+              </span>
+              <span className="truncate text-[10.5px] text-faint">这一轮会带上它</span>
+            </div>
+          )}
           <textarea
             ref={ref}
             value={value}

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MessagePart, NormalizedMessage } from '@tenon/protocol'
+// 只从零依赖子路径拿：主入口会把整张 zod 校验表拖进前端产物
+import { stripSelectionBlock } from '@tenon/protocol/browser'
 import { TextBlock } from '../../components/TextBlock.js'
 import { cn } from '../../lib/cn.js'
 import type { LiveTurn, ToolActivity } from '../../hooks/useWorkspace.js'
@@ -72,11 +74,21 @@ function partToActivity(part: Extract<MessagePart, { type: 'tool' }>): ToolActiv
   }
 }
 
-function Parts({ parts }: { parts: MessagePart[] }) {
+/**
+ * `withSelection` 只在**用户消息**上为 true。
+ *
+ * 服务端会把点选上下文拼在正文第一行发给 Agent（`[TENON-SELECTION] {...}`），
+ * 这行是给模型看的，不该出现在用户气泡里 —— 但界面上要让用户知道"这一轮带了什么"，
+ * 所以 Composer 顶部的 chip 才是那件事的呈现方式（发送后清空，历史里靠气泡上的 chip）。
+ */
+function Parts({ parts, withSelection = false }: { parts: MessagePart[]; withSelection?: boolean }) {
   return (
     <div className="flex flex-col gap-1.5">
       {parts.map((part, index) => {
-        if (part.type === 'text') return <TextBlock key={index} text={part.text} />
+        if (part.type === 'text') {
+          const text = withSelection ? stripSelectionBlock(part.text) : part.text
+          return text === '' ? null : <TextBlock key={index} text={text} />
+        }
         if (part.type === 'tool') return <ToolCard key={part.toolCallId} activity={partToActivity(part)} />
         if (part.type === 'error') {
           return (
@@ -116,7 +128,7 @@ function Bubble({ message }: { message: NormalizedMessage }) {
             : 'bg-panel-2 text-ink ring-1 ring-line-soft',
         )}
       >
-        <Parts parts={message.parts} />
+        <Parts parts={message.parts} withSelection={isUser} />
       </div>
     </div>
   )

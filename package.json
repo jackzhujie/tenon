@@ -29,6 +29,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "e2e:preview": "tsx scripts/e2e-preview.ts",
     "e2e:fullstack": "tsx scripts/e2e-fullstack.ts",
+    "e2e:inspector": "tsx scripts/e2e-inspector.ts",
     "clean": "rm -rf node_modules **/node_modules"
   },
   "devDependencies": {

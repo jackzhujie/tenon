@@ -12,11 +12,12 @@
 3. **pi 全家与 PGlite 是实验性 API** → `save-exact` 锁版本 + adapter 包一层
 
 ## 状态（2026-11-01）
-M1 九步全完成 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ **M3 第 1~2 步** → DESIGN **v1.2.10**。
+M1 九步全完成 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ **M3 前五步** → DESIGN **v1.2.11**。
 八个包 + `apps/web`（渲染器）+ `apps/desktop`（壳）。
-全绿基线：`pnpm typecheck` 15 project / `pnpm test` **187 项** / `smoke` 9 / `e2e:preview` **16** / `e2e:fullstack` / `smoke:desktop:packaged` 8。
-M3 已落地：JSX 编译期注入 `data-tenon-loc` / `data-tenon-callsite`（Babel 插件，源码分发进模板，只 dev 生效）
-+ `resolveTarget()` 反查。**下一步 M3 第 3 步：inspector 交互（Alt+Click / 框选 / SelectionContext 回传）**。
+全绿基线：`pnpm typecheck` 15 project / `pnpm test` **226 项** / `smoke` 9 / `e2e:preview` **16** / `e2e:inspector` **12** / `e2e:fullstack` / `smoke:desktop:packaged` 8。
+M3 已通：JSX 编译期注入 `data-tenon-loc`（Babel 插件）→ `resolveTarget()` 反查 → Alt+Click 点选
+→ 跨源 `postMessage`（hash token + 父窗口三道校验）→ Composer chip → `chat.submit.selection`。
+**下一步 M3 第 6 步：Diff 视图（`git.diff` 用 isomorphic-git `readBlob`，不解析 git 文本）+ 回滚**。
 Docker compose 产物 ⏸ 欠账（本机无容器运行时，不产出未验证的 Dockerfile）。
 
 ## 已定的架构选择（推翻要重做很多）

@@ -5,6 +5,7 @@ import { PreviewPanel } from '../features/preview/PreviewPanel.js'
 import { LogPanel } from '../features/logs/LogPanel.js'
 import { NewAppDialog } from '../features/apps/NewAppDialog.js'
 import { useWorkspace } from '../hooks/useWorkspace.js'
+import { useInspectorSelection } from '../hooks/useInspectorSelection.js'
 import { cn } from '../lib/cn.js'
 
 function BootScreen({ label }: { label: string }) {
@@ -42,6 +43,8 @@ export function App() {
   const { state } = workspace
   const [creating, setCreating] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
+  // 预览里"按住 Alt 点一下"选中的东西，从 iframe 发回来（跨源，靠 origin + token 认）
+  const inspectorToken = useInspectorSelection(state.preview, workspace.setSelection)
 
   if (state.booting) {
     return (
@@ -78,9 +81,11 @@ export function App() {
             stream={state.stream}
             submitting={state.submitting}
             hasApps={state.apps.length > 0}
+            selection={state.selection}
             onSend={(content) => void workspace.submit(content)}
             onStop={() => void workspace.stop()}
             onCreate={() => setCreating(true)}
+            onClearSelection={() => workspace.setSelection(null)}
           />
         </section>
 
@@ -89,6 +94,7 @@ export function App() {
             appId={state.activeAppId}
             preview={state.preview}
             fullscreen={fullscreen}
+            inspectorToken={inspectorToken}
             onStart={(restart) => void workspace.startPreview(restart)}
             onToggleFullscreen={() => setFullscreen((value) => !value)}
           />
