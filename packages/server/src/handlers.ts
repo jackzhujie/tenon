@@ -18,6 +18,7 @@ import {
   readBudget,
 } from '@tenon/core'
 import { ASSEMBLY_FILE, buildPlan, listAvailable, type PluginRoot } from '@tenon/component-host'
+import type { ComponentRuntime } from './components.js'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { listTemplates } from '@tenon/generator'
@@ -31,6 +32,8 @@ export interface ServerDeps {
   core: CoreServices
   agent: AgentRuntime
   preview: PreviewManager
+  /** 组件宿主（M5 第 3 步）：应用一运行就把它的 server facet 挂起来 */
+  components: ComponentRuntime
   bus: SseBus
   version: string
   /**
@@ -169,7 +172,18 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'preview.start': async (input) => {
       core.apps.require(input.appId)
-      return { preview: await preview.start(input.appId, { restart: input.restart }) }
+      const started = await preview.start(input.appId, { restart: input.restart })
+      /*
+       * 组件挂载**在预览起来之后**做，且不等它：
+       * 预览能不能打开是用户第一眼要看的东西，而组件加载再快也要 import 一堆代码。
+       * 失败也不影响这次返回 —— 装不上的原因会进 `component.list` 的 problems。
+       */
+      void deps.components.ensure(input.appId).catch((error: unknown) => {
+        process.stderr.write(
+          `[components] ${input.appId} 激活失败：${error instanceof Error ? error.message : String(error)}\n`,
+        )
+      })
+      return { preview: started }
     },
 
     'preview.stop': async (input) => ({ preview: await preview.stop(input.appId) }),

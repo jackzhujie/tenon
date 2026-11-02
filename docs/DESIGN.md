@@ -1,4 +1,4 @@
-# DESIGN.md — 详细方案设计 v1.2.24
+# DESIGN.md — 详细方案设计 v1.2.25
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
 > 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。 + **v1.2.17 补充（M4 第 3 步用量与预算：`harness.usage()` 是**会话账本**，跨重启不丢、且天然把子 Agent 与压缩摘要算进去 —— 前端累加必然少一半，所以逐条 `usage` 事件换成了全量的 `usage.update`；熔断不是"预测下一笔"，pi 没有 pre-request 钩子，只能"花超了就停" —— §5.6）**。 + **v1.2.18 补充（M4 第 4 步 e2e 子 Agent 的预览工具：**不新起浏览器，让页面反连回来领命令** —— 网关往 HTML 注一行脚本 + HTTP 长轮询（`upgrade` 要原样透传给 Vite，自己再握手必坏）；`sessionId` 存 `sessionStorage` 才能跨整页重载；刷新只重投幂等命令；注入时 `content-length` 与 `transfer-encoding` 必须**一起**处理；扩展必须既 `registry.install` 又进会话的 `extensions`，否则工具"不存在"且不报错 —— §5.7）**。 + **v1.2.19 补充（M4 第 5 步 Reviewer：评审的对象是**工作区**不是提交（一轮收尾才 commit，看提交等于永远看上一版）；工作区差异不能走 `git.statusMatrix`；`typecheck` 的判据是「跑完了 + 没诊断」，缺 `node_modules` / 缺 tsconfig / 超时都必须说"没跑成"而**不能**说"通过"；`scrubEnv` 会删掉 `ELECTRON_RUN_AS_NODE`，桌面版里跑 `tsc` 得把它显式补回来 —— §5.8）**。 + **v1.2.20 补充（M4 第 6 步 CodeAct：能力边界是**三层**不是一层提示词 —— 会话的 `tools`、工具的 `callers`、`modelTools` 子集；不设 `modelTools` 模型就绕过脚本直读；脚本里 `tools.write` 调不动是因为它根本没被注进沙箱；`CodemodeSandbox` 按 `import.meta.url` 找 wasm 与 worker，**打包成功不等于能跑** —— §5.9）**。 + **v1.2.21 补充（M4 第 7 步发布门禁：判据是**三态**不是布尔 —— `skip`（这个应用没有那项检查）不拦、`fail`（该检查的没检查成功）必拦，混成一个 `false` 会让「没配测试」和「测试挂了」同罪；「没跑成」算 `fail` 不算 `skip`，否则删掉 `node_modules` 就能绕过门禁；用户 `force` 时**仍然跑检查**，只影响拦不拦 —— §5.10）**。 + **v1.2.22 补充（发布预检：`release.check` 只读地回答「能不能发」，与 `publish` 共用 `inspectRelease`；前提不满足时**不跑门禁**；`stale` 用前后两次 HEAD 判定 —— 过期的「通过」比不检查更糟；**不缓存**，点发布会再跑一遍 —— §5.11）**。 + **v1.2.23 补充（M5 前置 spike：chord 的对象默认 `lifetime: "referenced"` —— 最后一个引用释放就连 state 一起销毁且**不报错**，组件必须显式 `linger`；链路静默丢帧时调用会**挂住**而不是抛错，web facet 的每个调用都要自带超时；`in` 判断变体无效（Ref 是代理），验权限只能真调一次认 `not_in_variant`；chord 可与 server 同打包（726KB），不必像 pi-codemode 那样外部化 —— §21.2 / §21.3 / §21.5）**。 + **v1.2.24 补充（M5 第 2 步组件加载器：`mount` 不再写 `host`，**插槽决定宿主**（`app.api` 必在 server，其余必在 web）—— 让声明自己写只会多出一种错法；解析是**覆盖层**（`hub > bundled`，先看根再看版本），按"全局最高版本"选会让内置版盖掉热修；每条装配条目**独立判定**、失败只落一条 problem（19 个稳定 code），`component.list` 恒 200 —— 插件页要能说清"它为什么装不上"；`minTenonVersion` 对 `0.0.0`（开发构建）恒通过，代价是开发态测不出写错 —— §21.3）**。
@@ -2276,6 +2276,33 @@ export const AiAssistant = remote('tenon.assistant', {
   },
 })
 ```
+
+**facet 的 ABI（M5 第 3 步定下）**：server facet 必须导出
+
+```ts
+export function activate(input: {
+  host: Host<Principal>   // chord 宿主；名字必须与契约的 hostNamed(...) 一致
+  appId: string
+  brain: { complete(input: { appId: string; text: string }): Promise<string> } // 宿主注入的模型能力
+  log: (line: string) => void
+}): void | Promise<void>
+```
+
+宿主**只交给组件它真正需要的东西**：没有文件系统、没有网络、没有数据库句柄。于是
+`manifest.permissions` 是"它被允许用什么的声明"，而真正能用的能力由宿主注入决定 --
+两者都在 `packages/server/src/components.ts` 里看得见，不需要审计插件源码。
+
+三条**当场抛错**的约束（都是实测）：
+
+| 约束 | 违反的表现 |
+|---|---|
+| 状态字段不能叫 `status` / `error` / `variant` / `ready` / `shape` / `release` / `then` / `contract` | 定义契约那一刻抛 `member name is reserved`（那是 chord Ref 自己的成员）|
+| host 的 `name` 必须等于契约里的 `hostNamed(...)`（这里是 `'server'`）| `serve` 抛「declared for server, but <别的名字> serves it」|
+| 无参方法的实现签名是 `(ctx)`，不是 `(args, ctx)` | 类型检查报错（不静默），见 Spike 5 |
+
+**状态里放整份对话，而不是一条条事件**：chord 的状态是可观察 JSON，订阅者拿到快照 + 增量。
+把 `messages` 放进 state，浏览器刷新/断线重连之后界面自己就能复原，不需要"重放历史"这套东西。
+反过来用一次性返回值的话，刷新即丢。
 
 **关键点：收费不是"前端藏按钮"，是服务端根本不下发方法。** 未购买的用户即使改了前端代码，`ask` 也不存在。这是 chord `principal` 白送的安全性，比任何前端开关都可靠。
 

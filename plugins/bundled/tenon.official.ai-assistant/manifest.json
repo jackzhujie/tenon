@@ -1,0 +1,18 @@
+{
+  "id": "tenon.official.ai-assistant",
+  "name": "AI 小助手",
+  "version": "1.0.0",
+  "description": "在应用里放一个会聊天的助手：它读得懂这个应用，回答写在对话里，不碰代码",
+  "source": "bundled",
+  "minTenonVersion": "0.0.0",
+  "signature": null,
+  "permissions": [],
+  "agentHints": "这个应用已经装了「AI 小助手」（组件 id: tenon.official.ai-assistant）。它给最终用户用，不是你改页面的工具：不要自己写聊天框，也不要改它的 facet 文件。要调整它的位置或开关，改 app.components.json 里的 mount；要卸载，删掉这一条装配声明。它没有工具、不会改代码、不会提交。",
+  "pricing": {
+    "type": "free"
+  },
+  "facets": {
+    "server": "server.js"
+  },
+  "slots": []
+}

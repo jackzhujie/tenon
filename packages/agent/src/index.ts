@@ -16,6 +16,7 @@ import type { SseEventInput } from '@tenon/protocol'
 
 export * from './context.js'
 export * from './models.js'
+export * from './assistant.js'
 export * from './harness-pool.js'
 export * from './normalize.js'
 export * from './docs.js'

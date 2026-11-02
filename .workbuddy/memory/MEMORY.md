@@ -3,7 +3,7 @@
 本地优先、可自托管的**对话式 AI 全栈应用搭建平台**（桌面 + Web 同构）。产品名 Tenon，作用域 `@tenon/*`。
 隐喻：应用靠标准组件咬合，Agent 只做设计。⚠️ `LM Studio` 是第三方名，全局改名须保护。
 
-**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 146 条**）；方案 `docs/DESIGN.md`（v1.2.24）。
+**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 149 条**）；方案 `docs/DESIGN.md`（v1.2.25）。
 这里只留「不知道就会走错方向」的，细节查 STATUS §5，别重复。
 
 ## 三条铁律
@@ -12,9 +12,9 @@
 3. **pi 全家与 PGlite 是实验性 API** → `save-exact` 锁版本 + adapter 包一层
 
 ## 状态（2026-11-02）
-M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–7 步 + M5 第 1–2 步** → DESIGN **v1.2.24**。
+M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–7 步 + M5 第 1–3a 步** → DESIGN **v1.2.25**。
 九个包 + `apps/web`（渲染器）+ `apps/desktop`（壳）。
-全绿基线：typecheck 17 project / test **509** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
+全绿基线：typecheck 18 project / test **518** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
 e2e:diff **36** / e2e:release **44** / **e2e:e2e 9** / e2e:fullstack / **spike:chord 10** /
 smoke:desktop:packaged 8 / build:web 299KB。
 M3 已通：定位注入 → 反查 → Alt+Click → 跨源回传 → 逐行差异 → 代码回滚 → 数据回滚 → 发布（tag + 本地裸库）。
@@ -42,7 +42,11 @@ M4 第 7 步：**发布前质量门禁**（`checks.ts` 的 `runTypecheck`/`runTe
 **M5 第 2 步：组件加载器**（新包 `packages/component-host`，`plugins/bundled/`，`component.list`）。
 清单校验 + `app.components.json`（原子写）+ 覆盖层解析（hub > bundled，认平铺与 `<id>/<version>/`）+
 加载计划（19 个 problem code、依赖拓扑、成环、前缀冲突）+ 桌面打包链路（`TENON_PLUGINS_DIR`）。
-**下一步：M5 第 3 步 —— 第一个真组件（AI 小助手：contract + server facet + web facet + 插槽渲染）**（八步表在 §4.2）。
+**M5 第 3 步 a：第一个真组件的服务端半边**（`plugins/bundled/tenon.official.ai-assistant/`：contract +
+server facet + manifest；`scripts/build-plugins.ts` esbuild 打单文件 410KB，产物不进 git、`pretest` 先建；
+`packages/server/src/components.ts` 按 `plan.targets` 动态 import + activate，preview.start 后异步激活；
+`packages/agent/src/assistant.ts` 给组件注入模型能力：ownerless + **空工具集**会话，复用 subagent 的原语）。
+**下一步：3b —— 界面半边**（web facet + 网关拦 `/_tenon/component` 的 upgrade → `webSocketLink` → `host.accept` + 插槽渲染）。
 欠账：Docker compose 产物、真远端 push、真模型下的"改样式自验"、额度无跨应用总闸、
 用量答不了"哪个角色花了多少"、`lint` 未接（模板没 eslint 配置）、
 脚本能用 `// @options: timeout_ms` 放大沙箱默认超时、主界面没有"当前能不能发"的指示。
@@ -134,6 +138,12 @@ M4 第 7 步：**发布前质量门禁**（`checks.ts` 的 `runTypecheck`/`runTe
 - **装配声明逐条独立判定**：一条坏只落一条 problem，其余照常加载。整份拒 = 用户以为组件全被卸载
 - **装不上要 problem 不要 500**：`component.list` 恒 200，19 个稳定 code 让界面能说"它要求 ≥1.4.0，你是 1.2.0"
 - **`minTenonVersion` 对 `0.0.0` 恒通过**（开发树比任何发布版都新）；代价是开发态测不出写错，真实分支单独测
+- **契约里的状态字段不能叫 `status`/`error`/`variant`/`ready`/`shape`/`release`/`then`/`contract`**：
+  那是 chord Ref 自带成员，撞名在**定义契约那一刻**抛 `member name is reserved`（AI 小助手叫 `phase`）
+- **chord host 的 `name` 必须等于契约的 `hostNamed(…)`**：否则 `serve` 抛「declared for A, but B serves it」；
+  名字是路由名不是实例 id（一个进程里多个应用的 host 都叫 `server`）
+- **facet 是构建产物**（`plugins/bundled/<id>/server.js`，esbuild 连 chord 打 410KB）：不进 git，
+  `pretest` 与 `build:desktop` 会先建；忘了建的表现是"组件加载失败：Cannot find module"而源码看着没问题
 - **组件目录名就是 id**（对不上 → `id-mismatch`）；**`TENON_PLUGINS_DIR` 与 `TENON_TEMPLATES_DIR` 同坑**：
   打进 `server.mjs` 后 `import.meta.url` 必错，错的表现是"插件页空空如也"且无任何报错
 

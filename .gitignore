@@ -32,6 +32,11 @@ docs/reverse/
 *.saz
 *.mitm
 
+# ---- 组件构建产物（源码在 plugins/bundled/<id>/*.ts，先跑 build:plugins）----
+plugins/bundled/*/server.js
+plugins/bundled/*/web.js
+plugins/bundled/*/worker.js
+
 # ---- spike 运行产物（结果 JSON 保留入库作为证据）----
 spikes/*/pgdata*
 spikes/*/work/

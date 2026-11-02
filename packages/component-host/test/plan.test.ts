@@ -145,6 +145,20 @@ describe('正常装配', () => {
     expect(result.loadOrder).toEqual(['tenon.official.ai-assistant'])
   })
 
+  it('加载计划带上目录与 facet 入口：加载器照着它去 import', async () => {
+    const pluginDir = await addPlugin({ id: 'tenon.official.a', version: '1.0.0' })
+    await assemble([entry('tenon.official.a', { version: '^1.0.0' })])
+    const result = await plan()
+    expect(result.targets).toEqual([
+      {
+        id: 'tenon.official.a',
+        version: '1.0.0',
+        dir: pluginDir,
+        facets: { server: 'server.js', web: 'web.js', worker: null },
+      },
+    ])
+  })
+
   it('hub 版覆盖 bundled 版（热更新靠这条）', async () => {
     await addPlugin({ id: 'tenon.official.a', version: '1.2.0' })
     await addPlugin({ id: 'tenon.official.a', version: '1.0.0', root: 'hub' })

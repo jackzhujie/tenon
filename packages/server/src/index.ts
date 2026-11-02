@@ -12,11 +12,19 @@ import { createAgentRuntime, type AgentRuntime, type PageDriverProvider } from '
 import { PreviewManager, type PreviewManagerOptions } from '@tenon/gateway'
 import { scaffoldApp } from '@tenon/generator'
 import { buildServer, type TenonServer } from './app.js'
+import { ComponentRuntime } from './components.js'
 import { SseBus } from './sse.js'
 
 export { buildServer, dispatch, type BuildServerOptions, type TenonServer } from './app.js'
 export { SseBus } from './sse.js'
 export { createHandlers, type HandlerMap, type ServerDeps } from './handlers.js'
+export {
+  ComponentRuntime,
+  activateComponents,
+  type ActivatedComponents,
+  type FacetActivation,
+  type Principal,
+} from './components.js'
 export { requireBearer, extractToken } from './auth.js'
 
 export interface StartServerOptions {
@@ -63,6 +71,7 @@ export interface RunningServer {
   readonly core: CoreServices
   readonly agent: AgentRuntime
   readonly preview: PreviewManager
+  readonly components: ComponentRuntime
   close(): Promise<void>
 }
 
@@ -119,6 +128,12 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
      */
     getPageDriver: options.pageDriver ?? ((appId) => preview.pages(appId)),
   })
+  const components = new ComponentRuntime({
+    home: core.home,
+    agent,
+    roots: options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root }),
+    tenonVersion: options.version ?? '0.0.0',
+  })
   const server = buildServer({
     core,
     agent,
@@ -127,6 +142,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     token,
     ...(options.version === undefined ? {} : { version: options.version }),
     pluginRoots: options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root }),
+    components,
     ...(options.logger === undefined ? {} : { logger: options.logger }),
     ...(options.webDir === undefined ? {} : { web: { dir: options.webDir } }),
   })
@@ -145,12 +161,14 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     core,
     agent,
     preview,
+    components,
     async close() {
       if (closed) return
       closed = true
       await server.app.close()
       // 先停预览：dev server 是我们 spawn 的，进程别留在外面
       await preview.close()
+      await components.close()
       await agent.close()
       core.close()
     },

@@ -73,6 +73,25 @@ export interface PlanInput {
   readonly tenonVersion: string
 }
 
+/**
+ * 一个**要被真的加载**的组件：够加载器去磁盘上找文件的信息。
+ *
+ * 与 `InstalledComponent` 分开，是因为后者是给界面看的（进 RPC、进 JSON），
+ * 而 `dir` 是本机路径 —— 界面既用不上，也不该看见。
+ */
+export interface LoadTarget {
+  readonly id: string
+  readonly version: string
+  /** 插件目录的绝对路径 */
+  readonly dir: string
+  /** facet 入口（相对 `dir`）；没有的那一侧为 null */
+  readonly facets: {
+    readonly server: string | null
+    readonly web: string | null
+    readonly worker: string | null
+  }
+}
+
 export interface PlanResult {
   /** 装配声明的解析结果。声明坏了是 null —— 此时 `components` 为空、`problems` 有一条 `assembly-invalid` */
   readonly assembly: ComponentAssembly | null
@@ -80,12 +99,16 @@ export interface PlanResult {
   readonly components: readonly InstalledComponent[]
   /** **加载顺序**（依赖在前）。只含 `loaded` 的那些 */
   readonly loadOrder: readonly string[]
+  /** 与 `loadOrder` 一一对应：加载器照着它去 `import()` */
+  readonly targets: readonly LoadTarget[]
   readonly problems: readonly ComponentProblem[]
 }
 
 interface ResolvedEntry {
   readonly entry: ComponentEntry
   readonly manifest: ComponentManifest
+  /** 插件目录（加载时要按它找 facet 文件） */
+  readonly dir: string
   readonly component: InstalledComponent
   blocked: boolean
   /** 依赖的组件 id（只记能在装配声明里找到的那些） */
@@ -164,7 +187,7 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
       `${ASSEMBLY_FILE} 读不出来，这次不会加载任何组件`,
       read.issues.join('；'),
     )
-    return { assembly: null, components: [], loadOrder: [], problems }
+    return { assembly: null, components: [], loadOrder: [], targets: [], problems }
   }
   const assembly = read.assembly
 
@@ -295,6 +318,7 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     resolved.push({
       entry,
       manifest,
+      dir: plugin.dir,
       blocked: broken,
       dependsOn: Object.keys(manifest.dependencies),
       component: {
@@ -420,6 +444,16 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     assembly,
     components: resolved.map((item) => item.component),
     loadOrder,
+    targets: loadOrder.map((id) => {
+      const item = byIdMap.get(id)
+      if (item === undefined) throw new Error(`加载顺序里出现了未知组件 ${id}`)
+      return {
+        id,
+        version: item.component.version,
+        dir: item.dir,
+        facets: item.component.facets,
+      }
+    }),
     problems,
   }
 }

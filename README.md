@@ -35,14 +35,14 @@
 |---|---|
 | [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、进度表、下一步拆解、已知陷阱 |
 | [**五个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度、chord 宿主接入的真实数字 |
-| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.24）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
+| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.25）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
 | [逆向工作手册](docs/REVERSE_ENGINEERING.md) | 内部研究用（不随开源发布） |
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.24**；五个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 七步完成，M5 走到第 2 步**：
+M0 逆向研究完成；方案 **v1.2.25**；五个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 七步完成，M5 走到第 3 步**：
 八个包（`protocol` / `component-host` / `core` / `agent` / `generator` / `gateway` / `db-provisioner` / `server`）+ 两个 app
 （渲染器 `apps/web`，浏览器与窗口共用一套代码；壳 `apps/desktop`，只做生命周期）。
 
@@ -68,7 +68,9 @@ M0 逆向研究完成；方案 **v1.2.24**；五个技术 spike 全部跑通。*
 
 **能装组件了（地基）**：应用里装了什么写在它自己的仓库里（`app.components.json`，跟着 git 走），
 加载器按 `hub > bundled` 覆盖层挑版本、逐条独立判定；装不上的原因有 19 个稳定 code，
-`component.list` 恒 200 把「它要求 Tenon ≥ 1.4.0，你是 1.2.0」这种话说清楚。真正的组件（AI 小助手）是下一步。
+`component.list` 恒 200 把「它要求 Tenon ≥ 1.4.0，你是 1.2.0」这种话说清楚。
+**第一个真组件（AI 小助手）的服务端半边已跑起来**：契约 + server facet + 宿主装载 + 注入的模型能力；
+界面半边（悬浮球）是下一步。
 
 **能派活了**：主 Agent 可以把「这个东西在哪」「这个库怎么用」交给 `explore` / `librarian` 子角色 ——
 那是**真的另一个会话**（独立 transcript、独立工具白名单、独立提示词）。只读角色的工具集里连 `write`
@@ -112,7 +114,7 @@ typescript」「测试红了」「超时了」必拦 —— 混成一个"不通�
 检查没过直接把清单摊开、主按钮是「重新检查」；检查通过是绿的。还有一格 `stale`：检查的几十秒里
 仓库又前进了，那份「通过」讲的是上一版代码 —— 界面会说「再查一次」，而不是「可以发」。
 
-509 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
+518 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
 44 项发布 e2e（**用系统 git 当裁判**：`fsck --strict` + `clone`）+ 9 项自验收 e2e + 全栈 e2e
 + 8 项桌面冒烟全绿。
 安装包默认路径上不带任何需按平台编译的原生模块（打包脚本会审计并打印清单）。
@@ -123,7 +125,7 @@ typescript」「测试红了」「超时了」必拦 —— 混成一个"不通�
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 509 项单测 / 集成测试（约 195s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 518 项单测 / 集成测试（约 295s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
@@ -138,10 +140,10 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**下一步**：M5 第 3 步 —— 第一个真组件（AI 小助手：contract + server facet + web facet + 插槽渲染）。
-加载器（清单 / `app.components.json` / 覆盖层解析 / 加载计划）已由 `@tenon/component-host` 落地，30 项单测验过。
+**下一步**：M5 第 3 步（b）—— 第一个真组件的界面半边（web facet + 网关 WS 链路 + `app.shell.overlay` 渲染）。
+服务端半边已经落地：契约 + server facet + 插件构建（`pnpm build:plugins`，410KB 单文件）+ 宿主装载。
 M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，
-M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17、第 2 步（组件加载器）见 §4.18。
+M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17、第 2 步（组件加载器）见 §4.18、第 3 步 a（真组件）见 §4.19。
 实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License

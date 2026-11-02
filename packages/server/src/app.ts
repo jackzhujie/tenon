@@ -22,6 +22,7 @@ import {
 } from '@tenon/protocol'
 import { requireBearer } from './auth.js'
 import { corsHeaderRecord, handleCors } from './cors.js'
+import { ComponentRuntime } from './components.js'
 import { createHandlers, type HandlerMap, type ServerDeps } from './handlers.js'
 import { SseBus } from './sse.js'
 import { createStaticServing, type StaticServing } from './static.js'
@@ -39,6 +40,8 @@ export interface BuildServerOptions {
   version?: string
   /** 组件来源（`hub > bundled`）。不给就用空列表 —— 纯 API 服务不该去猜磁盘布局 */
   pluginRoots?: readonly PluginRoot[]
+  /** 组件宿主。不给就建一个"没有模型、没有插件"的空实现，纯 RPC 测试不必装整套 */
+  components?: ComponentRuntime
   logger?: boolean
   /**
    * 渲染器产物目录（`apps/web/dist`）。给了就由 server 同源发页面，
@@ -64,6 +67,15 @@ export function buildServer(options: BuildServerOptions): TenonServer {
     bus,
     version: options.version ?? '0.0.0',
     plugins: { roots: options.pluginRoots ?? [] },
+    components:
+      options.components ??
+      // 直接调 buildServer 的调用方（测试、未来的 IPC 传输）：现建一个也够用
+      new ComponentRuntime({
+        home: options.core.home,
+        agent: options.agent,
+        roots: options.pluginRoots ?? [],
+        tenonVersion: options.version ?? '0.0.0',
+      }),
   }
   const handlers = createHandlers(deps)
 
