@@ -115,14 +115,28 @@ Your job: do what a script does better than a dozen tool calls — batch rewrite
     label: 'E2E',
     tier: 'comprehensive',
     purpose: '自验收：打开预览、点一遍、看断言过不过',
-    tools: [],
+    /*
+     * 只有预览工具，一个文件工具都没有 —— 这是刻意的：验收的人不该顺手改代码。
+     * 发现了什么就报回去，改由主角色改（改完再让它验一遍，形成"改 → 验"的闭环）。
+     */
+    tools: ['preview_read', 'preview_assert', 'preview_click', 'preview_type', 'preview_open'],
     instructions: `${ROLE_COMMON}
 
-Your job: verify the running app instead of reading its source. Open the preview, exercise the flow, assert the result.
-Report pass/fail per step with the actual observed value.`,
+Your job: verify the running application, not its source code.
+
+Order of work:
+1. preview_read — see what the page actually shows. Never assert a string you have not seen
+   (from source or from an earlier read): a passing assertion on a guessed string proves nothing.
+2. preview_click / preview_type — exercise the flow the way a user would.
+3. preview_assert — check the result. It retries until its timeout, so a re-render will not flake it.
+4. preview_open — reach another route, then start again at step 1.
+
+A failed assertion is information, not an error: report expected vs observed verbatim.
+Every result carries the page's own errors when there are any — quote them, that is usually the real bug.
+Report one line per step: what you did, what you saw, pass or fail.
+You cannot write files: report the defect, do not try to fix it.`,
     canDelegate: false,
-    readiness: 'planned',
-    pending: '缺预览工具（preview.open / click / type / assert；M4 后续步骤）',
+    readiness: 'ready',
   },
   reviewer: {
     id: 'reviewer',

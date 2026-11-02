@@ -35,6 +35,7 @@ import type { Launched } from './child.js'
 import { ensureDeps } from './deps.js'
 import { classifyLine, inputFromError, LogStore, parseClientLog, type LogInput } from './logs.js'
 import { findFreePorts } from './ports.js'
+import { PageBridge } from './page.js'
 import { startGateway, type Gateway } from './proxy.js'
 import { launchVite, type Launcher } from './vite.js'
 
@@ -162,6 +163,8 @@ class PreviewRun {
   error: string | null = null
   startedAt: number | null = null
   gateway: Gateway | null = null
+  /** 页面通道：Agent 借它驱动真实浏览器里的这个页面（M4 第 4 步） */
+  page: PageBridge | null = null
   vite: Launched | null = null
   api: Launched | null = null
   database: DatabaseProvider | null = null
@@ -253,6 +256,16 @@ export class PreviewManager {
   /** 删应用时连缓冲一起丢，别留下已删应用的日志 */
   forget(appId: string): void {
     this.store.drop(appId)
+  }
+
+  /**
+   * 这个应用的页面通道（给 e2e 子 Agent 用）。
+   *
+   * 返回 `undefined` 而不是抛错：预览没起过是**常态**（用户还没点预览），
+   * 上层据此回一句"先把预览打开"，比一个 500 有用得多。
+   */
+  pages(appId: string): PageBridge | undefined {
+    return this.runs.get(appId)?.page ?? undefined
   }
 
   /** 立刻返回 `starting`；真正的就绪通过 `preview.status` / `waitReady()` 观察 */
@@ -415,6 +428,13 @@ export class PreviewManager {
       run.apiPort = apiPort ?? null
       if (run.cancelled) return
 
+      /*
+       * 页面通道要在网关起来**之前**建好：网关的请求处理器会闭包持有它。
+       * 它自己不起任何东西（只有内存里的队列），所以放在这一步没有代价。
+       */
+      const page = new PageBridge()
+      run.page = page
+
       // 5. 网关先起：url 立刻确定，前端不用等任何进程
       //
       // `port` 必须显式传：这个端口是**提前用 `findFreePorts` 占好**的，
@@ -438,6 +458,8 @@ export class PreviewManager {
           const input = parseClientLog(payload)
           if (input !== null) this.pushLog(run.appId, input)
         },
+        // 页面通道：网关把 /__tenon/page* 吃掉，再往 HTML 里插一行脚本
+        page,
       })
       run.gateway = gateway
       run.url = gateway.url
@@ -586,9 +608,13 @@ export class PreviewManager {
     const api = run.api
     const vite = run.vite
     const gateway = run.gateway
+    const page = run.page
     run.api = null
     run.vite = null
     run.gateway = null
+    run.page = null
+    // 先掐通道：挂着的 e2e 命令立刻失败，不必等十几秒超时（Agent 那边会以为是自己错了）
+    if (page !== null) page.close()
     if (run.upstreamPort !== null) this.usedPorts.delete(run.upstreamPort)
     if (run.apiPort !== null) this.usedPorts.delete(run.apiPort)
     if (run.gatewayPort !== null) this.usedPorts.delete(run.gatewayPort)

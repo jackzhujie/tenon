@@ -5,6 +5,7 @@
  * 所以它暴露 `connected` 让调用方等首帧。这段逻辑写错会表现为"偶尔漏掉开头的增量"，
  * 很难查 —— 只留一份实现，别在测试里各写各的。
  */
+import type { PageDriverProvider } from '@tenon/agent'
 import type { PreviewManagerOptions } from '@tenon/gateway'
 import type { SseEvent } from '@tenon/protocol'
 import { startServer, type RunningServer } from '../src/index.js'
@@ -16,6 +17,8 @@ export interface BootOptions {
   preview?: Pick<PreviewManagerOptions, 'launch' | 'installDeps' | 'readyTimeoutMs'>
   /** 给了就由 server 同源托管这份产物（`static.test.ts` 用） */
   webDir?: string
+  /** 假页面通道（e2e 子 Agent 的集成测试用，不起浏览器） */
+  pageDriver?: PageDriverProvider
 }
 
 export function boot(dir: string, options: BootOptions = {}): Promise<RunningServer> {
@@ -25,6 +28,7 @@ export function boot(dir: string, options: BootOptions = {}): Promise<RunningSer
     env: { TENON_HOME: dir, TENON_FAUX: '1', ...(options.env ?? {}) },
     ...(options.preview === undefined ? {} : { preview: options.preview }),
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
+    ...(options.pageDriver === undefined ? {} : { pageDriver: options.pageDriver }),
   })
 }
 

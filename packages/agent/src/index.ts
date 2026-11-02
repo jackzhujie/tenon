@@ -10,6 +10,7 @@ import { ChatService } from './chat.js'
 import { HarnessPool } from './harness-pool.js'
 import { planModel, resolveModel, type ModelPlan, type ResolvedModel } from './models.js'
 import { TaskGraphService } from './taskgraph.js'
+import type { PageDriverProvider } from './tools/preview.js'
 import { UsageService } from './usage.js'
 import type { SseEventInput } from '@tenon/protocol'
 
@@ -24,6 +25,7 @@ export * from './usage.js'
 export * from './tools/coding.js'
 export * from './tools/search.js'
 export * from './tools/subagent.js'
+export * from './tools/preview.js'
 export { ChatService } from './chat.js'
 
 export interface AgentRuntimeOptions {
@@ -35,6 +37,11 @@ export interface AgentRuntimeOptions {
    * 在这里只是一个可选项 —— 缺省时 agent 照常工作，只是没有可回滚的数据库快照。
    */
   onSchemaCommit?: ChatServiceOptions['onSchemaCommit']
+  /**
+   * 页面通道的提供者（M4 第 4 步）：由 server 接到 `PreviewManager.pages`。
+   * 不给的话 e2e 角色会明确回"预览没起"，其它角色不受影响。
+   */
+  getPageDriver?: PageDriverProvider
 }
 
 export interface AgentRuntime {
@@ -69,7 +76,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
   }
 
   const model = resolveModel(options.core, { env: options.env })
-  const pool = new HarnessPool({ home: options.core.home, model })
+  const pool = new HarnessPool({
+    home: options.core.home,
+    model,
+    ...(options.getPageDriver === undefined ? {} : { getPageDriver: options.getPageDriver }),
+  })
   const usage = new UsageService({ pool, core: options.core, publish: options.publish })
   const chat = new ChatService({
     pool,

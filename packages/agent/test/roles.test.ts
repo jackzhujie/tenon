@@ -32,7 +32,22 @@ const fake = (name: string): ToolRegistration => ({
   },
 })
 
-const ALL = ['read', 'write', 'edit', 'bash', 'ls', 'glob', 'grep', 'subagent'].map(fake)
+const ALL = [
+  'read',
+  'write',
+  'edit',
+  'bash',
+  'ls',
+  'glob',
+  'grep',
+  'subagent',
+  // M4 第 4 步：e2e 角色的预览工具也要在"全量表"里，否则下面那条"名字都是真名字"的断言会误报
+  'preview_read',
+  'preview_assert',
+  'preview_click',
+  'preview_type',
+  'preview_open',
+].map(fake)
 
 describe('角色表', () => {
   it('每个子角色的工具都是全量表里的真名字（拼错会静默给空工具集）', () => {
@@ -67,11 +82,11 @@ describe('角色表', () => {
   })
 
   it('没接好的角色带 pending 说明，已接好的不带', () => {
-    for (const id of ['explore', 'librarian'] as RoleId[]) {
+    for (const id of ['explore', 'librarian', 'e2e'] as RoleId[]) {
       expect(ROLES[id].readiness, id).toBe('ready')
       expect(ROLES[id].pending, id).toBeUndefined()
     }
-    for (const id of ['codeact', 'e2e', 'reviewer'] as RoleId[]) {
+    for (const id of ['codeact', 'reviewer'] as RoleId[]) {
       expect(ROLES[id].readiness, id).toBe('planned')
       expect(ROLES[id].pending, id).toBeTruthy()
     }

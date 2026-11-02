@@ -152,7 +152,9 @@ describe('工具层（write / edit / bash）', () => {
     running = await boot()
     const session = await running.agent.pool?.acquire(app.id)
     // M4 第 1 步把工具补齐了：四个写工具 + 三个只读检索（ls/glob/grep）+ 编排（subagent）
-    expect(session?.tools.map((tool) => tool.name).sort()).toEqual([
+    // 看 `rootTools` 而不是 `tools`：后者含只给子角色用的 `preview_*`（M4 第 4 步），
+    // 主角色拿到的仍是这八个 —— 这条测的正是"主角色没掉队"
+    expect(session?.rootTools.map((tool) => tool.name).sort()).toEqual([
       'bash',
       'edit',
       'glob',
@@ -162,6 +164,8 @@ describe('工具层（write / edit / bash）', () => {
       'subagent',
       'write',
     ])
+    // 预览工具在 registry 里（e2e 子角色要用），但不在主角色的工具集里
+    expect(session?.tools.map((tool) => tool.name)).toContain('preview_assert')
 
     // 光有工具对象不够：还要确认它在真跑的这条路上确实能被调用
     running.agent.model?.script([

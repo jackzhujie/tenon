@@ -17,6 +17,7 @@ import type { TenonHome } from '@tenon/core'
 import { appPaths } from '@tenon/core'
 import type { ModelChoice, ResolvedModel } from './models.js'
 import { codingExtension } from './tools/coding.js'
+import { previewExtension, type PageDriverProvider } from './tools/preview.js'
 import { subagentExtension } from './tools/subagent.js'
 
 const ctx = BACKGROUND_CONTEXT
@@ -28,14 +29,28 @@ export interface HarnessSession {
   readonly harness: Harness
   readonly root: RootConversation
   readonly conversationId: RootConversation['id']
-  /** 这个会话可用的工具（与 `configure` 时选中的完全一致） */
+  /**
+   * registry 里**全部**可用的工具（含只给子角色的）。
+   *
+   * 注意它与"主角色实际拿到的"不是一回事：`preview_*` 只进 registry、不进根会话的配置，
+   * 主角色要靠 `subagent` 派给 e2e 角色才用得到（见 `open()` 里的 rootTools）。
+   */
   readonly tools: readonly ToolRegistration[]
+  /** 主角色实际拿到的工具（`configure` 时选中的那一份，是 `tools` 的子集） */
+  readonly rootTools: readonly ToolRegistration[]
   close(): Promise<void>
 }
 
 export interface HarnessPoolOptions {
   home: TenonHome
   model: ResolvedModel
+  /**
+   * 页面通道的提供者（M4 第 4 步）：由 server 接到 `PreviewManager.pages`。
+   *
+   * 不给也能跑 —— 那样 e2e 角色会说"预览没起"，其余角色完全不受影响，
+   * 单测与纯文件场景不必为了装这个扩展而拉起网关。
+   */
+  getPageDriver?: PageDriverProvider
 }
 
 /** 工具集比对只看名字：对象每次启动都是新的，比引用永远"漂移" */
@@ -83,19 +98,43 @@ export class HarnessPool {
 
     // 工具挂在扩展上：装进 registry 之后，会话才能用名字选中它们
     const coding = codingExtension(paths.repoDir)
+    /*
+     * 预览工具（M4 第 4 步）：**只装进 registry，不给主角色**。
+     * 主角色有 `bash`，把它能做的事已经很多了；给它 `preview_*` 只会让它绕过"改代码"
+     * 去做"点页面"。要验页面，它该派活给 e2e 角色 —— 这个分工才让 e2e 有用。
+     */
+    const preview = previewExtension({
+      appId,
+      getDriver: (id) => this.options.getPageDriver?.(id),
+    })
     // `subagent` 需要 Harness（子会话的模型/工具只能在创建那一刻定），而扩展必须在
     // `Harness.open` 之前建好 —— 所以给一个懒读取器，调用发生时它一定已经有值。
     let harnessRef: Harness | undefined
-    const tools: ToolRegistration[] = [...(coding.tools ?? [])]
+    // registry 全量：子角色按白名单从这里面挑
+    const tools: ToolRegistration[] = [...(coding.tools ?? []), ...(preview.tools ?? [])]
     const subagent = subagentExtension({
       getHarness: () => harnessRef,
       getTools: () => tools,
     })
     tools.push(...(subagent.tools ?? []))
-    const extensions: Extension[] = [coding, subagent]
+    /*
+     * 主角色拿到的工具：显式列举，**不用过滤**。
+     * 过滤的写法（"凡是名字不以 preview_ 开头"）会让下一个新工具默认落到主角色手里，
+     * 而这里的默认应该是"不给"。与 `roles.ts` 的白名单是同一个思路。
+     */
+    const rootTools: ToolRegistration[] = [...(coding.tools ?? []), ...(subagent.tools ?? [])]
+    /*
+     * 扩展列表 = "这个应用的工具与提示词世界"。`preview` 必须在这里 ——
+     * 只 `registry.install` 是不够的：**工具要靠扩展才能被会话解析到**，
+     * 否则子会话里那些调用会直接"工具不存在"，而模型会若无其事地继续往下说
+     * （实测症状：e2e 说"页面上找不到"，但页面通道一次都没被调用过）。
+     * 它没有 section，所以主角色不会因此多出一段"你去验页面"的说明。
+     */
+    const extensions: Extension[] = [coding, subagent, preview]
 
     const registry = createRegistry()
     registry.install(coding)
+    registry.install(preview)
     registry.install(subagent)
 
     const harness = await Harness.open(
@@ -118,7 +157,7 @@ export class HarnessPool {
       model: { provider: choice.provider, modelId: choice.modelId },
       // 扩展与工具都显式选定：不依赖宿主默认，避免"升级后老应用拿不到新工具"
       extensions,
-      tools,
+      tools: rootTools,
       cwd: paths.repoDir,
     }
     const root = await harness.root(ctx, { agent: wanted })
@@ -130,7 +169,7 @@ export class HarnessPool {
       currentModel === undefined ||
       currentModel.modelId !== choice.modelId ||
       currentModel.provider !== choice.provider
-    const toolsDrifted = !sameTools(agent.tools, tools)
+    const toolsDrifted = !sameTools(agent.tools, rootTools)
     const extensionDrifted = extensions.some(
       (item) => !agent.extensions.some((current) => current.name === item.name),
     )
@@ -144,6 +183,7 @@ export class HarnessPool {
       harness,
       root,
       tools,
+      rootTools,
       conversationId: root.id,
       async close() {
         if (closed) return

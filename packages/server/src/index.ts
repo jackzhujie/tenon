@@ -7,7 +7,7 @@
 import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { openCore, type CoreServices } from '@tenon/core'
-import { createAgentRuntime, type AgentRuntime } from '@tenon/agent'
+import { createAgentRuntime, type AgentRuntime, type PageDriverProvider } from '@tenon/agent'
 import { PreviewManager, type PreviewManagerOptions } from '@tenon/gateway'
 import { scaffoldApp } from '@tenon/generator'
 import { buildServer, type TenonServer } from './app.js'
@@ -38,6 +38,14 @@ export interface StartServerOptions {
     PreviewManagerOptions,
     'launch' | 'launchApi' | 'database' | 'installDeps' | 'readyTimeoutMs' | 'apiReadyTimeoutMs' | 'log'
   >
+  /**
+   * 测试注入：页面通道（M4 第 4 步）。
+   *
+   * 给了就不走 `preview.pages(appId)`。集成测试验的是"子 Agent 能不能把断言发到页面、
+   * 结果会不会回到对话里"，不该为了这个先装一遍 React、再起一个浏览器。
+   * 真 DOM 由 `pnpm e2e:e2e` 在 Electron 里验。
+   */
+  pageDriver?: PageDriverProvider
 }
 
 export interface RunningServer {
@@ -99,6 +107,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     onSchemaCommit: async ({ appId, sha }) => {
       await preview.snapshotDatabase(appId, sha)
     },
+    /*
+     * e2e 子 Agent 的预览工具从这里拿到"那个应用的页面通道"。
+     * 传的是**函数**不是快照：预览会在应用生命周期里反复起停，每次起都是新的一条通道。
+     */
+    getPageDriver: options.pageDriver ?? ((appId) => preview.pages(appId)),
   })
   const server = buildServer({
     core,

@@ -35,3 +35,20 @@ export {
 export { launchVite, type LaunchSpec, type Launcher } from './vite.js'
 export { launchApi, resolveApiEntry, type ApiLaunchSpec, type ApiLauncher } from './api.js'
 export { PreviewManager, type PreviewDatabase, type PreviewManagerOptions } from './preview.js'
+export {
+  PAGE_HELLO_PATH,
+  PAGE_POLL_PATH,
+  PAGE_REPLY_PATH,
+  PAGE_SCRIPT,
+  PAGE_SCRIPT_PATH,
+  PageBridge,
+  PageError,
+  injectPageScript,
+  isPagePath,
+  type PageCommand,
+  type PageCommandName,
+  type PageFailure,
+  type PageHello,
+  type PageReply,
+  type PageSessionInfo,
+} from './page.js'

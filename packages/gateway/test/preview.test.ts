@@ -215,7 +215,14 @@ describe('PreviewManager', () => {
     expect(new URL(ready.url as string).port).toBe(String(ready.gatewayPort))
 
     const response = await fetch(ready.url as string)
-    expect(await response.text()).toBe('<h1>你好</h1>')
+    /*
+     * 首屏现在带一行注入脚本（M4 第 4 步：页面通道要在页面里跑起来）。
+     * 所以断言"体以原文开头 + 带注入标记"，而不是"体完全等于原文" ——
+     * 原文一个字都没改，只是后面多了一行。
+     */
+    const html = await response.text()
+    expect(html.startsWith('<h1>你好</h1>')).toBe(true)
+    expect(html).toContain('data-tenon-page')
 
     const types = events.map((event) => event.type)
     expect(types).toContain('preview.status')
@@ -242,7 +249,8 @@ describe('PreviewManager', () => {
     const url = ready.url as string
     // 同一源上的两条前缀：这是「单源、无 CORS」的全部意义
     expect(await (await fetch(`${url}/api/echo`)).text()).toBe('来自后端')
-    expect(await (await fetch(url)).text()).toBe('<h1>前端</h1>')
+    // HTML 会被注入页面通道的脚本，所以看前缀；`/api` 的回包不该被碰（上一行就是证据）
+    expect((await (await fetch(url)).text()).startsWith('<h1>前端</h1>')).toBe(true)
 
     // ★ 铁律 2 的落点：应用只拿到一个连接串 + 一个容量参数
     const spec = api.specs[0] as ApiLaunchSpec

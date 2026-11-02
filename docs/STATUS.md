@@ -1,10 +1,11 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-11-01（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
-> + M4 第 1、2、3 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断）**：344 个测试 + 9 项端到端冒烟 +
-> 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+ 36 项改动/回滚 e2e + 32 项发布 e2e（系统 git 当裁判：`fsck --strict` + `clone`）
-> + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 已收口，M3 已收口**）
+> 最后更新：2026-11-02（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
+> + M4 第 1、2、3、4 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具）**：
+> 375 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> 36 项改动/回滚 e2e + 32 项发布 e2e（系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
+> + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
 ---
 
@@ -55,17 +56,24 @@ pi 静止时会回收任务节点，所以"空"不是没数据，是没人跑了
 真值来自 `harness.usage()` 的会话账本：**跨重启不丢**，而且把子 Agent 与压缩摘要都算进去 ——
 这两块恰恰是前端自己累加永远算不到的（§4.11 / DESIGN §5.6）。
 
+**Agent 自己去验页面了（M4 第 4 步）**：e2e 子 Agent 有了五个预览工具
+（`preview_read` / `preview_assert` / `preview_click` / `preview_type` / `preview_open`），
+它**驱动的是用户眼前那个页面**：网关往 HTML 里注一行脚本，页面反连回来领命令
+（HTTP 长轮询，不新起浏览器、不加依赖）。所以"改完的按钮点一下对不对"这件事，
+现在有 DOM 里的证据，而不是靠读源码猜（§4.12 / DESIGN §5.7）。
+
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 344 项单测 + 集成测试（约 145s，含 PGlite 冷启动）
+pnpm test                       # 375 项单测 + 集成测试（约 150s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
 pnpm e2e:diff                    # ★ 36 项改动链路：git.log / git.show / git.revert 全走真 HTTP（含根提交与错误码）
 pnpm e2e:release                 # ★ 32 项发布链路：打 tag + 推本地裸库，用系统 git 做 fsck --strict 与 clone 验收
+pnpm e2e:e2e                     # ★ 9 项自验收：真 Electron 里由 e2e 子 Agent 点页面 —— 注入的 bug 被断言抓到、修好后同一条断言通过
 pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁移 → Vite+Nest 双进程 → CRUD 经网关 → 重启后数据还在
 pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界面、退出后不留孤儿进程
@@ -231,8 +239,8 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 1 | **子 Agent 骨架**：角色表（1 主 + 5 子，工具白名单/档位/提示词/可用状态）+ `subagent` 工具（真子会话、幂等复用、递归禁止）+ `ls`/`glob`/`grep` 只读检索 + faux 按角色分道 | ✅ 见 §4.9 | `packages/agent/src/roles.ts`、`tools/subagent.ts`、`tools/search.ts`、`models.ts`（分道）、`harness-pool.ts`（注入 harness） |
 | 2 | **任务图**：`watchTaskGraph` 逐帧归一化 → `taskgraph.update` 事件 + `taskgraph.get` RPC + 预览下方任务条（DoD ②） | ✅ 见 §4.10 | `packages/core/src/taskgraph.ts`、`packages/agent/src/taskgraph.ts`、`features/tasks/TaskGraphPanel.tsx` |
 | 3 | **用量与预算**：`harness.usage()` 会话账本 → `usage.update` 全量快照 + `usage.get`/`budget.set` RPC + 顶栏用量面板 + 两个拦截点（开跑前 402 / 半路 abort，DoD ③） | ✅ 见 §4.11 | `packages/core/src/usage.ts`、`packages/agent/src/usage.ts`、`packages/protocol/src/usage-format.ts`、`features/usage/UsagePanel.tsx` |
-| 4 | E2E 子 Agent 的预览工具（`preview.open/click/type/assert`）+ 自验收流程（DoD ①） | ⏳ 下一步 | — |
-| 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ⏳ | — |
+| 4 | **E2E 子 Agent 的预览工具**（`preview_read/assert/click/type/open`）+ 自验收流程（DoD ①） | ✅ 见 §4.12 | `packages/gateway/src/page.ts`（页面通道）、`packages/agent/src/tools/preview.ts`、`scripts/e2e-e2e-agent.ts` |
+| 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ⏳ **下一步** | — |
 | 6 | CodeAct：`codemode` 沙箱接入 | ⏳ | — |
 | 7 | 发布前质量门禁（typecheck / test 不过不许发） | ⏳ | — |
 
@@ -466,7 +474,41 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 `usage()` 只给按模型/工具的聚合，**看不出"哪个子角色花了多少"**（子会话的账在它自己的桶里，
 要按角色分摊得自己扫会话读 `pi.usage`，现在没做）。
 
-### 4.12 代码地图（只列已落地的）
+### 4.12 M4 第 4 步验收（e2e 子 Agent 的预览工具 / DoD ①）—— ✅ 已完成
+
+- [x] **★ 子 Agent 能驱动真实浏览器里的页面，并拿到失败证据** —— `pnpm e2e:e2e`：
+      真 Electron 打开模板页面 → e2e 角色 `preview_read` → `preview_click` →
+      `preview_assert '计数 1'` 失败，**"实测"里的数字来自真 DOM**（注入的 bug 是 `+2`）
+- [x] **★ 修完之后同一条断言通过** —— 主角色改 `App.tsx` → 整页重载（`preview_open`）→
+      再点一次 → 断言通过。这条就是 DoD ① 的判据
+- [x] **断言失败不是工具错误** —— 返回 `isError: false` + "✗ 期望 X，实测 Y"。
+      当错误返回会让模型去重试工具，而它该做的是回去改代码（`preview-tools.test.ts` 钉住）
+- [x] **faux 的诚实边界** —— 假模型不会推理，"发现"是剧本安排的；判据仍然来自真 DOM
+      （断言失败时的实测值、修复后同一条断言才通过）。接真模型后剧本换成一句话
+- [x] **只有 e2e 角色拿得到这些工具** —— 主角色仍是那八个（`tools.test.ts` 断言
+      `rootTools` 不含 `preview_*`），要验页面只能派活；`preview_*` 在 registry 里
+- [x] **页面没起来时说人话** —— "这个应用还没有预览在跑，让用户点一下预览"，
+      不是抛栈也不是空等（集成测试覆盖）
+- [x] **命令超时后不会被补发** —— 超时的命令会从队列里摘掉。只删挂账的话，下一次轮询
+      会把它交给页面**照样执行**（超时的 click 还会点出去）。单测钉住
+- [x] **页面刷新时幂等命令会重投，click/type 不会** —— `sessionStorage` 里带 sessionId，
+      整页重载仍是同一会话；重投只限 `read`/`assert`
+- [x] **浏览器断开长轮询要被感知** —— 否则命令被投进一条已经断掉的连接，只能等超时
+      （真机重载 100% 复现，假客户端永远不断开，所以只有 e2e 能抓到）
+- [x] **页面里抛异常也必须回话** —— 找不到元素时回一句"没找到第 1 个「#buy」（一共 0 个）"，
+      而不是让调用方等到 12 秒超时
+- [x] **HTML 注入不破坏原有响应** —— 只改 `text/html`、只改未压缩的；`content-length`
+      重算且**删掉 `transfer-encoding`**（两个同时在，响应会永远等不到结尾）。
+      非 HTML 原样透传，没有 `page` 时行为与以前完全一致（各有单测）
+
+使用方式：**没有 UI 入口** —— 它是给 Agent 用的。用户只需要把预览打开，
+然后在对话里说"点一下加一看看对不对"，主角色会派活给 e2e。
+
+**还没做的**（如实记）：没有"跑一条用户旅程"的能力（现只有单条命令 + 断言，
+不会录制/回放一串操作）；`preview_*` 只覆盖鼠标点击与输入，没有 hover / 拖拽 / 滚动；
+断言只能看文字、数量、值，没有截图对比；多标签页只有最后一个连上的页面会被驱动。
+
+### 4.13 代码地图（只列已落地的）
 
 ```
 packages/
@@ -701,6 +743,15 @@ scripts/
 | **`watchTaskGraph` 必须早于 `chat.submit` 挂上** | 在 RPC handler 里"查一次"是不够的：一次派活 17 帧，等界面来问的时候前半段已经过去了。而 watch 只在有人 acquire 时才存在 —— 所以 `chat.submit` handler 里先 `taskGraph.ensure(appId)`。反过来 `app.delete` 要先 `release` 任务图再关 harness，顺序反了会踩到已关闭的 session |
 | **本机 `npx electron` 直接 SIGTERM 137 且一个字都不输出** | `node_modules/.bin/electron` 是个**断掉的 symlink**（`no such file or directory`），`npx` 于是找不到可执行文件 —— 表现成"被杀了"而不是"没装"，很误导。真二进制在 `node_modules/.pnpm/electron@<ver>/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`，截图/冒烟脚本一律直接用完整路径 + `--no-sandbox` |
 | **`pi-coding-agent` 的 `grep` / `find` 会下载二进制** | 它们走 `ensureTool()`：首次调用从 GitHub 拉 `rg` / `fd` 到 `~/.pi/bin` 再 spawn。本地优先的产品不能这么干（没网即失败、桌面版偷偷落可执行文件、它还自己解析 cwd 之外的路径）。已改成自己的 `ls` / `glob` / `grep`（纯 `node:fs` + 进程内正则，有上限） |
+| **`content-length` 与 `transfer-encoding` 不能并存** | 往 HTML 里注入脚本后要改长度，只重算 `content-length` 而把上游带来的 `transfer-encoding: chunked` 留着 —— 两个头同时在，客户端**永远等不到响应结束**：预览一直停在 `failed`（`expected 'failed' to be 'ready'`），日志里一个字都没有。两个都要删，只写新的 `content-length`。用显式长度的桩测不出来，得经真 upstream |
+| **注入的脚本要插在 `</body>` 之前** | 放进 `<head>` 时 `document.title` 还是空的（脚本先跑、解析器才继续），上报的页面信息全是 `''`。而且脚本必须 ES5 风格：它跑在生成应用的页面里，不保证与平台的构建目标一致 |
+| **扩展只 `registry.install()` 不够，必须也在会话的 `extensions` 里** | 表现极隐蔽：子会话里工具**"不存在"**，模型若无其事地继续讲，`execute` 一次都不进（打点才能发现"派了活但没调工具"）。`harness-pool.ts` 里 `extensions: [coding, subagent, preview]` 这一行漏掉就等于工具没接 |
+| **整页导航会掐断挂在长轮询上的请求** | 网关侧那个 `await bridge.poll()` 还活着，命令被投进一条死连接 → 调用方等到 12 秒超时（`页面在 12 秒内没有回话`）。`poll(sessionId, signal)` 要接 `AbortSignal`，`res.on('close', () => abort.abort())` 里中止，让命令回到队列而不是消失 |
+| **页内抛异常也必须回话** | `document.querySelector` 拿到 `null` 再读 `.textContent` 会抛 —— 如果只在 `try` 里回话，调用方只能等满超时，而真实信息（"没找到第 1 个「#buy」（一共 0 个）"）根本没送出去。`handle` 必须带 rejection 分支 |
+| **断言失败不是工具错误** | `preview_assert` 失败要返回 `isError: false` + 「✗ 期望 X，实测 Y」。标成错误会让模型去**重试工具**（换个 selector 再试一次），而它真正该做的是回去改代码。同理，参数不合法（`value` 没配 `selector`）要在**发命令之前**拦住，那是真的工具错误 |
+| **改完代码不能用"计数回到 0"当起点** | React Fast Refresh **保留 state**：HMR 之后计数器还是旧值，整页不重载就永远验不到干净起点。所以有 `preview_open`（显式整页重载）。另外整页重载会换 `document`，但 `sessionStorage` 还在 —— sessionId 存那儿才能跨 reload 延续同一条通道 |
+| **刷新时只能重投幂等命令** | `read` / `assert` 重投是安全的（读两次没有副作用），`click` / `type` 重投就可能点出两个东西、输入两遍。`PageBridge.hello()` 按命令名分档，别一律重投 |
+| **`poll` 遇到不认识的 sessionId 要回 `'reset'` 而不是 `null`** | 回 `null` 页面会立刻再问一遍 —— 空转打满 CPU，而且从日志上看不出任何异常。页面收到 `reset` 就换新会话 |
 
 
 ---
@@ -783,18 +834,21 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.17），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.18），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
 当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
-发布 push）；**M4 第 1、2、3 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断）。
-下一步是 M4 第 4 步（E2E 子 Agent 的预览工具，DoD ①），先看 §4.2 的 M4 表决定从哪块进。
-344 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:fullstack + 桌面包全绿。
-**欠账三笔**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
+发布 push）；**M4 第 1–4 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 +
+e2e 子 Agent 的预览工具，**DoD ①②③ 已满足**）。
+下一步是 M4 第 5 步，先看 §4.2 的 M4 表决定从哪块进。
+375 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:e2e 9
++ e2e:fullstack + 桌面包全绿。
+**欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
-③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接。
+③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；
+④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了"哪个角色花了多少"（聚合层看不见归属）。
 `pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`，
-动到 git / 回滚跑 `pnpm e2e:diff`，动到发布跑 `pnpm e2e:release`。
+动到 git / 回滚跑 `pnpm e2e:diff`，动到发布跑 `pnpm e2e:release`，动到 Agent 工具/角色跑 `pnpm e2e:e2e`。
 
 三条铁律不要违反：Electron 只做壳 / 生成应用不感知运行环境 / 实验性依赖锁版本 + adapter 包装。
 （「安装包零原生模块」**不在**这三条里 —— v1.2.13 起已降为偏好，别再拿它当硬约束挡需求。）

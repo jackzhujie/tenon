@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.17
+# DESIGN.md — 详细方案设计 v1.2.18
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。 + **v1.2.17 补充（M4 第 3 步用量与预算：`harness.usage()` 是**会话账本**，跨重启不丢、且天然把子 Agent 与压缩摘要算进去 —— 前端累加必然少一半，所以逐条 `usage` 事件换成了全量的 `usage.update`；熔断不是"预测下一笔"，pi 没有 pre-request 钩子，只能"花超了就停" —— §5.6）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。 + **v1.2.17 补充（M4 第 3 步用量与预算：`harness.usage()` 是**会话账本**，跨重启不丢、且天然把子 Agent 与压缩摘要算进去 —— 前端累加必然少一半，所以逐条 `usage` 事件换成了全量的 `usage.update`；熔断不是"预测下一笔"，pi 没有 pre-request 钩子，只能"花超了就停" —— §5.6）**。 + **v1.2.18 补充（M4 第 4 步 e2e 子 Agent 的预览工具：**不新起浏览器，让页面反连回来领命令** —— 网关往 HTML 注一行脚本 + HTTP 长轮询（`upgrade` 要原样透传给 Vite，自己再握手必坏）；`sessionId` 存 `sessionStorage` 才能跨整页重载；刷新只重投幂等命令；注入时 `content-length` 与 `transfer-encoding` 必须**一起**处理；扩展必须既 `registry.install` 又进会话的 `extensions`，否则工具"不存在"且不报错 —— §5.7）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -698,6 +698,105 @@ docs/
 
 **面板放顶栏，不放预览下方。** 它跟任务条不是一类东西：任务条空闲时不渲染（"没人跑"才是常态），
 而"这个应用一共花了多少"随时都可能想看。点开是账 + 额度表单（在这里设上限，比另开设置页少三步）。
+
+### 5.7 让 Agent 自己去点页面（v1.2.18 落地）
+
+M4 DoD ① 的原话是「**E2E 子 Agent 能发现并修复一个注入的 bug**」。这条 DoD 没法靠读源码过：
+读 `App.tsx` 看到 `value + 2` 只能说"这段和某个预期不一样"，说不出"用户点一下会看到 3 而不是 2"。
+**证据必须来自 DOM。**
+
+**决策：不新起浏览器，让页面反连回来领命令。** 三条理由，缺一条这个方案都不成立：
+
+| 理由 | 说明 |
+|---|---|
+| 装 Chromium 违背本地优先的默认偏好 | 一百多兆下载 + 平台相关版本，为了验一个按钮不值得 |
+| Web 模式下用户本来就开着一个浏览器 | 再起一个无头实例验的**不是**用户眼前那个页面（端口、注入、HMR 全不一样） |
+| 桌面版里只有一个 Chromium | 它是 Electron 自己的，我们既不能也不该再 spawn 一个 |
+
+所以通道方向是**反过来**的：网关往它转发的 HTML 里插一行 `<script>`，脚本加载后反过来向网关
+`hello` → 领命令 → 回话。平台侧因此完全没有"浏览器怎么起"这个问题。
+
+```
+浏览器页面（被注入的脚本）
+  POST /__tenon/page/hello   → 建会话，拿到 sessionId（顺带重投幂等命令）
+  GET  /__tenon/page/poll    → 长轮询，挂着等命令（"read"/"assert"/"click"/"type"/"navigate"）
+  POST /__tenon/page/reply   → 执行结果
+网关（PageBridge）  ←→  agent 工具（preview_read / preview_assert / …）
+```
+
+**只有 HTTP 长轮询，没有 WebSocket。** 网关的 `upgrade` 是**原样透传**给 Vite 的（HMR 握手带自定义
+header，代理改一个字就坏，§9.1）。在同一个 handler 里既要透传又要自己握手，是这个模块里最容易
+写出"偶尔连不上"的写法 —— 用一个普通 GET 就没有这个交叉点。代价是每条命令多一次空转，
+而命令是"人让 Agent 看一眼"级别的频率，不是每帧。
+
+**`sessionId` 存 `sessionStorage`，不存内存变量。** 这条链路最常见的动作就是「改完代码 → 整页重载 →
+再断言一次」。sessionStorage 跨 reload 存活（同标签页、同源），所以重载后仍是同一个会话，
+挂账的命令还在队列里等着。存 JS 变量的话，"改完再验"会随机失败 —— 而且是那种"重跑一次就好了"
+的失败，最难查。
+
+**刷新时只重投幂等命令。** `read` / `assert` 做两遍没有副作用；`click` / `type` 做两遍可能点出两个
+东西、输入两遍。`hello` 按命令名分档重投，不是"全部重来"。
+
+**长轮询必须感知浏览器断开。** 整页导航会掐断挂着的请求，但网关侧那个 `await poll()` 还活着 ——
+新页面的 `hello` 来之前，命令会被投给那条死连接，调用方只能等到超时（真机上 100% 复现）。
+所以 `poll(sessionId, signal)` 接 `AbortSignal`，`res.on('close')` 里 abort，让命令**回到队列**。
+
+**页内抛异常也必须回话。** `querySelector` 返回 `null` 再读 `.textContent` 会抛；只在成功路径回话，
+调用方拿到的是"12 秒没回话"而不是"没找到第 1 个「#buy」（一共 0 个）"。`handle` 带 rejection 分支。
+
+**五个工具，只有一个是"断言"：**
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `preview_read` | `selector?` / `maxChars?` | 读页面文字（不给 selector 就是整页），元素带 tag 与选择器路径 |
+| `preview_assert` | `text` / `selector`+`text` / `selector`+`count` / `selector`+`value` | 四种断言形态，失败时**带实测值** |
+| `preview_click` | `selector` / `nth?` | 点第 n 个匹配（默认第 1 个） |
+| `preview_type` | `selector` / `text` / `nth?` | 填值 + 触发 `input`/`change`（受控组件才认） |
+| `preview_open` | `path?` | **整页重载**并等新会话，拿干净起点 |
+
+**断言失败返回 `isError: false`。** 这不是"工具坏了"，是"页面和预期不一致"——模型该做的是回去改代码。
+标成错误会让它换一个选择器重试、或者干脆换个断言绕过，两种行为都在浪费钱。
+反过来**参数不合法**（写了 `value` 却没 `selector`）在**发命令之前**就拦住，那是真的工具错误。
+工具输出里明确写「这是"页面与预期不一致"，不是工具坏了」，以及"该去改代码"。
+
+**为什么 `preview_open` 单独存在。** React Fast Refresh **保留 state**：改完代码计数器还是旧值
+（HMR 只换模块不重建根）。想验"从 0 开始点一次是不是 1"，必须先整页重载。这不是给用户的功能，
+是给 Agent 的"把现场清干净"。
+
+**依赖方向：`PageDriver` 是窄接口，不是 `@tenon/gateway` 的类型。**
+`server → gateway` 与 `server → agent` 都成立，但 agent 不能反向依赖 gateway。
+所以 `packages/agent/src/tools/preview.ts` 自己声明 `PageDriver { info, run, navigate }`，
+网关的 `PageBridge` 天然满足它，接线在 server 里做（`getPageDriver: (appId) => preview.pages(appId)`）。
+好处是单测能塞一个假 driver，把 Agent 循环整条验穿而不起真浏览器。
+
+**HTML 注入的三个条件**，少一个就会把别的响应改坏：
+
+1. 只改 `content-type` 含 `text/html` 的
+2. 只改**未压缩**的（`content-encoding` 为空）—— 压缩过就得先解压再压，为一个脚本不值得
+3. 插在 `</body>` **之前**：放 `<head>` 里执行时 `document.title` 还是空串
+
+以及一个必须成对处理的头：`content-length` 要重算，**`transfer-encoding` 必须一并删掉** ——
+两个同时存在时客户端永远等不到响应结束（表现为预览一直 `failed`，日志里什么都没有）。
+用「显式带 `content-length` 的桩」测不出这个，得经真 upstream。
+
+**工具要靠扩展才能被会话解析到。** `registry.install(extension)` 只是让工具"注册进注册表"，
+会话找工具走的是它自己的 `extensions` 列表。漏了的表现极隐蔽：子会话里工具**不存在**，
+模型若无其事地继续讲（"我看了一下页面…"），`execute` 一次都不进。所以 `harness-pool.ts` 里
+`extensions: [coding, subagent, preview]` 这一行是硬要求，且 `preview` 扩展**只有 tools、没有 sections**
+（它不往提示词里塞东西，靠角色自己的 `instructions` 说清工作顺序）。
+
+**角色侧：`e2e` 从"定义好了但没接"转 `ready`。** 它是唯一拿得到这五个工具的角色，主角色
+（`rootTools`）**没有** `preview_*` —— 要验页面必须派活。这也是对 §5.1「白名单是唯一事实来源」的
+一次实证：改角色表不需要动工具层，改工具层也不需要动角色表。
+
+**诚实边界（如实记）：**
+
+- `faux` 下"发现 bug"是**剧本**安排的，不是模型推理出来的。但判据是真的：断言失败的实测值来自
+  真 DOM，修完后同一条断言通过。换真模型只是把剧本换成一句话。
+- 没有"跑一条用户旅程"的能力：只有单条命令 + 断言，不录制/回放一串操作。
+- 只有点击与输入，没有 hover / 拖拽 / 滚动。
+- 断言只看文字、数量、值，没有截图对比。
+- 多标签页只有**最后一个**连上来的页面会被驱动（后到的 `hello` 覆盖前面的会话）。
 
 ---
 
@@ -1798,6 +1897,20 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > 一条断言"删掉一个应用别的应用还能跑"）。**M4 还欠**：E2E 子 Agent 的预览工具（DoD ①）、
 > Reviewer 的 `git_diff`/`typecheck`、CodeAct 的 codemode；档位路由要等设置能存多个 profile；
 > 额度没有跨应用的**总闸**（见 §5.6 的缺口）。
+
+> **M4 进度（v1.2.18，2026-11-02）**：第 4 步落地 —— **e2e 子 Agent 能自己点页面，DoD ① 已满足**。
+> ① `packages/gateway/src/page.ts`：`PageBridge`（会话 / 队列 / 长轮询 / 超时挂账 + 摘除 / 断开感知）
+> + 注入脚本（ES5、`sessionStorage` 存 sessionId、异常也回话、`navigate` 先回话再跳）+
+> `injectPageScript()`。② `proxy.ts`：吃掉四条 `/__tenon/page/*` 路径、HTML 注入（重算 `content-length`
+> 并删 `transfer-encoding`）。③ `preview.ts`：每个 run 一个 `PageBridge`，`pages(appId)` 给 server 查。
+> ④ `packages/agent/src/tools/preview.ts`：五个工具 + 窄接口 `PageDriver`（agent 不依赖 gateway）。
+> ⑤ `roles.ts`：`e2e` 转 `ready`，主角色拿不到这五个工具。⑥ `harness-pool.ts`：`preview` 扩展
+> 必须进 `extensions`，否则工具在子会话里"不存在"。
+> `pnpm test` 新增 31 项（gateway page 16 + agent preview-tools 13 + server e2e-agent 2），
+> `pnpm e2e:e2e` 9 项真 Electron：注入 `value + 2` 的 bug → 从真 DOM 拿到"期望 1、实测 3" →
+> 主角色改成 `value + 1` → 整页重载 → **同一条断言通过**。
+> **M4 还欠**：Reviewer 的 `git_diff`/`typecheck`、CodeAct 的 codemode、发布质量门禁；
+> 档位路由要等设置能存多个 profile；额度没有跨应用的**总闸**（§5.6）；用量答不了"哪个角色花了多少"。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 

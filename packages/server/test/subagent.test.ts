@@ -184,11 +184,12 @@ describe('subagent 工具', () => {
     expect(await lastAssistantText(app.id)).toContain('我自己来')
   })
 
-  it('还没接好的角色（e2e / reviewer / codeact）回一句"还没接"，不是让模型撞空', async () => {
+  it('还没接好的角色（reviewer / codeact）回一句"还没接"，不是让模型撞空', async () => {
     running = await boot()
     const { app } = await rpc<{ app: { id: string } }>(running, 'app.create', { name: '没接好' })
     running.agent.model?.script([
-      { tool: 'subagent', args: { role: 'e2e', task: '点一下按钮' } },
+      // e2e 在 M4 第 4 步接过来了，这里换成还没接的 reviewer
+      { tool: 'subagent', args: { role: 'reviewer', task: '审一遍' } },
       { text: '那我自己看代码吧。' },
     ])
     await runTurn(app.id, 's4')
@@ -198,7 +199,7 @@ describe('subagent 工具', () => {
     const text = rejected?.content?.map((part) => part.text ?? '').join('') ?? ''
     expect(text).toContain('还没接上')
     // 说清楚缺什么，模型才知道下一步该怎么办
-    expect(text).toContain('preview')
+    expect(text).toContain('git_diff')
     expect(await conversations(app.id)).toHaveLength(1)
   })
 
