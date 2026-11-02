@@ -235,3 +235,27 @@ net.Socket ──pg-gateway(fromNodeSocket)──> 单条全局串行队列 ─�
 | §21.5 | 未提断链 | 补：链路静默丢帧，调用会挂住 → web facet 每个调用自带超时 + 心跳 |
 | §21.2 | 未提变体探测 | 补：`in` 判断权限无效，必须试调并认 `not_in_variant` |
 | §2 / 附录 | 未提打包 | 补：chord 可与 server 同打包（726KB），不需外部化（与 pi-codemode 相反）|
+
+---
+
+## 8. Spike 6：`webSocketLink` 接真实 `ws`（2026-11-02，未收口）
+
+M5 第 3 步 b 卡在一条链路上：`memoryLinkPair`（Spike 5）一切正常，换成真 WebSocket 之后
+握手成功、`ctx.get` 能拿到引用，随后报 `invalid/protocol: link to peer: ack 2 outside 0..2`，
+调用不再返回。`pnpm --filter @tenon/spike-chord ws` 跑这一项。
+
+| 配置 | 结果 |
+|---|---|
+| 直连（`ws` client → `wss` server → 两个 host 在同一进程） | ✅ `hits=2`，46ms |
+| 经网关（`startGateway` 的 `upgrade` → `bridge.upgrade` → `wss.handleUpgrade`） | ✅ `hits=2`，52ms，`head=0` |
+| 关掉 `acceptPacked` | 直连与经网关都仍然通过 |
+| 真实组件路径（`plugin/server.js` 410KB bundle + 测试里 `import Assistant from contract.ts`） | ❌ ack 越界 |
+
+**结论：`webSocketLink` 本身、以及"网关转手 socket"这两步都是好的。** 剩下的差异只有一处：
+那个 410KB 的 facet bundle 里**自己带了一份 chord 与一份 contract**，而客户端用的是
+`contract.ts` / 根 `node_modules` 里的 chord —— 两端看到的 contract 不是同一个对象。
+
+下一个实验（已写进 STATUS §4.21）：
+1. 让 facet bundle **外部化 chord**（`external: ['@earendil-works/chord']`），两端共用一份实现；
+2. 或者让 server facet 把它的 contract 导出（`export { Assistant }`），客户端用**同一个实例**；
+3. 若两者都不行，再查 chord 的窗口/序号在"帧大小不同"时的行为（facet 侧 `send()` 返回值与实际写出字节不一致的可能）。

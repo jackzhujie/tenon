@@ -938,6 +938,11 @@ Spike 5 用的 `memoryLinkPair` 完全正常，所以问题在"真实 WebSocket 
 **下一步**：先做一个小 spike 把 `webSocketLink(ws)` 两端跑通（试单端压缩、`binaryType`、
 `accept` 与建客户端的时序），通了就取消那条 skip —— 它才是"浏览器那半边真能说话"的唯一证据。
 
+> **Spike 6 结论（`docs/SPIKES.md` §8，2026-11-02）**：已经排除了两个嫌疑人 ——
+> `webSocketLink` 直连 `ws` 正常（`hits=2` / 46ms），**经网关转手 socket 也正常**（52ms，`head=0`）。
+> 剩下的唯一差异：那个 410KB 的 facet bundle 里**自带一份 chord 与一份 contract**，
+> 而客户端用的是仓库里那份。下一步就试「facet 外部化 chord」与「facet 导出 contract 让两端共用」。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |

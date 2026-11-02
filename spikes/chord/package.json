@@ -4,14 +4,18 @@
   "type": "module",
   "description": "Spike 5：chord 宿主接入（契约 / 变体 / 状态复制 / 跨 host / 热重载 / 打包）",
   "scripts": {
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "ws": "tsx src/link.ts"
   },
   "dependencies": {
     "@earendil-works/chord": "1.4.0",
-    "typebox": "1.3.27"
+    "typebox": "1.3.27",
+    "ws": "8.22.0",
+    "@tenon/gateway": "workspace:*"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
-    "tsx": "4.23.15"
+    "tsx": "4.23.15",
+    "@types/ws": "8.18.1"
   }
 }
