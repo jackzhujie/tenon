@@ -37,6 +37,9 @@ extraResources:
     to: web
   - from: dist/templates
     to: templates
+  # 官方组件：加载器按真实目录扫描 manifest.json，同样必须在 asar 外面
+  - from: dist/plugins
+    to: plugins
 
 asar: true
 # 模板与页面在 asar 外面（生成器要按真实路径读文件），所以只有主进程进 asar

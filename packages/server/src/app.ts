@@ -5,6 +5,7 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
 import type { CoreServices } from '@tenon/core'
+import type { PluginRoot } from '@tenon/component-host'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import {
@@ -36,6 +37,8 @@ export interface BuildServerOptions {
   bus: SseBus
   token: string
   version?: string
+  /** 组件来源（`hub > bundled`）。不给就用空列表 —— 纯 API 服务不该去猜磁盘布局 */
+  pluginRoots?: readonly PluginRoot[]
   logger?: boolean
   /**
    * 渲染器产物目录（`apps/web/dist`）。给了就由 server 同源发页面，
@@ -60,6 +63,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
     preview: options.preview,
     bus,
     version: options.version ?? '0.0.0',
+    plugins: { roots: options.pluginRoots ?? [] },
   }
   const handlers = createHandlers(deps)
 

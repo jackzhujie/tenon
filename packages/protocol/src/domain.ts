@@ -418,3 +418,95 @@ export const DiffFile = z.object({
   truncated: z.boolean().optional(),
 })
 export type DiffFile = z.infer<typeof DiffFile>
+
+/* ────────────────────────── 组件体系（M5） ────────────────────────── */
+
+/**
+ * 组件类型（DESIGN §21.4）。`bundled` 随包、`hub` 从官方 Hub 下、`local` 是本地目录（M5 不开放）。
+ *
+ * 它与"从哪个根加载的"必须一致：hub 根里放一个写着 `bundled` 的清单，等于绕过签名校验——
+ * 加载计划里会当成错误拦掉。
+ */
+export const ComponentSource = z.enum(['bundled', 'hub', 'local'])
+export type ComponentSource = z.infer<typeof ComponentSource>
+
+export const ComponentPricing = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('free') }),
+  /** Phase 3 才用得到；M5 / M6 的官方插件恒为 free */
+  z.object({ type: z.literal('paid'), sku: z.string() }),
+])
+export type ComponentPricing = z.infer<typeof ComponentPricing>
+
+/** 一处挂载。`prefix` 只对 `app.api`（后端路由）有意义 */
+export const ComponentMount = z.object({
+  slot: z.string(),
+  order: z.number().int(),
+  prefix: z.string().nullable(),
+})
+export type ComponentMount = z.infer<typeof ComponentMount>
+
+/**
+ * 一条**装不上**的原因。
+ *
+ * 为什么是"列出来"而不是抛异常：组件装不上不该让插件页 500。用户要看到的是
+ * 「AI 小助手 装不上：它要求 Tenon ≥ 1.4.0，当前 1.2.0」这种东西，
+ * 而不是一个红叉加一句「Internal Server Error」。
+ *
+ * `code` 是稳定契约（界面按它决定要不要给"重试/卸载"按钮），`message` 可以改文案。
+ */
+export const ComponentProblem = z.object({
+  code: z.string(),
+  /** 装配声明里的组件 id；坏到连 id 都读不出来时为 null */
+  componentId: z.string().nullable(),
+  message: z.string(),
+  /** 怎么修（"把 version 改成 ^1.0.0" / "先装 xxx"） */
+  hint: z.string().nullable(),
+})
+export type ComponentProblem = z.infer<typeof ComponentProblem>
+
+/** 装配声明里的一条，加上解析结果 —— 插件页直接渲染这个 */
+export const InstalledComponent = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  /** 实际选中的版本（不是装配声明里的区间） */
+  version: z.string(),
+  source: ComponentSource,
+  license: z.string(),
+  /** 插件页的开关。`false` = 声明还在但不加载 */
+  enabled: z.boolean(),
+  /**
+   * 是否真的会被加载：`enabled` 为真且没有任何 error 级 problem。
+   *
+   * 与 `enabled` 分开是因为两种"没生效"要区别对待：开关关了是用户的选择，
+   * 装不上是故障。界面上前者是灰色开关，后者是红字。
+   */
+  loaded: z.boolean(),
+  permissions: z.array(z.string()),
+  pricing: ComponentPricing,
+  /** 组件自己声明支持哪些插槽 */
+  slots: z.array(z.string()),
+  mounts: z.array(ComponentMount),
+  /** facet 入口（相对插件目录）；没有的那一侧为 null */
+  facets: z.object({
+    server: z.string().nullable(),
+    web: z.string().nullable(),
+    worker: z.string().nullable(),
+  }),
+  /** 安装时要写进应用 AGENTS.md 的说明 */
+  agentHints: z.string(),
+})
+export type InstalledComponent = z.infer<typeof InstalledComponent>
+
+/** 磁盘上有、但没装进这个应用的组件（插件页的"可安装"列表） */
+export const AvailableComponent = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  version: z.string(),
+  source: ComponentSource,
+  pricing: ComponentPricing,
+  /** 已经在装配声明里（哪怕被 `enabled: false` 关着也算装了） */
+  installed: z.boolean(),
+})
+export type AvailableComponent = z.infer<typeof AvailableComponent>

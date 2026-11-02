@@ -1,0 +1,15 @@
+{
+  "name": "@tenon/component-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "组件体系（M5）：插件清单、装配声明 app.components.json、覆盖层解析与加载计划",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@tenon/protocol": "workspace:*",
+    "zod": "4.6.7"
+  }
+}

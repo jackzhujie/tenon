@@ -7,6 +7,7 @@
 import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { openCore, type CoreServices } from '@tenon/core'
+import { pluginRoots, type PluginRoot } from '@tenon/component-host'
 import { createAgentRuntime, type AgentRuntime, type PageDriverProvider } from '@tenon/agent'
 import { PreviewManager, type PreviewManagerOptions } from '@tenon/gateway'
 import { scaffoldApp } from '@tenon/generator'
@@ -46,6 +47,11 @@ export interface StartServerOptions {
    * 真 DOM 由 `pnpm e2e:e2e` 在 Electron 里验。
    */
   pageDriver?: PageDriverProvider
+  /**
+   * 组件来源覆盖（M5）。不传就按 `TENON_HOME` 与环境算：`<home>/plugins` + `plugins/bundled`。
+   * 测试给临时目录，免得"组件列表"依赖测试机上有没有真插件。
+   */
+  pluginRoots?: readonly PluginRoot[]
 }
 
 export interface RunningServer {
@@ -120,6 +126,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     bus,
     token,
     ...(options.version === undefined ? {} : { version: options.version }),
+    pluginRoots: options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root }),
     ...(options.logger === undefined ? {} : { logger: options.logger }),
     ...(options.webDir === undefined ? {} : { web: { dir: options.webDir } }),
   })

@@ -17,6 +17,7 @@ import {
   levelOf,
   readBudget,
 } from '@tenon/core'
+import { ASSEMBLY_FILE, buildPlan, listAvailable, type PluginRoot } from '@tenon/component-host'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { listTemplates } from '@tenon/generator'
@@ -32,6 +33,11 @@ export interface ServerDeps {
   preview: PreviewManager
   bus: SseBus
   version: string
+  /**
+   * 组件从哪里加载（`hub > bundled`）。由 `startServer` 按 `TENON_HOME` 与环境算出来，
+   * 测试可以直接给一个临时目录 —— 组件加载不该要求测试机器上真装了官方插件。
+   */
+  plugins: { roots: readonly PluginRoot[] }
 }
 
 export type Handler<M extends RpcMethod> = (input: RpcArgs<M>) => Promise<RpcOutput<M>>
@@ -319,6 +325,28 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     'release.publish': async (input) => {
       const app = core.apps.require(input.appId)
       return publishRelease({ core, app, notes: input.notes, force: input.force === true })
+    },
+
+    'component.list': async (input) => {
+      const app = core.apps.require(input.appId)
+      const plan = await buildPlan({
+        repoDir: appPaths(core.home, app.id).repoDir,
+        roots: deps.plugins.roots,
+        tenonVersion: deps.version,
+      })
+      /*
+       * `installed` 只认装配声明 —— 不是"加载成功的那些"。开关关掉、装不上的，都算装过：
+       * 插件页上它们已经在那份列表里了，再在"可安装"里出现一次会让人以为装了两份。
+       */
+      const installed = (plan.assembly?.components ?? []).map((c) => c.id)
+      const available = await listAvailable({ roots: deps.plugins.roots, installed })
+      return {
+        components: [...plan.components],
+        problems: [...plan.problems],
+        available,
+        assemblyFile: ASSEMBLY_FILE,
+        tenonVersion: deps.version,
+      }
     },
 
     'settings.get': async () => ({ values: core.settings.all() }),

@@ -9,11 +9,14 @@
 import { z } from 'zod'
 import {
   App,
+  AvailableComponent,
+  ComponentProblem,
   DiffFile,
   FileNode,
   GateOutcome,
   GitCommit,
   GitFileChange,
+  InstalledComponent,
   LogEntry,
   LogLevel,
   LogSource,
@@ -391,6 +394,28 @@ export const rpcMethods = {
       objects: z.number().int().nonnegative(),
       /** 这次跑过的检查。发成功之后前端也要显示"它是怎么过的" */
       gate: GateOutcome,
+    }),
+  },
+
+  /**
+   * 这个应用装了哪些组件、为什么有的装不上、磁盘上还有什么可装（M5 第 2 步）。
+   *
+   * **只读**：不加载任何东西，也不改装配声明。装不上的原因放在 `problems` 里而不是让整个
+   * 调用失败 —— 插件页要能显示「AI 小助手装不上：它要求 Tenon ≥ 1.4.0」，而不是一个 500。
+   */
+  'component.list': {
+    input: z.object({ appId: Id }),
+    output: z.object({
+      /** 装配声明里的每一条（按声明顺序），含被 `enabled:false` 关掉的和装不上的 */
+      components: z.array(InstalledComponent),
+      /** 装不上的原因。`code` 是稳定契约，见 `@tenon/component-host` 的 `COMPONENT_PROBLEM_CODES` */
+      problems: z.array(ComponentProblem),
+      /** 磁盘上有、但没装配的组件（插件页的"可安装"） */
+      available: z.array(AvailableComponent),
+      /** 装配声明文件名（`app.components.json`，相对仓库根） */
+      assemblyFile: z.string(),
+      /** 当前宿主版本 —— 界面要能说清"组件要求 1.4.0，你是 1.2.0" */
+      tenonVersion: z.string(),
     }),
   },
 

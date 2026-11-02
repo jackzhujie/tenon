@@ -6,6 +6,7 @@
  * 很难查 —— 只留一份实现，别在测试里各写各的。
  */
 import type { PageDriverProvider } from '@tenon/agent'
+import type { PluginRoot } from '@tenon/component-host'
 import type { PreviewManagerOptions } from '@tenon/gateway'
 import type { SseEvent } from '@tenon/protocol'
 import { startServer, type RunningServer } from '../src/index.js'
@@ -19,6 +20,8 @@ export interface BootOptions {
   webDir?: string
   /** 假页面通道（e2e 子 Agent 的集成测试用，不起浏览器） */
   pageDriver?: PageDriverProvider
+  /** 组件来源（不传就是测试机上真实的 `plugins/bundled`，通常为空） */
+  pluginRoots?: readonly PluginRoot[]
 }
 
 export function boot(dir: string, options: BootOptions = {}): Promise<RunningServer> {
@@ -29,6 +32,7 @@ export function boot(dir: string, options: BootOptions = {}): Promise<RunningSer
     ...(options.preview === undefined ? {} : { preview: options.preview }),
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
     ...(options.pageDriver === undefined ? {} : { pageDriver: options.pageDriver }),
+    ...(options.pluginRoots === undefined ? {} : { pluginRoots: options.pluginRoots }),
   })
 }
 

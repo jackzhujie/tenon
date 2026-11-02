@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tenon/agent": "workspace:*",
+    "@tenon/component-host": "workspace:*",
     "@tenon/core": "workspace:*",
     "@tenon/db-provisioner": "workspace:*",
     "@tenon/gateway": "workspace:*",

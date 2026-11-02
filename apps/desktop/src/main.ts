@@ -25,9 +25,15 @@ let serverOrigin: string | null = null
 function buildEnv(paths: DesktopPaths): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }
 
-  // 壳告诉 server 三件事：页面在哪、模板在哪、数据放哪。其余全由 server 自己决定
+  // 壳告诉 server 四件事：页面在哪、模板在哪、组件在哪、数据放哪。其余全由 server 自己决定
   env['TENON_WEB_DIR'] = paths.webDir
   env['TENON_TEMPLATES_DIR'] = paths.templatesDir
+  /*
+   * 组件目录必须由壳来指：`@tenon/component-host` 只在开发态能按 `import.meta.url` 找到
+   * `plugins/bundled`，打包进 `server.mjs` 之后那个相对位置全错 —— 而错的表现是
+   * "插件页空空如也"，没有任何报错。这与 `TENON_TEMPLATES_DIR` 是同一个坑。
+   */
+  env['TENON_PLUGINS_DIR'] = paths.pluginsDir
   env['TENON_HOME'] ??= join(app.getPath('userData'), 'home')
 
   // 开发态便利：没配 provider 就先跑 faux，否则第一次启动只会得到"没有可用模型"

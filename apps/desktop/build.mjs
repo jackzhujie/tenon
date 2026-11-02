@@ -6,6 +6,7 @@
  *   main.mjs              ← Electron 主进程（只有 electron 是外部依赖）
  *   server/server.mjs     ← 整个 server 打成一个文件（12MB，含 fastify/pi/isomorphic-git）
  *   templates/            ← 建应用用的模板（真实文件，必须随包走）
+ *   plugins/              ← 官方组件（真实文件，加载器按目录扫描 manifest.json）
  *   web/                  ← 渲染器产物（`pnpm build:web` 的 dist）
  * ```
  *
@@ -256,6 +257,20 @@ async function main() {
     filter: (src) => !src.includes('node_modules') && !src.endsWith('/dist'),
   })
 
+  /*
+   * 3b) 官方组件（真实文件，加载器按目录找 `manifest.json`）。
+   *
+   * 目录可以暂时是空的（M5 第 3 步才放第一个组件），但**目录本身必须存在**：
+   * 主进程把 `TENON_PLUGINS_DIR` 指过来，少一个目录就等于"官方组件全丢了"，
+   * 而那种缺失在界面上只表现为插件页空空如也。
+   */
+  const pluginsSrc = join(root, 'plugins', 'bundled')
+  if (!existsSync(pluginsSrc)) throw new Error(`缺少官方组件目录：${pluginsSrc}`)
+  await cp(pluginsSrc, join(dist, 'plugins'), {
+    recursive: true,
+    filter: (src) => !src.includes('node_modules'),
+  })
+
   // 4) 渲染器产物
   const webDist = join(root, 'apps', 'web', 'dist')
   try {
@@ -283,6 +298,7 @@ async function main() {
       `pglite+pnpm   ${kib(await sizeOf(join(dist, 'server', 'node_modules')))}（外部化）/ pnpm ${kib(await sizeOf(join(dist, 'server', 'node_modules', 'pnpm')))}`,
       `codemode      ${kib(await sizeOf(join(dist, 'server', 'node_modules', '@earendil-works', 'pi-codemode')))} + quickjs.wasm ${kib((await stat(join(dist, 'server', 'node_modules', 'quickjs-wasi', 'quickjs.wasm'))).size)}`,
       `templates     ${kib(await sizeOf(join(dist, 'templates')))}`,
+      `plugins       ${kib(await sizeOf(join(dist, 'plugins')))}`,
       `web           ${kib(await sizeOf(join(dist, 'web')))}`,
       ...reportNatives(natives),
     ].join('\n') + '\n',

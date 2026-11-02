@@ -3,10 +3,10 @@
  *
  * 两种形态的差别只有一层目录，但搞混就会得到一个"开发能跑、装完白屏"的应用：
  *
- * | 形态 | 基线 | server.mjs | web | templates |
- * |---|---|---|---|---|
- * | 开发（`pnpm dev:desktop`） | `apps/desktop/dist` | `<base>/server/server.mjs` | `<base>/web` | `<base>/templates` |
- * | 打包（electron-builder） | `Contents/Resources` | 同上 | 同上 | 同上 |
+ * | 形态 | 基线 | server.mjs | web | templates | plugins |
+ * |---|---|---|---|---|---|
+ * | 开发（`pnpm dev:desktop`） | `apps/desktop/dist` | `<base>/server/server.mjs` | `<base>/web` | `<base>/templates` | `<base>/plugins` |
+ * | 打包（electron-builder） | `Contents/Resources` | 同上 | 同上 | 同上 | 同上 |
  *
  * 所以 `apps/desktop/build.mjs` 把三样东西铺成**同构的** `dist/{server,web,templates}`，
  * 打包时整体作为 `extraResources` 放进去 —— 主进程不需要知道自己在哪。
@@ -21,6 +21,11 @@ export interface DesktopPaths {
   readonly serverEntry: string
   readonly webDir: string
   readonly templatesDir: string
+  /**
+   * 官方组件（`resources/plugins/<id>/`）。M5 起是真实目录 —— 加载器按目录扫描，
+   * 所以它必须像 templates 一样**在 asar 外面**，且开发态与打包态同构。
+   */
+  readonly pluginsDir: string
   /** 打包后的应用资源根（日志里打得出来，排查"到底读的哪份"） */
   readonly base: string
 }
@@ -40,5 +45,6 @@ export function resolveDesktopPaths(input: ResolvePathsInput): DesktopPaths {
     serverEntry: join(base, 'server', 'server.mjs'),
     webDir: join(base, 'web'),
     templatesDir: join(base, 'templates'),
+    pluginsDir: join(base, 'plugins'),
   }
 }

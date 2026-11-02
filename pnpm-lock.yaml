@@ -107,6 +107,15 @@ importers:
         specifier: 1.3.27
         version: 1.3.27
 
+  packages/component-host:
+    dependencies:
+      '@tenon/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   packages/core:
     dependencies:
       '@tenon/protocol':
@@ -185,6 +194,9 @@ importers:
       '@tenon/agent':
         specifier: workspace:*
         version: link:../agent
+      '@tenon/component-host':
+        specifier: workspace:*
+        version: link:../component-host
       '@tenon/core':
         specifier: workspace:*
         version: link:../core

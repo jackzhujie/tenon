@@ -5,7 +5,8 @@
 > + M4 第 1–7 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具
 > + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁）
 > + **发布预检**（`release.check`：打开对话框就知道能不能发）
-> + **M5 第 1 步**（chord 宿主接入 spike，10 项，`pnpm spike:chord`）**：435 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + **M5 第 1 步**（chord 宿主接入 spike，10 项，`pnpm spike:chord`）
+> + **M5 第 2 步**（组件加载器：清单 / 装配声明 / 覆盖层解析 / 加载计划 / `component.list`）**：509 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -37,6 +38,10 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 （`RELEASE_CHECKS_FAILED`），被拒的发布连 tag 都不留、也不消耗版本号。判断是三态 —— 「这个应用没有
 那项检查」放行并说明，「该检查的没检查成功」必拦。用户确实要发，可以点「仍然发布」（二次确认），
 但记录里会标成 `带问题`，半年后查得出来。
+
+**组件能装了**（M5 第 2 步）：应用里装了什么组件写在它自己的仓库里（`app.components.json`，跟着 git 走），
+加载器按 `hub > bundled` 的覆盖层挑版本、逐条独立判定，装不上的原因（19 个稳定 code）原样返回给界面 ——
+`component.list` 恒 200，插件页要能说清"它要求 Tenon ≥ 1.4.0，你是 1.2.0"。真组件（AI 小助手）是下一步。
 
 **而且打开对话框就知道能不能发（预检 `release.check`）**：不用点了才知道。查一次是**真跑**
 一遍（`tsc` + `pnpm run test`），所以界面上有转圈和已等秒数；查完什么都不留下 —— 不打 tag、
@@ -282,7 +287,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | # | 步骤 | 状态 | 落在哪 |
 |---|---|---|---|
 | 1 | **chord 宿主接入 spike**：契约 / 变体 / 跨 host / 热重载 / 打包（10 项） | ✅ 见 §4.17 | `spikes/chord/` |
-| 2 | **bundled 插件加载器**：`resources/plugins/<id>/` 只读源 + 清单（依赖/权限/宿主兼容）+ 装配声明 `app.components.json` | ⬜ | — |
+| 2 | **bundled 插件加载器**：`resources/plugins/<id>/` 只读源 + 清单（依赖/权限/宿主兼容）+ 装配声明 `app.components.json` + `component.list` | ✅ 见 §4.18 | `packages/component-host/`、`plugins/bundled/`、`apps/desktop/src/{paths,main}.ts`、`apps/desktop/{build.mjs,electron-builder.yml}` |
 | 3 | **第一个真组件：AI 小助手**（contract + server facet + web facet + `app.shell.overlay` 插槽） | ⬜ | — |
 | 4 | **`install_component` 工具**：写装配声明 + 生成 `src/components.generated.ts` + 改 `AGENTS.md` 索引 | ⬜ | — |
 | 5 | **卸载即清理**（代码 + 装配声明 + `AGENTS.md`，幂等；DoD ②） | ⬜ | — |
@@ -707,10 +712,35 @@ M5 整套押在 chord 上（DESIGN §21「不要自研插件框架」），所�
 推翻的假设：`'ask' in ref` 恒为 `true`（Ref 代理），判权限只能真调一次认 `not_in_variant`；
 无参方法的实现签名是 `(ctx)` 不是 `(args, ctx)`；`invalid(reason, message)` 是两个参数。
 
-细节与逐项数字：`docs/SPIKES.md` §7。**下一步 = M5 第 2 步：把 `Sheet` 这种 probe 换成一个真组件**（AI 小助手，
-契约 + server facet + web facet + `install_component` 工具 + 插槽渲染），第 1 步只验了"能跑"，还没验"能装进应用"。
+细节与逐项数字：`docs/SPIKES.md` §7。**下一步 = M5 第 3 步：把 probe 换成一个真组件**，
+第 1 步只验了"能跑"、第 2 步验了"能装"，还没验"能挂到应用上并被 Agent 用起来"。
 
-### 4.18 代码地图（只列已落地的）
+### 4.18 M5 第 2 步验收（bundled 组件加载器 + 装配声明）—— ✅ 已完成
+
+新包 `@tenon/component-host`：**不加载 chord、不碰 React**，只回答「磁盘上有谁、这个应用装了谁、
+按什么顺序加载、装不上的那几条为什么」。真正的 `host.load()` 留给壳生成器（第 3 步）。
+
+| 交付 | 落在哪 | 验了什么（单测条数） |
+|---|---|---|
+| 严格 semver 子集 | `src/version.ts` | 15 项：`^0.x` 只放开补丁（与 `^1.x` 规则不同）、预发布版不放行 `*`、**认不出的写法抛错**（宽松实现会静默给 false/true） |
+| 清单校验 | `src/manifest.ts` | 14 项：未知权限 / 绝对路径 / `../` 越界 / 未知插槽 / 重复项 / 收费缺 sku 全拒，且指出哪一行 |
+| 装配声明 | `src/assembly.ts` | 10 项：文件不存在 = 空装配（不是错误）、坏 JSON = invalid、**原子写**（tmp+rename）、增删幂等 |
+| 覆盖层解析 | `src/resolve.ts` + `src/roots.ts` | 认两种布局（bundled 平铺 / hub `<id>/<version>/`），`hub > bundled` |
+| 加载计划 | `src/plan.ts` | 30 项：19 个 problem code、依赖拓扑排序、成环整组不加载、前缀冲突、**坏一个不影响别的** |
+| RPC | `component.list` | 5 项：走真 HTTP；装不上带原因且**恒 200**（插件页不该看到 500）；appId 错是 404 |
+| 打包 | `apps/desktop` | `TENON_PLUGINS_DIR` → `dist/plugins` → `extraResources`（与 `templates` 同一套约定） |
+
+三个**会静默坏**的设计点（都进了 §5）：
+
+1. **覆盖层按"根"选版本**，不是按全局最高版本 —— 否则 bundled 1.3 会盖掉 hub 1.2，官方热更新永远不生效。
+2. **一条装配条目坏，只影响它自己**。整份拒会让用户以为所有组件都被卸载了。
+3. **`minTenonVersion` 对 `0.0.0` 恒通过**（仓库构建代表"还没发版的开发树"，比任何发布版都新）。
+   代价是开发态测不出写错，所以"真实分支"（host=1.2.0 / 组件要 1.4.0）单独有一条用例。
+
+`plugins/bundled/README.md` 是第一个组件的目录约定（M5 第 3 步往里放 AI 小助手；现在目录是空的，
+加载器返回空列表而不是报错）。全绿：typecheck **17** project / test **509**（53 文件）/ build:desktop。
+
+### 4.19 代码地图（只列已落地的）
 
 ```
 packages/
@@ -718,6 +748,12 @@ packages/
 │   ├── src/rpc.ts       #   一张表三种用途：服务端校验、前端取类型、覆盖率测试断言
 │   └── src/usage-format.ts # ★ formatTokens / formatCost / budgetMessage —— 服务端与浏览器共用同一套口径
 │                        #   （走 `@tenon/protocol/browser`，core 带 node:sqlite 进不了前端产物）
+├── component-host/      # ★ M5 组件体系地基：不加载 chord、不碰 React，只做判断
+│   ├── src/version.ts   #   严格 semver 子集：**认不出的写法抛错**（宽松实现会静默 false/true）
+│   ├── src/manifest.ts  #   清单校验：权限白名单 / facet 路径不许越界 / 未知插槽
+│   ├── src/assembly.ts  #   app.components.json 读写（原子写 = tmp + rename）
+│   ├── src/{roots,resolve}.ts # 覆盖层：hub > bundled，认平铺与 <id>/<version>/ 两种布局
+│   └── src/plan.ts      #   ★ 加载计划：19 个 problem code / 依赖拓扑 / 成环 / 前缀冲突
 ├── core/                # 领域服务，不认识 HTTP
 │   ├── src/paths.ts     #   TENON_HOME 布局（唯一算路径的地方）
 │   ├── src/db.ts        #   node:sqlite + PRAGMA user_version 线性迁移
@@ -993,6 +1029,12 @@ scripts/
 | **`'method' in ref` 判不出权限** | Ref 是代理，`in` 恒为 `true`。要知道 guest 有没有某个方法，只能**真调一次**并认 `not_in_variant` |
 | **chord 断链时调用会挂住，不抛错** | `sever()`（双向静默丢帧、不发 close）之后调用方法，1.5s 内既不返回也不抛。所以 web facet 的每个调用都得自带超时 + 心跳，不能等"断了会告诉我" |
 | **无参方法的实现签名是 `(ctx)`** | 有入参才是 `(args, ctx)`；写错会被类型检查拦住（不静默）。`invalid` 也是两个参数：`invalid(reason, message)` |
+| **覆盖层要按"根"选版本，不是按全局最高版本** | 顺序是 `hub > bundled`：先看哪个根有满足区间的版本，再看该根里的最高版本。按全局最高选的话 bundled 1.3 会盖掉 hub 1.2 —— 官方修了 bug 推到 Hub 也装不上，而现象只是"更新没生效" |
+| **一个组件坏不能连累别的组件** | 装配声明逐条独立判定：失败的落一条 problem，其余照常加载。整份拒（"有个字段不认识就全不装"）会让用户以为所有组件都被卸载了，比装不上更吓人 |
+| **装不上要返回 problem，不要抛 500** | `component.list` 恒 200，原因在 `problems`（19 个稳定 code）。插件页要能说"它要求 Tenon ≥ 1.4.0，你是 1.2.0"；一个红叉加 Internal Server Error 什么也说明不了 |
+| **`minTenonVersion` 对 `0.0.0` 恒通过** | 仓库构建就是 `0.0.0`，代表"还没发版的开发树"。不这么判所有清单都得写 `0.0.0`，字段当场失去意义。**代价：开发态测不出写错**，所以真实分支（host=1.2.0 / 组件要 1.4.0）单独有用例 |
+| **组件目录名就是 id** | 清单 `id` 与目录名不一致 → `id-mismatch` 直接拦。否则放错一个目录就是"装配了 A、装上了 B"，而且两者都合法、都能跑 |
+| **`TENON_PLUGINS_DIR` 和 `TENON_TEMPLATES_DIR` 是同一个坑** | 加载器打进 `server.mjs` 后按 `import.meta.url` 找 `plugins/bundled` 必然找错，而表现是"插件页空空如也"、**没有任何报错**。壳必须显式指到 `<Resources>/plugins` |
 
 
 ---
@@ -1012,18 +1054,18 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：48 个测试文件（435 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检）
+pnpm test                  # vitest：53 个测试文件（509 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
 pnpm e2e:diff              # ★ 改动/回滚：git.log / show / revert 全走真 HTTP
 pnpm e2e:release           # ★ 发布：预检只读 → 门禁拦截 → force 留痕 → 打 tag + 推本地裸库，系统 git 验 fsck / clone
 pnpm build:web             # 前端产物
-pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates} + server/node_modules
+pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates,plugins} + server/node_modules
 pnpm pack:desktop          # electron-builder --dir → apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop         # 桌面冒烟（开发态）：真起 Electron，8 项断言
 pnpm smoke:desktop:packaged # 同上，但跑打包后的 Tenon.app
-pnpm typecheck             # 8 个 packages + 2 个 apps + 5 个 spikes + scripts（16 个项目）
+pnpm typecheck             # 9 个 packages + 2 个 apps + 5 个 spikes + scripts（17 个项目）
 
 # 模板里的副本从 runtime-sdk 同步（改了 src/browser 或 src/nest 之后）
 node packages/runtime-sdk/scripts/sync-templates.mjs          # 写入
@@ -1076,7 +1118,7 @@ pnpm spike:chord    # chord 宿主：契约/变体/跨 host/热重载/打包（1
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（五个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.22），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.24），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
 当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
@@ -1084,9 +1126,11 @@ pnpm spike:chord    # chord 宿主：契约/变体/跨 host/热重载/打包（1
 e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁）
 + **发布预检**（`release.check`），**DoD ①②③ 已满足，五个子角色全部 ready**。
 **M5 已开工**：第 1 步是 chord 宿主接入 spike（`pnpm spike:chord` 10/10），
-撞出「对象默认 referenced → state 随 root 静默归零（必须 `linger`）」与「断链调用会挂住」两条硬约束。
-下一步是 **M5 第 2 步（bundled 插件加载器 + 装配声明）**，先看 §4.2 的 M5 表与 §4.18 的代码地图。
-435 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
+撞出「对象默认 referenced → state 随 root 静默归零（必须 `linger`）」与「断链调用会挂住」两条硬约束；
+第 2 步是组件加载器（`@tenon/component-host`：清单 / `app.components.json` / 覆盖层解析 /
+加载计划 / `component.list`），撞出「覆盖层要按根选版本」与「装不上要 problem 不要 500」。
+下一步是 **M5 第 3 步（第一个真组件：AI 小助手）**，先看 §4.2 的 M5 表与 §4.19 的代码地图。
+509 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
