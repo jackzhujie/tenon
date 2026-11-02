@@ -26,7 +26,8 @@
  * 2. `templates` 必须落在 `dist/templates`：`registry.ts` 按 `import.meta.url` 找 `../templates`
  */
 import { build } from 'esbuild'
-import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { cp, mkdir, readdir, rm, stat, realpath } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -64,10 +65,69 @@ async function sizeOf(path) {
  */
 const PGLITE_EXTERNAL = ['@electric-sql/pglite', '@electric-sql/pglite/*']
 
+/**
+ * CodeAct 的脚本沙箱（M4 第 6 步）同理，而且**两处**都靠 `import.meta.url`：
+ * - `quickjs-wasi/quickjs.wasm` 用 `createRequire(import.meta.url).resolve()` 找；
+ * - worker 线程用 `new URL('./worker.js', import.meta.url)` 起。
+ *
+ * 打进单文件之后这两个路径都指向 `server.mjs` 旁边，worker 起不来、wasm 读不到。
+ * 症状比 PGlite 更隐蔽：构建成功、其它功能全好，只有"派活给 codeact"会报 sandbox 错误。
+ *
+ * 做法同上：external + 整包拷进 `dist/server/node_modules/`。`quickjs-wasi` 只拷
+ * `package.json` 与 `quickjs.wasm` —— 那几个 `extensions/*.so` 是别用不上的 WASI 扩展。
+ */
+const CODEMODE_EXTERNAL = [
+  '@earendil-works/pi-codemode',
+  '@earendil-works/pi-codemode/*',
+  'quickjs-wasi',
+  'quickjs-wasi/*',
+]
+
 function resolvePgliteDir() {
   const req = createRequire(join(root, 'packages', 'db-provisioner', 'package.json'))
   // 包没有导出 `./package.json`，所以从主入口往上退两级
   return dirname(dirname(req.resolve('@electric-sql/pglite')))
+}
+
+/**
+ * pi-codemode 的包根。
+ *
+ * 不能用 `require.resolve('@earendil-works/pi-codemode')`：它的 `exports` 只有
+ * `types` / `source` / `import` 三个条件，**没有 `require` / `default`** —— CJS 解析直接报
+ * `No "exports" main defined`。而 `./package.json` 子路径也没导出，绕不过去。
+ * pnpm 把直接依赖做成软链，`realpath` 一下就是真包目录（扁平布局下返回自身，同样对）。
+ */
+function resolveCodemodeDir() {
+  return realpath(join(root, 'packages', 'agent', 'node_modules', '@earendil-works', 'pi-codemode'))
+}
+
+/** `quickjs.wasm` 的真实路径：从 pi-codemode 自己那里解析，与运行期走的是同一条规则 */
+async function resolveQuickJSWasm() {
+  const req = createRequire(join(await resolveCodemodeDir(), 'package.json'))
+  return req.resolve('quickjs-wasi/quickjs.wasm')
+}
+
+/**
+ * 自检：照着运行期那两条规则验一遍沙箱的布局。
+ *
+ * 这条链路最坏的失败是**构建成功、功能坏掉**：esbuild 把 `import.meta.url` 指到 `server.mjs`
+ * 旁边之后，worker 与 wasm 都读不到，而报错要到用户派活给 codeact 那一刻才出现。
+ * 所以在构建时就按 `dist/wasm.js` / `dist/runtime/host.js` 的位置各解析一次，错了当场失败。
+ */
+function assertCodemodeLayout() {
+  const pkg = join(dist, 'server', 'node_modules', '@earendil-works', 'pi-codemode')
+  const wasm = createRequire(join(pkg, 'dist', 'wasm.js')).resolve('quickjs-wasi/quickjs.wasm')
+  const worker = join(pkg, 'dist', 'runtime', 'worker.js')
+  for (const [label, path] of [
+    ['quickjs.wasm', wasm],
+    ['codemode worker', worker],
+  ]) {
+    if (!existsSync(path)) throw new Error(`脚本沙箱缺文件（${label}）：${path}`)
+  }
+  // 解析到仓库自己的 node_modules 不算成功 —— 打包后那台机器上没有它
+  if (!wasm.startsWith(dist)) {
+    throw new Error(`quickjs.wasm 解析到了安装包之外：${wasm}（应该落在 ${dist} 里）`)
+  }
 }
 
 /**
@@ -142,7 +202,7 @@ async function main() {
     outfile: join(dist, 'server', 'server.mjs'),
     logLevel: 'warning',
     banner: { js: BANNER },
-    external: PGLITE_EXTERNAL,
+    external: [...PGLITE_EXTERNAL, ...CODEMODE_EXTERNAL],
   })
 
   // 2b) PGlite 原样随包走（含 wasm / data / 扩展）
@@ -150,6 +210,27 @@ async function main() {
   await cp(pgliteSrc, join(dist, 'server', 'node_modules', '@electric-sql', 'pglite'), {
     recursive: true,
     filter: (src) => !src.endsWith('.map') && !src.endsWith('.d.ts') && !src.endsWith('.d.cts'),
+  })
+
+  // 2b-2) 脚本沙箱：pi-codemode 整包 + quickjs.wasm
+  //
+  // 两者必须**放在同一个 node_modules 树里**：pi-codemode 用 `createRequire` 从自己的位置
+  // 解析 `quickjs-wasi/quickjs.wasm`，所以 `dist/server/node_modules/quickjs-wasi/` 正好是
+  // 它往上找时的落点。改目录结构前先读一遍 `dist/wasm.js` 那三行。
+  await cp(await resolveCodemodeDir(), join(dist, 'server', 'node_modules', '@earendil-works', 'pi-codemode'), {
+    recursive: true,
+    filter: (src) => !src.endsWith('.map') && !src.endsWith('.d.ts'),
+  })
+  /*
+   * quickjs-wasi 要整个包（`dist/` 也要）：`vm.js` 会 `import { QuickJS } from "quickjs-wasi"`
+   * 拿它自己的 JS 驱动层。但 `extensions/*.so` 不用拷 —— 那是「可选的原生 WASI 扩展」，
+   * 只有给 `QuickJS.create({ extensions })` 才加载，pi-codemode 一个都不传。
+   * 少拷 540KB，也让安装包的原生模块审计只剩真正要看的那些。
+   */
+  const quickjsPkg = dirname(await resolveQuickJSWasm())
+  await cp(quickjsPkg, join(dist, 'server', 'node_modules', 'quickjs-wasi'), {
+    recursive: true,
+    filter: (src) => !src.includes('/extensions/') && !src.endsWith('.map') && !src.endsWith('.d.ts'),
   })
 
   // 2c) pnpm 也随包走：用户机器上不该假设装了 pnpm
@@ -184,6 +265,8 @@ async function main() {
   }
   await cp(webDist, join(dist, 'web'), { recursive: true })
 
+  assertCodemodeLayout()
+
   const natives = await auditNative(dist)
   if (natives.length > 0 && process.env['TENON_STRICT_NATIVE'] === '1') {
     throw new Error(
@@ -198,6 +281,7 @@ async function main() {
       `main.mjs      ${kib(mainSize)}`,
       `server.mjs    ${kib(serverSize)}`,
       `pglite+pnpm   ${kib(await sizeOf(join(dist, 'server', 'node_modules')))}（外部化）/ pnpm ${kib(await sizeOf(join(dist, 'server', 'node_modules', 'pnpm')))}`,
+      `codemode      ${kib(await sizeOf(join(dist, 'server', 'node_modules', '@earendil-works', 'pi-codemode')))} + quickjs.wasm ${kib((await stat(join(dist, 'server', 'node_modules', 'quickjs-wasi', 'quickjs.wasm'))).size)}`,
       `templates     ${kib(await sizeOf(join(dist, 'templates')))}`,
       `web           ${kib(await sizeOf(join(dist, 'web')))}`,
       ...reportNatives(natives),

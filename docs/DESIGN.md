@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.19
+# DESIGN.md — 详细方案设计 v1.2.20
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。 + **v1.2.17 补充（M4 第 3 步用量与预算：`harness.usage()` 是**会话账本**，跨重启不丢、且天然把子 Agent 与压缩摘要算进去 —— 前端累加必然少一半，所以逐条 `usage` 事件换成了全量的 `usage.update`；熔断不是"预测下一笔"，pi 没有 pre-request 钩子，只能"花超了就停" —— §5.6）**。 + **v1.2.18 补充（M4 第 4 步 e2e 子 Agent 的预览工具：**不新起浏览器，让页面反连回来领命令** —— 网关往 HTML 注一行脚本 + HTTP 长轮询（`upgrade` 要原样透传给 Vite，自己再握手必坏）；`sessionId` 存 `sessionStorage` 才能跨整页重载；刷新只重投幂等命令；注入时 `content-length` 与 `transfer-encoding` 必须**一起**处理；扩展必须既 `registry.install` 又进会话的 `extensions`，否则工具"不存在"且不报错 —— §5.7）**。 + **v1.2.19 补充（M4 第 5 步 Reviewer：评审的对象是**工作区**不是提交（一轮收尾才 commit，看提交等于永远看上一版）；工作区差异不能走 `git.statusMatrix`；`typecheck` 的判据是「跑完了 + 没诊断」，缺 `node_modules` / 缺 tsconfig / 超时都必须说"没跑成"而**不能**说"通过"；`scrubEnv` 会删掉 `ELECTRON_RUN_AS_NODE`，桌面版里跑 `tsc` 得把它显式补回来 —— §5.8）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。 + **v1.2.17 补充（M4 第 3 步用量与预算：`harness.usage()` 是**会话账本**，跨重启不丢、且天然把子 Agent 与压缩摘要算进去 —— 前端累加必然少一半，所以逐条 `usage` 事件换成了全量的 `usage.update`；熔断不是"预测下一笔"，pi 没有 pre-request 钩子，只能"花超了就停" —— §5.6）**。 + **v1.2.18 补充（M4 第 4 步 e2e 子 Agent 的预览工具：**不新起浏览器，让页面反连回来领命令** —— 网关往 HTML 注一行脚本 + HTTP 长轮询（`upgrade` 要原样透传给 Vite，自己再握手必坏）；`sessionId` 存 `sessionStorage` 才能跨整页重载；刷新只重投幂等命令；注入时 `content-length` 与 `transfer-encoding` 必须**一起**处理；扩展必须既 `registry.install` 又进会话的 `extensions`，否则工具"不存在"且不报错 —— §5.7）**。 + **v1.2.19 补充（M4 第 5 步 Reviewer：评审的对象是**工作区**不是提交（一轮收尾才 commit，看提交等于永远看上一版）；工作区差异不能走 `git.statusMatrix`；`typecheck` 的判据是「跑完了 + 没诊断」，缺 `node_modules` / 缺 tsconfig / 超时都必须说"没跑成"而**不能**说"通过"；`scrubEnv` 会删掉 `ELECTRON_RUN_AS_NODE`，桌面版里跑 `tsc` 得把它显式补回来 —— §5.8）**。 + **v1.2.20 补充（M4 第 6 步 CodeAct：能力边界是**三层**不是一层提示词 —— 会话的 `tools`、工具的 `callers`、`modelTools` 子集；不设 `modelTools` 模型就绕过脚本直读；脚本里 `tools.write` 调不动是因为它根本没被注进沙箱；`CodemodeSandbox` 按 `import.meta.url` 找 wasm 与 worker，**打包成功不等于能跑** —— §5.9）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -485,16 +485,17 @@ stream.start(events => bus.publish(appId, events)) // → SSE 推给前端
 |---|---|---|---|---|
 | **Builder**（主） | 根会话 | comprehensive | 全部写入类工具 + `subagent` | 用户每次发言 |
 | **Explore** | 前台子会话 | fast | 只读：`list/read/glob/grep/sql_query` | 定位代码、查库结构、看日志 |
-| **CodeAct** | 前台子会话 | comprehensive | `codemode`（脚本沙箱）、`bash`（受限） | 批量转换、数据导入、一次性探查 |
+| **CodeAct** | 前台子会话 | comprehensive | `codemode`（脚本沙箱；**脚本内**可调 `read/ls/glob/grep`） | 批量读、过滤、汇总、一次性探查 |
 | **Librarian** | 前台子会话 | fast | 只读 + `docs_search` | 查框架文档/项目约束，减少返工 |
 | **E2E** | 后台子会话 | comprehensive | `preview.open/screenshot/click/type/assert` | 生成后自验收 |
 | **Reviewer** | 前台子会话 | thinking | 只读 + `git_diff` + `typecheck/lint` | 提交前审查，出风险清单 |
 
 实现要点（pi-durable 已验证的模式，**v1.2.15 按实测重写**）：
 
-落地状态（**v1.2.19**）：`explore` / `librarian` / `e2e` / `reviewer` 四个角色已接好（`readiness: 'ready'`），
-只剩 `codeact` 还是 `planned` —— 派活会**明确回一句"还没接、缺什么"**，不让模型自己去发现工具不存在
-（那样它会开始瞎猜文件内容）。`reviewer` 的 `typecheck` 已接、`lint` 未接（模板没有 eslint 配置，§5.8）。
+落地状态（**v1.2.20**）：五个子角色全部接好（`readiness: 'ready'`）。`codeact` 在 v1.2.20 接上
+（§5.9）；`reviewer` 的 `typecheck` 已接、`lint` 未接（模板没有 eslint 配置，§5.8）。
+`planned` 这条分支留着（下一个角色会用到），但表里目前没有这样的角色 —— 派活时那句"还没接、缺什么"
+改由单测钉住，所以机制不会因为没入口而烂掉。
 
 ```ts
 // 实测修正过的三处，别照抄速查表里的伪代码
@@ -545,8 +546,9 @@ const settled = await (await child.submit(
 
 **已落地的工具名（v1.2.15，跟上面的规划名对齐后的实际值）**：
 `read` `write` `edit` `bash`（来自 `pi-coding-agent`，过 adapter）+ `ls` `glob` `grep`（**我们自己的实现**）
-+ `subagent`。其余组（Git / 构建 / 预览 / 数据 / 可观测 / 记忆 / 交付 / 脚本）按里程碑顺序接，
-预览组是 M4 第 6 步的活。
++ `subagent`。其余组（Git / 构建 / 预览 / 数据 / 可观测 / 记忆 / 交付 / 脚本）按里程碑顺序接。
+脚本组的实际取值见 §5.9：CodeAct 拿到的是 `codemode`（模型面）+ `read/ls/glob/grep`（脚本面），
+**没有 `bash`** —— 规划表里的 `bash（受限）` 在落地时被去掉了，理由是可审性。
 
 > **为什么 `grep` / `glob` 不用 `pi-coding-agent` 的同名工具**：它的 `grep` / `find` 走 `ensureTool()`，
 > **首次调用会从 GitHub 下载 `rg` / `fd` 二进制**到 `~/.pi/bin` 再 spawn。对 CLI 合理，对我们是三处都错：
@@ -843,6 +845,71 @@ Reviewer 要回答「这一轮改的东西能不能提交」。这个问题的�
 它的两个工具用的是真 git 与真 `tsc`，所以证据放在单测里 —— 临时仓库 + 本仓库装的 typescript
 真编一遍（含"从应用自己的 `node_modules` 里找 tsc"这条真实路径），以及一条经服务端的 Agent 循环
 集成测试（派活 → 子会话工具集 → diff 看到未提交改动 → typecheck 说"没跑成" → 清单回到父轮）。
+
+---
+
+### 5.9 脚本沙箱：一次调用换十个（v1.2.20 落地）
+
+**模型不会写循环。** 「在这四十个文件里找出哪几个同时调用了 `submitOrder` 和 `commit`」用工具做，
+是四十次往返、四十份正文进上下文、最后还得靠模型自己数；用脚本做，是一次调用、一行结论。
+CodeAct 存在的理由只有这一条 —— 它不是"更强的 bash"，是**更少的转录**。
+
+**用 `pi-durable` 自带的 codemode，不用 `pi-coding-agent` 那份。** 两份实现干的事一样，
+但 `pi-durable/codemode` 的嵌套调用走 `api.executeTool()`，也就是走**我们已经在用的**那条工具管线：
+参数校验、重放策略、输出上限全部照旧生效。上游那份绑在它自己的 agent loop 上，我们用不了。
+另外 durable 那份带确定性日志（`pi.codemode.run` / `pi.codemode.journal`），重启能续跑 —— 这正是铁律 3
+"实验性 API 要包一层"的又一处落点。
+
+**能力边界是三层，不是一层提示词。** 想加一个工具时，先问清楚加在哪一层：
+
+| 层 | 谁决定 | 我们的取值 |
+|---|---|---|
+| 会话里有哪些工具 | `AgentChange.tools` | `codemode` + `read` / `ls` / `glob` / `grep` |
+| 谁能调它 | 工具自己的 `callers` | `codemode` 是 `["model"]`（**脚本不能起脚本**）；其余默认两边都可 |
+| 递给模型哪些 | `AgentChange.modelTools`（子集） | 只有 `codemode` |
+
+`modelTools` 这一层是本节的关键：不设它，`read` 会**同时**出现在模型手里，于是它绕过脚本一次次直读，
+"四十次 read 只回一行结论"这个能力就白做了。而 `callers` 决定了脚本摸到的是四个只读工具还是九个 ——
+脚本里 `tools.write` 之所以调不动，不是提示词拦的，是**这个工具根本没被注进沙箱**
+（真去调会抛 `tools.write does not exist. Available: read, ls, glob, grep`）。
+
+**没有 `bash`、没有 `write`/`edit`。** 规划表（§5.1）里给 CodeAct 写过 `bash（受限）`，落地时改成不给，
+理由是**可审性**：主角色跑命令是一次一条、每条都在转录里、随时能被打断；脚本里四十条命令的输出
+只有脚本自己看得到。而写工具一旦进沙箱，"子 Agent 只读"这条对五个角色都成立的不变式就破了 ——
+`subagent` 的工具描述对模型承诺过这件事，它该一直是真的。要写就回主角色改。
+
+**`models: false`。** 上游默认给脚本 `models.classify()` / `generateImages()`：那是**脚本自己发起、
+按次计费**的模型调用，不经过父会话的事件流 —— §5.6 刚把预算熔断做出来，这里再开一个绕开它的口子不合适。
+
+**60 秒 / 128MB。** 上游的 `timeoutMs` 默认 300 秒，对"一次工具调用"太长了：本地应用里
+"五分钟没反应"和卡死没有区别，而派活的主角色会一直等在这条调用上。堆上限则是为了一个跑飞的
+字符串拼接不要把 wasm32 的 4GiB 吃干净、把整个 server 带走。
+
+**打包：构建成功 ≠ 能跑。** `CodemodeSandbox` 有两处按 `import.meta.url` 找东西 ——
+`quickjs-wasi/quickjs.wasm`（`createRequire`）与 `./worker.js`（worker 线程入口）。esbuild 把整个
+server 打成 `server.mjs` 之后这两条路径全指向 `server.mjs` 旁边，而**构建一声不响地成功**，
+故障要到用户派活给 codeact 时才以"sandbox 错误"的形式出现。做法与 PGlite 同一条：外部化 + 整包拷进
+`dist/server/node_modules/`，并在 `build.mjs` 里加 `assertCodemodeLayout()` 按运行期那两条规则
+各解析一次（还要求解析结果落在 `dist/` 内 —— 解析到仓库自己的 `node_modules` 不算成功）。
+这一步踩到三个具体的坑：
+
+| 坑 | 症状 | 修法 |
+|---|---|---|
+| `require.resolve('@earendil-works/pi-codemode')` | `No "exports" main defined` | 它的 `exports` 只有 `types`/`source`/`import`，没有 `require`/`default`；`./package.json` 也没导出 → 用 `realpath` 拿 pnpm 软链指向的真包根 |
+| 只拷 `quickjs.wasm` | `Cannot find ... quickjs-wasi/dist/index.js` | `vm.js` 会 `import { QuickJS } from "quickjs-wasi"` 拿它的 JS 驱动层，`dist/` 必须一起拷 |
+| 过滤 `extensions` 目录 | `Cannot find ... quickjs-wasi/dist/extensions.js` | `extensions/*.so` 不拷（只有显式传 `QuickJS.create({ extensions })` 才加载），但别把同名的 `dist/extensions.js` 一起滤掉 |
+
+**证据。** 三条服务端集成测试跑的是真沙箱（真 worker、真 QuickJS、真文件系统）：
+① 派活 → 子会话 `tools` 只有 `codemode`、`callable` 只有四个只读工具 → 脚本 fan-out 读仓库里
+八个源文件并统计 `useState` 出现次数，**产出的数字与测试自己算的一致**（这比断言一句话可靠：
+沙箱没真读到盘就不可能对上）；② 脚本里 `write`/`edit`/`bash`/`subagent`/`codemode` 五个名字都不存在；
+③ 脚本语法错误时模型看到的是 `Script failed` + 指向 `codemode.js:行` 的栈，不是一个"工具坏了"。
+
+**缺口（如实记）**：① 脚本可以用 `// @options: {"timeout_ms": …}` **放大**沙箱默认超时（上游语义就是覆盖），
+我们没夹；② 没有配 `ExecutionEnv`，所以输出超过 token 预算时无法另存全文，只能看到截断版
+（提示词因此要求"打印结论不打印数据"）；③ 嵌套调用不进父会话的事件流，用量按工具归集，
+答不了"某个脚本里的某一次 read 花了多少"（与 §5.6 的欠账同源）；④ 脚本不能写文件，所以
+"批量改"这类活现在只能由主角色一条条 `edit` —— 要放开得先想清楚怎么让它进 commit 审阅。
 
 ---
 
@@ -1968,6 +2035,22 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > ⑤ 提示词写死工作顺序（先 diff 再 typecheck）与清单格式（最多五条、`[blocker|risk|nit] path:line`）。
 > `pnpm test` 新增 30 项（core typecheck 10 + core worktree 5 + agent review 11 + server 集成 2
 > + roles 2），其中三条盯"别把没跑成报成通过"。`lint` 未接（模板没有 eslint 配置）。
+
+> **M4 进度（v1.2.20，2026-11-02）**：第 6 步落地 —— **CodeAct 会写脚本了，五个子角色全部接好**。
+> ① `packages/agent/src/tools/codeact.ts`：`CodemodeSandbox`（60s / 128MB）+ `createCodemodeExtension`
+> （`models: false`、`inlineBudget: 1200`）+ 改名 `tenon.codeact` + `close()`。
+> ② `roles.ts`：`codeact` 转 `ready`；新增 `RoleSpec.modelTools`（只有 `codemode` 递给模型）与
+> `RoleSpec.extensions`（`tenon.codeact` 只进子会话）。
+> ③ `subagent.ts`：给子会话传 `modelTools` 与 `extensions: { add }`；"还没接"的文案抽成纯函数
+> `plannedRejection()`（表里没有 `planned` 角色了，机制靠单测钉住）。
+> ④ `harness-pool.ts`：装扩展、装 registry、`close()` 里先关沙箱再关 harness。
+> ⑤ `apps/desktop/build.mjs`：`pi-codemode` + `quickjs-wasi` 外部化并整包拷进 `dist/server/node_modules/`，
+> 加 `assertCodemodeLayout()` 自检（构建成功不等于能跑）。
+> `pnpm test` 409 项（+4：server 集成 3 + roles 3 − 两条已失效的 planned 用例），
+> 其中一条让脚本 fan-out 读真文件、算出的数字与测试自己算的一致。`pnpm build:desktop` 后
+> 在 `dist/` 里真跑了一次沙箱（`return 42` 拿到 42）。
+> **M4 还欠**：发布质量门禁（第 7 步）、档位路由要等设置能存多个 profile、额度没有跨应用的**总闸**
+> （§5.6）、用量答不了"哪个角色花了多少"、脚本超时可被 `// @options` 放大（§5.9）。
 
 > **平台顺序的说明（v1.2 收窄后）**：Windows 与 macOS 的技术差异只剩三项 —— ① 进程管理与端口占用（Windows 无 `lsof`，用 `netstat`/`Get-NetTCPConnection`）；② `gondolin` 微 VM 在 Windows 无原生后端（走 §15.3 方案 B）；③ Electron 打包签名与自动更新的平台差异。原先最大的两项（`embedded-postgres` 原生二进制分发、`node-gyp` 编译）已经通过「PGlite 默认 + `node:sqlite` 产品库」消除。**M1 仍建议双平台冒烟，但重点从"能不能跑起来"转为"打包链路通不通"**。
 

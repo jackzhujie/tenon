@@ -11,10 +11,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ToolRegistration } from '@earendil-works/pi-durable'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { RoleId } from '../src/roles.js'
+import type { RoleId, RoleSpec } from '../src/roles.js'
 import {
   DELEGABLE_ROLES,
   ROLES,
+  modelToolsFor,
+  plannedRejection,
   roleOf,
   roleOfPrompt,
   subagentPrompt,
@@ -50,6 +52,8 @@ const ALL = [
   // M4 第 5 步：reviewer 的两个判据工具
   'git_diff',
   'typecheck',
+  // M4 第 6 步：codeact 的脚本沙箱
+  'codemode',
 ].map(fake)
 
 describe('角色表', () => {
@@ -85,14 +89,54 @@ describe('角色表', () => {
   })
 
   it('没接好的角色带 pending 说明，已接好的不带', () => {
-    for (const id of ['explore', 'librarian', 'e2e', 'reviewer'] as RoleId[]) {
+    // M4 第 6 步起，五个子角色全接好了 —— 再没有 planned 的角色
+    for (const id of ['explore', 'librarian', 'codeact', 'e2e', 'reviewer'] as RoleId[]) {
       expect(ROLES[id].readiness, id).toBe('ready')
       expect(ROLES[id].pending, id).toBeUndefined()
     }
-    for (const id of ['codeact'] as RoleId[]) {
-      expect(ROLES[id].readiness, id).toBe('planned')
-      expect(ROLES[id].pending, id).toBeTruthy()
+  })
+
+  it('planned 角色回一句"缺什么"（表里暂时没有这样的角色，机制要留着）', () => {
+    const planned: RoleSpec = {
+      ...ROLES.codeact,
+      readiness: 'planned',
+      pending: '缺 `codemode` 沙箱',
     }
+    expect(plannedRejection(planned)).toContain('还没接上')
+    expect(plannedRejection(planned)).toContain('codemode')
+    // 接好的角色不能误报
+    expect(plannedRejection(ROLES.codeact)).toBeUndefined()
+    // 没说缺什么时也给一句能读的话
+    expect(plannedRejection({ ...planned, pending: undefined })).toContain('缺工具')
+  })
+
+  it('★ 只有 CodeAct 的 read/ls/glob/grep 不给模型（它们只给脚本调）', () => {
+    for (const role of Object.values(ROLES)) {
+      const tools = toolsForRole(role, ALL)
+      const shown = modelToolsFor(role, tools).map((tool) => tool.name)
+      if (role.id === 'codeact') {
+        // 递给模型的只有 codemode —— 全递给它，它就会绕过脚本一次次直读
+        expect(shown).toEqual(['codemode'])
+        // 但五个都在会话里（脚本要能调到那四个）
+        expect(tools.map((tool) => tool.name).sort()).toEqual(['codemode', 'glob', 'grep', 'ls', 'read'])
+        // 写工具与 bash 一个都没有：脚本沙箱是“算”，不是“绕过审阅”
+        for (const forbidden of ['write', 'edit', 'bash', 'subagent']) {
+          expect(tools.map((tool) => tool.name)).not.toContain(forbidden)
+        }
+      } else {
+        // 其余角色不写 modelTools，全给
+        expect(shown, role.id).toEqual(tools.map((tool) => tool.name))
+      }
+    }
+  })
+
+  it('每个子角色都不给写工具（“子 Agent 只能读”对五个角色都成立）', () => {
+    for (const id of DELEGABLE_ROLES) {
+      const tools = toolsForRole(ROLES[id], ALL).map((tool) => tool.name)
+      for (const forbidden of ['write', 'edit']) expect(tools, id).not.toContain(forbidden)
+    }
+    // bash 只有主角色有
+    expect(toolsForRole(ROLES.builder, ALL).map((tool) => tool.name)).toContain('bash')
   })
 
   it('reviewer 拿得到判据工具，但一个写工具都没有（评审不改代码）', () => {

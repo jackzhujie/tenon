@@ -172,6 +172,40 @@ harness.watchTaskGraph(ctx)   // 同值，watch 形式
 2. **无效读只失败该次调用**（`StorageRequestError`）；但 `commit()` / `mintId()` 的任何错误按第 1 条处理
 3. **你的代码只失败自己的单元**：task 抛错→该 task faulted；tool 抛错→返回错误结果；hook 抛错→上报并跳过（`beforeTool` 会阻断调用）；commit 回调抛错→回滚该 commit
 
+### 1.9 code mode（脚本沙箱，M4 第 6 步用过）
+
+**两个包分工**：`@earendil-works/pi-codemode` 是沙箱本体（QuickJS-WASM）；
+`@earendil-works/pi-durable/codemode` 是把它接成工具的适配层（带确定性重放）。
+
+```ts
+import { CodemodeSandbox } from '@earendil-works/pi-codemode'          // 直接依赖，要写进 package.json
+import { createCodemodeExtension } from '@earendil-works/pi-durable/codemode'
+
+const sandbox = new CodemodeSandbox({ timeoutMs: 60_000, memoryLimitBytes: 128 * 1024 * 1024 })
+const extension = createCodemodeExtension({ sandbox, models: false, inlineBudget: 1200 })
+// extension.tools = [codemode]；extension.sections = [codemode]（渲染**当前会话可调用工具**的声明）
+await sandbox.close()   // 会话关闭时必须调，否则 worker 线程拽住进程
+```
+
+要点：
+
+- **脚本能调什么，由会话的 `agent.callable` 决定**（= 启用 且 `callers` 含 `"tools"`）。嵌套调用走
+  `api.executeTool(name, args, ctx, { key })`，所以校验 / 重放 / 输出上限全部生效。
+- `createCodemodeTool` 自己的 `callers` 是 **`["model"]`** —— 脚本调不到 codemode，不能脚本起脚本。
+- **谁递给模型**由 `AgentChange.modelTools` 决定（`tools` 是可用集）。想"有工具但不给模型"，
+  必须显式设 `modelTools`，否则全给。
+- `models: false` 关掉脚本里的 `models.classify()` / `generateImages()`（那是脚本自己发起的计费调用）。
+- 沙箱默认 `timeoutMs` 是 **300s**；脚本可以用 `// @options: {"timeout_ms": …}` 覆盖它（不受构造参数约束）。
+- 结果：`result.ok` / `value` / `output`（`text()` 与 `console.*`）/ `calls` / `storeWrites` /
+  `error.kind`（`script` / `timeout` / `aborted` / `sandbox`）。工具层把它排版成
+  `Script completed ... Output:` 或 `Script failed ... Script error:`。
+- **`tools` 是抛异常的代理**：访问不存在的成员直接抛 `tools.write does not exist. Available: …`，
+  所以脚本里 `typeof tools.write` 也会抛。
+
+打包（详见 DESIGN §5.9）：`import.meta.url` 找 `./worker.js` 与 `quickjs-wasi/quickjs.wasm`，
+打进单文件后两条都失效 → external + 整包拷。`require.resolve('@earendil-works/pi-codemode')` 不行
+（`exports` 没有 `require`/`default` 条件）；`quickjs-wasi` 的 `dist/` 必须一起拷（`vm.js` import 它）。
+
 ## 2. chord 核心
 
 ### 2.1 心智模型

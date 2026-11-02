@@ -184,24 +184,12 @@ describe('subagent 工具', () => {
     expect(await lastAssistantText(app.id)).toContain('我自己来')
   })
 
-  it('还没接好的角色（codeact）回一句"还没接"，不是让模型撞空', async () => {
-    running = await boot()
-    const { app } = await rpc<{ app: { id: string } }>(running, 'app.create', { name: '没接好' })
-    running.agent.model?.script([
-      // e2e（第 4 步）与 reviewer（第 5 步）都接过来了，现在只剩 codeact 还在 planned
-      { tool: 'subagent', args: { role: 'codeact', task: '批量改一遍' } },
-      { text: '那我自己来吧。' },
-    ])
-    await runTurn(app.id, 's4')
-
-    const rejected = (await toolResults(app.id)).find((result) => result.toolName === 'subagent')
-    expect(rejected?.isError).toBe(true)
-    const text = rejected?.content?.map((part) => part.text ?? '').join('') ?? ''
-    expect(text).toContain('还没接上')
-    // 说清楚缺什么，模型才知道下一步该怎么办
-    expect(text).toContain('codemode')
-    expect(await conversations(app.id)).toHaveLength(1)
-  })
+  /*
+   * 这里以前有一条「还没接好的角色（codeact）回一句"还没接"」。M4 第 6 步把 codeact 接上之后，
+   * 表里**一个 `planned` 都没有了**，这条集成就没入口了。
+   * 分支本身留着（下一个角色会用到），文案改由 `roles.test.ts` 的 `plannedRejection` 单测钉住 ——
+   * 比放在这里更稳：不用为了测一句话先造一个假角色。
+   */
 
   it('同一轮派两次活 = 两个子会话（ownerTaskId 是工具调用的 task，不是根会话）', async () => {
     running = await boot()

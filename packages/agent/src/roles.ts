@@ -28,9 +28,25 @@ export interface RoleSpec {
   readonly purpose: string
   /** 白名单：这个角色能用哪些工具（按名字选） */
   readonly tools: readonly string[]
+  /**
+   * 白名单的一个**子集**：这些工具真的递给模型。
+   *
+   * 不给（`undefined`）时 `tools` 全部递给模型，这是绝大多数角色的情况。
+   * 给了的只有 CodeAct：它的 `read/ls/glob/grep` 是给**脚本**调的，模型手里只该有 `codemode` ——
+   * 否则它会绕过脚本一次次直接读文件，"四十次 read 只回一行结论"这件事就没了。
+   */
+  readonly modelTools?: readonly string[]
   readonly instructions: string
   /** 能不能再派活给别的角色 */
   readonly canDelegate: boolean
+  /**
+   * 除父会话已有的扩展之外，这个角色还要哪些（按扩展名）。
+   *
+   * 只有 CodeAct 用得上：`codemode` 那个工具与它的 section 都在 `tenon.codeact` 扩展里，
+   * 而**扩展不在会话的 `extensions` 里，工具就解析不到**（M4 第 4 步踩过：表现是
+   * "工具不存在"，模型若无其事继续讲）。父会话特意不装它 —— 主角色不该看见 codemode。
+   */
+  readonly extensions?: readonly string[]
   /**
    * `ready`：工具齐了，现在就能用。
    * `planned`：角色已定义，缺的工具在 M4 后面的步骤里接 —— 派活会明确报"还没接"，
@@ -101,14 +117,38 @@ Note: external documentation search is not wired up yet, so only on-disk materia
     id: 'codeact',
     label: 'CodeAct',
     tier: 'comprehensive',
-    purpose: '写一次性脚本：批量改、导数据、跑探查',
-    tools: [],
+    /*
+     * 五个工具进会话，只有 `codemode` 递给模型 —— 另外四个是**给脚本调的**（`modelTools`）。
+     * 没有 `bash`、没有 `write`/`edit`：脚本沙箱的意义是"算"，不是"绕过一步一条命令的审阅"。
+     * 主角色跑命令时每条都在转录里、随时能被打断；脚本里四十条命令的输出只有脚本自己看得到。
+     * 要写文件就回主角色改，这条不变式让"子 Agent 只读"对五个角色都成立。
+     */
+    purpose: '写一次性脚本：批量读、过滤、汇总、跑探查',
+    tools: ['codemode', 'read', 'ls', 'glob', 'grep'],
+    modelTools: ['codemode'],
+    extensions: ['tenon.codeact'],
     instructions: `${ROLE_COMMON}
 
-Your job: do what a script does better than a dozen tool calls — batch rewrites, data imports, one-off inspection.`,
+Your job: write one short script instead of a dozen tool calls — filter a huge grep result, read twenty
+files and summarise them, reshape JSON, check one pattern across the whole repo.
+
+How the script sees the world (it is a sandbox: no fetch, no timers, no filesystem, no npm —
+only the tools below):
+- \`await tools.read({ path })\`, \`tools.ls\`, \`tools.glob\`, \`tools.grep\` — the read-only tools, one promise each.
+  Fan out with \`Promise.all\` when the calls do not depend on each other; that is the whole point of being here.
+- \`text(value)\` appends a line to what I see. \`return value\` comes back too. Everything else you compute is invisible.
+- Nothing else exists. Do not import, do not try \`require\`, do not write files.
+
+Rules:
+1. Print the conclusion, not the data. The first two hundred lines of a search result are worth nothing to me;
+   "12 files mention submitOrder, 3 of them also call commit" is worth a lot.
+2. Keep the script under ~30 lines and the output to a screen. A long script means you are doing the main
+   agent's job with worse tools.
+3. A failing nested call rejects — wrap the ones that may miss (a missing file, a no-match grep) in try/catch
+   and print what you caught.
+4. You cannot change the app. Report the values and the paths; the main agent edits.`,
     canDelegate: false,
-    readiness: 'planned',
-    pending: '缺 `codemode` 沙箱（pi-codemode 未接入；M4 后续步骤）',
+    readiness: 'ready',
   },
   e2e: {
     id: 'e2e',
@@ -188,6 +228,36 @@ export function roleOf(id: string): RoleSpec | undefined {
 export function toolsForRole(spec: RoleSpec, available: readonly ToolRegistration[]): ToolRegistration[] {
   const allowed = new Set(spec.tools)
   return available.filter((tool) => allowed.has(tool.name) && tool.name !== 'subagent')
+}
+
+/**
+ * 递给**模型**的那一份：`modelTools` 是 `tools` 的子集，只做筛选、不重排。
+ * 没有 `modelTools` 的角色原样返回（绝大多数）。
+ */
+export function modelToolsFor(
+  spec: RoleSpec,
+  tools: readonly ToolRegistration[],
+): readonly ToolRegistration[] {
+  if (spec.modelTools === undefined) return tools
+  const allowed = new Set(spec.modelTools)
+  return tools.filter((tool) => allowed.has(tool.name))
+}
+
+/**
+ * 角色还没接好时回给模型的那句话；`undefined` = 接好了。
+ *
+ * 单独抽成纯函数，是因为角色表里现在**一个 `planned` 都没有**了 —— 集成测试不再有入口去走
+ * 这条分支。而这句话是模型"下一步该怎么办"的唯一线索（说清缺什么，它才会换角色或自己做），
+ * 值得用单测钉住，而不是等下一个角色接一半时才发现文案坏了。
+ */
+export function plannedRejection(spec: RoleSpec): string | undefined {
+  if (spec.readiness !== 'planned') return undefined
+  return `${spec.label} 还没接上（${spec.pending ?? '缺工具'}），换个角色或自己做`
+}
+
+/** 这个角色要用到哪些扩展（按名字）：多数角色继承父会话的，CodeAct 要额外要一个沙箱 */
+export function extensionNamesFor(spec: RoleSpec): readonly string[] {
+  return spec.extensions ?? []
 }
 
 /** 子会话首行标记：faux 靠它分道，日志里也能一眼看出这句是谁说的 */

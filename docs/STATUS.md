@@ -2,8 +2,8 @@
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
 > 最后更新：2026-11-02（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
-> + M4 第 1–5 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具
-> + Reviewer 出风险清单）**：405 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + M4 第 1–6 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具
+> + Reviewer 出风险清单 + CodeAct 的脚本沙箱）**：409 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 36 项改动/回滚 e2e + 32 项发布 e2e（系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -68,12 +68,19 @@ pi 静止时会回收任务节点，所以"空"不是没数据，是没人跑了
 与修法的风险清单**，外加一句"查了什么、什么没查成"。关键在于它**不会把没查成说成没问题**：
 缺 `node_modules`、缺 `tsconfig`、超时，三种都明说"没跑成"（§4.13 / DESIGN §5.8）。
 
+**会写脚本了（M4 第 6 步）**：CodeAct 拿到一个 QuickJS 沙箱（`codemode`），**一次工具调用**就能
+fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一行结论进上下文 —— 模型不会写循环，
+这是唯一能把它当循环用的地方。边界是三层而不是一层提示词：会话里有哪些工具、工具能被谁调
+（`callers`）、递给模型哪些（`modelTools` 只留 `codemode`）。所以脚本里 `tools.write` 调不动
+不是提示词拦的，是它**根本没被注进沙箱**；`bash` 也没给 —— 命令一条条在转录里可审，
+脚本里四十条命令只有脚本自己看得到（§4.14 / DESIGN §5.9）。
+
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 405 项单测 + 集成测试（约 165s，含 PGlite 冷启动）
+pnpm test                       # 409 项单测 + 集成测试（约 175s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -247,8 +254,8 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 3 | **用量与预算**：`harness.usage()` 会话账本 → `usage.update` 全量快照 + `usage.get`/`budget.set` RPC + 顶栏用量面板 + 两个拦截点（开跑前 402 / 半路 abort，DoD ③） | ✅ 见 §4.11 | `packages/core/src/usage.ts`、`packages/agent/src/usage.ts`、`packages/protocol/src/usage-format.ts`、`features/usage/UsagePanel.tsx` |
 | 4 | **E2E 子 Agent 的预览工具**（`preview_read/assert/click/type/open`）+ 自验收流程（DoD ①） | ✅ 见 §4.12 | `packages/gateway/src/page.ts`（页面通道）、`packages/agent/src/tools/preview.ts`、`scripts/e2e-e2e-agent.ts` |
 | 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ✅ 见 §4.13 | `packages/core/src/git.ts`（`worktreeDiff`）、`packages/core/src/typecheck.ts`、`packages/agent/src/tools/review.ts` |
-| 6 | CodeAct：`codemode` 沙箱接入 | ⏳ **下一步** | — |
-| 7 | 发布前质量门禁（typecheck / test 不过不许发） | ⏳ | — |
+| 6 | CodeAct：`codemode` 沙箱接入 | ✅ 见 §4.14 | `packages/agent/src/tools/codeact.ts`、`packages/agent/src/roles.ts`（`modelTools`）、`apps/desktop/build.mjs`（外部化 + `assertCodemodeLayout`） |
+| 7 | 发布前质量门禁（typecheck / test 不过不许发） | ⏳ **下一步** | — |
 
 ### 4.3 M1 验收（DoD）
 
@@ -545,7 +552,41 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 没有结构化事件 / 面板；`typecheck` 只看类型，不跑测试；评审结论不会自动变成"不许提交"
 （发布质量门禁是 M4 第 7 步）。
 
-### 4.14 代码地图（只列已落地的）
+### 4.14 M4 第 6 步验收（CodeAct：codemode 沙箱）—— ✅ 已完成
+
+- [x] **★ 沙箱真在跑，而且真读到盘了** —— 集成测试里脚本 `tools.glob('src/*.ts*')` + `Promise.all`
+      读八个源文件，统计 `useState` 出现次数；**产出的数字与测试自己用 `readdir`+`readFile` 算的一致**
+      （沙箱没真读到盘不可能对上，比断言一句话可靠）
+- [x] **★ 递给模型的只有 `codemode`** —— 子会话 `agent.tools` 严格等于 `['codemode']`；
+      `read/ls/glob/grep` 在 `callable` 里（脚本调），不在 `tools` 里（模型调）。
+      不设 `modelTools` 就会变成"模型绕过脚本一次次直读"
+- [x] **★ 能力边界由注入决定，不由提示词决定** —— 脚本里 `write/edit/bash/subagent/codemode`
+      五个名字都不存在；真去调 `tools.write` 抛 `tools.write does not exist. Available: read, ls, glob, grep`
+      （报错本身有用：模型看得到自己错在哪）
+- [x] **`codemode` 不能被脚本再调** —— 上游给它的 `callers` 是 `["model"]`，所以 `callable` 里没有它，
+      "脚本起脚本"从工具集上断了
+- [x] **脚本写错时说人话** —— 语法错误返回 `Script failed` + `Script error:` + 指向 `codemode.js:行`
+      的栈，不是"工具坏了"
+- [x] **四十次嵌套调用、父轮只看到一段收尾输出** —— 断言脚本结果文本 < 2000 字（这是 codemode
+      存在的理由，写成大段输出就等于白用）
+- [x] **`tenon.codeact` 只进子会话** —— `codeact` 的 `extensions` 列出它；主角色既不装这个扩展
+      也拿不到 `codemode`，所以不会多出一段"你去写脚本"的说明
+- [x] **沙箱随会话关** —— `HarnessSession.close()` 先关沙箱再关 harness（正在跑的脚本会回调进 harness）
+- [x] **★ 打包之后真能跑** —— `build.mjs` 外部化 `pi-codemode` + `quickjs-wasi` 并整包拷进
+      `dist/server/node_modules/`；`assertCodemodeLayout()` 按运行期那两条规则各解析一次（还要求落在
+      `dist/` 内）。实测在 `dist/` 里真起了一次沙箱：`return 42` 拿到 42
+- [x] **回归** —— `e2e:e2e` 9 项仍全绿（这一步动了 harness 装配，所以把真 Electron 那条链路也跑了一遍）
+
+**三个只在打包时才现形的坑**（都记进 §5）：`require.resolve('@earendil-works/pi-codemode')` 直接报
+`No "exports" main defined`（它的 `exports` 没有 `require`/`default` 条件）→ 用 `realpath` 拿软链目标；
+`quickjs-wasi` 只拷 `quickjs.wasm` 不够（`vm.js` import 它的 JS 驱动层，`dist/` 要一起拷）；
+过滤 `extensions/*.so` 时别把 `dist/extensions.js` 一起滤掉。
+
+**还没做的**：脚本能用 `// @options: {"timeout_ms": …}` 放大沙箱默认超时（上游语义就是覆盖，我们没夹）；
+没配 `ExecutionEnv`，输出超 token 预算时无法另存全文；嵌套调用不进父会话事件流，用量按工具归集；
+脚本不能写文件（"批量改"仍由主角色一条条 `edit`）。
+
+### 4.15 代码地图（只列已落地的）
 
 ```
 packages/
@@ -572,6 +613,7 @@ packages/
 ├── agent/               # pi 生态的唯一入口（铁律 3 的落地点）
 │   ├── src/models.ts    #   faux / BYOK(openai-compatible, 自建 provider)；faux 剧本**按角色分道**
 │   ├── src/roles.ts     # ★ 角色表：1 主 + 5 子的工具白名单/档位/提示词/可用状态（唯一事实来源）
+│   │                    #   + modelTools（递给模型的子集；只有 codeact 用）/ extensions（额外要的扩展）
 │   ├── src/context.ts   #   把 pi 的 BACKGROUND_CONTEXT 导出去，上层不必 import pi
 │   ├── src/harness-pool.ts  # 每应用一个 harness.sqlite + resume() + 装工具扩展（含懒注入的 harness）
 │   ├── src/chat.ts      #   submit/stop/history/plan + watchEvents → SSE（40ms 合帧）
@@ -584,6 +626,8 @@ packages/
 │   ├── src/tools/subagent.ts # ★ 派活：真子会话 + 幂等复用 + 白名单；子会话里没有 subagent
 │   ├── src/tools/review.ts   # ★ git_diff（工作区 vs HEAD）/ typecheck（跑应用自己的 tsc，多 tsconfig）
 │   │                    #   只给 reviewer；桌面版里要给子进程补回 ELECTRON_RUN_AS_NODE
+│   ├── src/tools/codeact.ts  # ★ QuickJS 沙箱（CodemodeSandbox 60s/128MB + 上游 codemode 扩展）
+│   │                    #   —— 模型面只有 codemode，read/ls/glob/grep 是给脚本调的；models: false
 │   └── src/docs.ts      #   tenon.app / tenon.plan（defineDoc）
 ├── generator/           # 模板铺进 repo（DESIGN §8.7）
 │   ├── src/scaffold.ts  #   scaffoldApp：渲染模板 → 写文件；已有 package.json 就拒绝
@@ -654,7 +698,7 @@ apps/desktop/            # Electron 壳：只做生命周期（DESIGN §2.2.1）
 ├── src/main.ts          #   窗口 / 导航守卫 / 关窗即退出 / SMOKE 探针
 ├── src/supervisor.ts    #   spawn server（ELECTRON_RUN_AS_NODE）+ 解析 TENON_READY + 退避重启（不 import electron，可单测）
 ├── src/paths.ts         #   打包前后资源路径的唯一算法（dist/ ↔ Contents/Resources/ 同构）
-├── build.mjs            #   esbuild 打 server 单文件 + 拷模板/web/pglite/pnpm + 扫原生模块（铁律 3 兜底）
+├── build.mjs            #   esbuild 打 server 单文件 + 拷模板/web/pglite/pnpm/pi-codemode + 扫原生模块（铁律 3 兜底）
 ├── scripts/launch.mjs   #   清掉 ELECTRON_RUN_AS_NODE 再起 electron
 └── electron-builder.yml #   files: 主进程 / extraResources: server,web,templates + server/node_modules
 
@@ -732,6 +776,9 @@ scripts/
 | **`node --watch` 只监听"已经加载过"的文件** | 入口文件还不存在时，它打印 `Failed running 'dist-server/api/main.js'. Waiting for file changes` 然后**永不重启**（它没监听任何东西，包括那个目录）。所以 `launchApi` 必须 `await waitForFile(outputPath, compiler, 90_000)`，等首次编译产出再起 runner；超时要把 tsc 最后几行塞进错误里，否则只有一句"没起来" |
 | **子进程报错要带多行尾部，不能只取最后一行** | `node --watch` 会把真错误放在 `Failed running ...` 的**上一行**。`tailOf(launched, 6)` 而不是 `lastLine()` |
 | **PGlite 必须 esbuild external 并整包拷进安装包** | 它按 `import.meta.url` 相对读 `wasm/`、`data/`、`extensions/`，打进单文件后这些路径全失效（表现为起库即崩）。`build.mjs` 里 external 掉再原样拷到 `dist/server/node_modules/` |
+| **`CodemodeSandbox` 同理有两条 `import.meta.url`** | worker 用 `new URL('./worker.js', import.meta.url)`、wasm 用 `createRequire(...).resolve('quickjs-wasi/quickjs.wasm')`。打进 `server.mjs` 后两条全指向 `server.mjs` 旁边，而**构建一声不响地成功** —— 要派活给 codeact 才报 sandbox 错误。`build.mjs` 里 external + 整包拷，并留了 `assertCodemodeLayout()` 按运行期规则各解析一次 |
+| **`require.resolve('@earendil-works/pi-codemode')` 会失败** | 它的 `exports` 只有 `types`/`source`/`import`，**没有 `require`/`default`**，CJS 解析报 `No "exports" main defined`；`./package.json` 也没导出。构建脚本里用 `realpath` 拿 pnpm 软链的目标（扁平布局下返回自身，同样对） |
+| **`quickjs-wasi` 不是只拷 `quickjs.wasm` 就行** | `pi-codemode` 的 `vm.js` 会 `import { QuickJS } from "quickjs-wasi"` 拿它的 JS 驱动层，`dist/` 必须一起拷；但 `extensions/*.so` 不用（只有显式传 `QuickJS.create({ extensions })` 才加载）—— 过滤时别把 `dist/extensions.js` 一起滤掉 |
 | **electron-builder 的 `extraResources` 会跳过相对路径含 `node_modules` 的文件** | 给 `from: dist/server` 写 `filter: ['**/*']` **也无效** —— 那一层目录直接被忽略，包能打出来、能启动，但 server 一跑就 `Cannot find module`/'server 在就绪前退出'。必须**单列一条** `from: dist/server/node_modules` → `to: server/node_modules` |
 | **pnpm 自带 4 个平台的 `reflink.*.node`** | 打包时会触发"dist 里出现需要按平台编译的模块"的兜底断言。删掉后 `pnpm install` 实测照常工作（那是可选加速模块），`build.mjs` 拷贝时按扩展名过滤 |
 | **`DATABASE_POOL_MAX` 是容量参数，不是环境判断** | 生成应用读它**只是**为了把 `extra.max` 传给驱动（默认 10），PGlite 档由 `db-provisioner` 注入 1。它**不许**被用来判断 desktop/docker/cloud —— 那是铁律 2 的红线。测试逐文件断言模板里搜不到 `NODE_ENV`/`TENON_*` |
@@ -788,6 +835,8 @@ scripts/
 | **`content-length` 与 `transfer-encoding` 不能并存** | 往 HTML 里注入脚本后要改长度，只重算 `content-length` 而把上游带来的 `transfer-encoding: chunked` 留着 —— 两个头同时在，客户端**永远等不到响应结束**：预览一直停在 `failed`（`expected 'failed' to be 'ready'`），日志里一个字都没有。两个都要删，只写新的 `content-length`。用显式长度的桩测不出来，得经真 upstream |
 | **注入的脚本要插在 `</body>` 之前** | 放进 `<head>` 时 `document.title` 还是空的（脚本先跑、解析器才继续），上报的页面信息全是 `''`。而且脚本必须 ES5 风格：它跑在生成应用的页面里，不保证与平台的构建目标一致 |
 | **扩展只 `registry.install()` 不够，必须也在会话的 `extensions` 里** | 表现极隐蔽：子会话里工具**"不存在"**，模型若无其事地继续讲，`execute` 一次都不进（打点才能发现"派了活但没调工具"）。`harness-pool.ts` 里 `extensions: [coding, subagent, preview]` 这一行漏掉就等于工具没接 |
+| **"工具在会话里"与"工具递给模型"是两件事** | `AgentChange.tools` 是**可用集**，`modelTools` 才是**递给模型的那一份**；不写 `modelTools` 等于全给。CodeAct 的 `read/ls/glob/grep` 必须只在可用集里 —— 写进 `tools` 而不设 `modelTools`，模型就会绕过脚本一次次直读，"四十次 read 只回一行结论"当场失效 |
+| **沙箱里访问不存在的工具会抛异常，不是 `undefined`** | `tools` 是个会抛的代理：`typeof tools.write` 直接抛 `tools.write does not exist. Available: read, ls, glob, grep`。所以脚本里 `if (tools.write)` 这种写法会炸，要 `try/catch`。好处是报错本身有用（把真有哪些工具列出来） |
 | **整页导航会掐断挂在长轮询上的请求** | 网关侧那个 `await bridge.poll()` 还活着，命令被投进一条死连接 → 调用方等到 12 秒超时（`页面在 12 秒内没有回话`）。`poll(sessionId, signal)` 要接 `AbortSignal`，`res.on('close', () => abort.abort())` 里中止，让命令回到队列而不是消失 |
 | **页内抛异常也必须回话** | `document.querySelector` 拿到 `null` 再读 `.textContent` 会抛 —— 如果只在 `try` 里回话，调用方只能等满超时，而真实信息（"没找到第 1 个「#buy」（一共 0 个）"）根本没送出去。`handle` 必须带 rejection 分支 |
 | **断言失败不是工具错误** | `preview_assert` 失败要返回 `isError: false` + 「✗ 期望 X，实测 Y」。标成错误会让模型去**重试工具**（换个 selector 再试一次），而它真正该做的是回去改代码。同理，参数不合法（`value` 没配 `selector`）要在**发命令之前**拦住，那是真的工具错误 |
@@ -881,20 +930,22 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.19），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.20），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
 当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
-发布 push）；**M4 第 1–5 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 +
-e2e 子 Agent 的预览工具 + Reviewer 出风险清单，**DoD ①②③ 已满足**）。
-下一步是 M4 第 6 步（CodeAct 的 `codemode` 沙箱），先看 §4.2 的 M4 表决定从哪块进。
-405 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:e2e 9
+发布 push）；**M4 第 1–6 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 +
+e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙箱，**DoD ①②③ 已满足，
+五个子角色全部 ready**）。
+下一步是 M4 第 7 步（发布前质量门禁：typecheck/test 不过不许发），先看 §4.2 的 M4 表。
+409 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:e2e 9
 + e2e:fullstack + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；
 ④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了“哪个角色花了多少”（聚合层看不见归属）；
-⑥ Reviewer 的 `lint` 未接（模板没有 eslint 配置），清单也只有文本、没有结构化事件/面板。
+⑥ Reviewer 的 `lint` 未接（模板没有 eslint 配置），清单也只有文本、没有结构化事件/面板；
+⑦ 脚本的 `// @options: timeout_ms` 能放大沙箱默认超时（上游语义），我们没夹。
 `pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`，
 动到 git / 回滚跑 `pnpm e2e:diff`，动到发布跑 `pnpm e2e:release`，动到 Agent 工具/角色跑 `pnpm e2e:e2e`。
 

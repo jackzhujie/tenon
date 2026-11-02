@@ -31,7 +31,17 @@ import { defineExtension, section } from '@earendil-works/pi-durable'
 import { Type } from 'typebox'
 import type { RawEntry } from '../normalize.js'
 import { normalizeEntries } from '../normalize.js'
-import { DELEGABLE_ROLES, ROLES, roleOf, subagentPrompt, toolsForRole } from '../roles.js'
+import {
+  DELEGABLE_ROLES,
+  ROLES,
+  extensionNamesFor,
+  modelToolsFor,
+  plannedRejection,
+  roleOf,
+  subagentPrompt,
+  toolsForRole,
+  type RoleSpec,
+} from '../roles.js'
 
 const ctx = BACKGROUND_CONTEXT
 
@@ -44,7 +54,7 @@ const DELEGATION_RULES = `You can delegate read-only investigation with the \`su
 - role=librarian: answer "how does this library / this project do X" from what is on disk.
 - role=e2e: check the running app in the preview — it reads and clicks the real page, not the source. Use it after you change behaviour.
 - role=reviewer: review what you just changed before it gets committed (diff + typecheck) and get a risk list. Use it when the change touches contracts, migrations or error paths.
-Role codeact is not wired up yet — it comes back with an explicit "not available" message, do not retry it.
+- role=codeact: hand it batch work a script does better — filter a big search result, read twenty files and summarise, reshape JSON. One script, one conclusion, not a pile of raw output.
 Delegate one concrete question per call, then use the answer. Do not delegate the thinking you are supposed to do.`
 
 export interface SubagentToolOptions {
@@ -55,6 +65,11 @@ export interface SubagentToolOptions {
   getHarness: () => Harness | undefined
   /** 全部可用工具（registry 里那一份）；按角色白名单过滤 */
   getTools: () => readonly ToolRegistration[]
+  /**
+   * 全部装好的扩展：角色可能要额外装一个（CodeAct 的沙箱就是）。
+   * 不给就只继承父会话的扩展 —— 与 M4 第 1 步的行为一致。
+   */
+  getExtensions?: () => readonly Extension[]
 }
 
 function errorResult(text: string): { isError: true; output: { type: 'text'; text: string }[] } {
@@ -67,6 +82,23 @@ function textOfMessage(message: { parts: readonly { type: string; text?: string 
     .map((part) => part.text ?? '')
     .join('')
     .trim()
+}
+
+/**
+ * 角色额外要的扩展 —— 只挑**子会话还没有的**。
+ *
+ * 子会话默认继承父会话的扩展（M4 第 1 步起就是），所以这里返回的通常是空。
+ * 重复 `add` 同一个扩展会让创建会话那一步直接失败，别把父会话已有的再塞一遍。
+ */
+function extraExtensions(
+  spec: RoleSpec,
+  current: readonly Extension[],
+  all: readonly Extension[],
+): Extension[] {
+  const names = extensionNamesFor(spec)
+  if (names.length === 0) return []
+  const have = new Set(current.map((item) => item.name))
+  return all.filter((extension) => names.includes(extension.name) && !have.has(extension.name))
 }
 
 /** 子会话里最后一条 assistant 文本就是"结论" */
@@ -87,6 +119,7 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
     description:
       'Delegate a read-only investigation to a sub agent and get its conclusion back. ' +
       'Roles: explore (locate code), librarian (answer from docs and on-disk type definitions), ' +
+      'codeact (run one script over many files: filter, join, summarise), ' +
       'e2e (verify the running page in the preview), reviewer (risk list on the current change). ' +
       'One concrete question per call. The sub agent cannot edit files.',
     parameters: Type.Object({
@@ -108,9 +141,10 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
         const available = DELEGABLE_ROLES.map((id) => ROLES[id].label).join(' / ')
         return errorResult(`没有这个子角色：${String(input.role)}。可用的是 ${available}`)
       }
-      if (spec.readiness === 'planned') {
+      const planned = plannedRejection(spec)
+      if (planned !== undefined) {
         // 明确报"还没接"，不让模型以为是自己参数写错了
-        return errorResult(`${spec.label} 还没接上（${spec.pending ?? '缺工具'}），换个角色或自己做`)
+        return errorResult(planned)
       }
 
       const tools = toolsForRole(spec, options.getTools())
@@ -131,8 +165,19 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
       // 2. 没有就建：模型/工具/指令必须在创建这一步给全（见文件头第 1 条）
       if (child === undefined) {
         const parentAgent = await api.agent(context)
+        const modelTools = modelToolsFor(spec, tools)
+        const extra = extraExtensions(spec, parentAgent.extensions, options.getExtensions?.() ?? [])
         const agent: AgentChange = {
           tools,
+          /*
+           * 只递给模型它该看的那些。CodeAct 的 `read/ls/glob/grep` 是**给脚本调的** ——
+           * 全递给模型，它就会绕过脚本一次次直读，"四十次 read 只回一行结论"就没了。
+           * 一样多时不必写：`modelTools` 不写等于"全给"。
+           */
+          ...(modelTools.length === tools.length
+            ? {}
+            : { modelTools: modelTools as readonly ToolRegistration[] }),
+          ...(extra.length === 0 ? {} : { extensions: { add: extra } }),
           instructions: spec.instructions,
           cwd: parentAgent.cwd,
           ...(parentAgent.model === undefined ? {} : { model: parentAgent.model }),

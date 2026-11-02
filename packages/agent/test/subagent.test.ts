@@ -53,13 +53,10 @@ describe('subagent 守卫', () => {
     }
   })
 
-  it('没接好的角色说清楚缺什么（而不是"工具不存在"）', async () => {
-    // e2e（第 4 步）与 reviewer（第 5 步）都接好了，现在只剩 codeact 还在 planned
-    const result = await call({ role: 'codeact', task: '批量改一遍' })
-    expect(result.isError).toBe(true)
-    expect(result.text).toContain('还没接上')
-    expect(result.text).toContain('codemode')
-  })
+  /*
+   * 「没接好的角色说清楚缺什么」以前在这里用 codeact 当样例。M4 第 6 步把它接上之后表里一个
+   * `planned` 都没有了 —— 这条分支改由 `roles.test.ts` 的 `plannedRejection` 单测钉住。
+   */
 
   it('白名单过滤后一个工具都没有时报错，不去建空会话', async () => {
     const result = await call({ role: 'explore', task: '找工作' }, { tools: [] })
