@@ -23,7 +23,7 @@ import { listTemplates } from '@tenon/generator'
 import type { RpcArgs, RpcMethod, RpcMethods, RpcOutput, UsageSnapshot } from '@tenon/protocol'
 import { TenonError } from '@tenon/protocol'
 import { pickSnapshot, type PickedSnapshot } from './revert-data.js'
-import { publishRelease } from './release.js'
+import { inspectRelease, publishRelease } from './release.js'
 import type { SseBus } from './sse.js'
 
 export interface ServerDeps {
@@ -307,6 +307,13 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     'release.list': async (input) => {
       const app = core.apps.require(input.appId)
       return { releases: core.releases.list(app.id, input.limit) }
+    },
+
+    // 预检是只读的：不打 tag、不写记录、不消耗版本号。它跑得慢（真跑测试），
+    // 但门禁的全部价值在于"发之前就知道"，而点了才知道等于没有
+    'release.check': async (input) => {
+      const app = core.apps.require(input.appId)
+      return inspectRelease({ core, app })
     },
 
     'release.publish': async (input) => {

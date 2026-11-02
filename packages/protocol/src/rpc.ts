@@ -323,6 +323,49 @@ export const rpcMethods = {
     input: z.object({ appId: Id, limit: z.number().int().positive().max(100).default(20) }),
     output: z.object({ releases: z.array(Release) }),
   },
+  /**
+   * 发布预检：**现在这一版能不能发**。只读 —— 不打 tag、不写记录、不消耗版本号。
+   *
+   * 为什么要有它：门禁只在 `release.publish` 里跑的话，用户点了才知道过不过，而这
+   * 个功能的全部价值恰恰是"**在发之前**知道"。对话框一打开就跑它。
+   *
+   * 注意它是**真跑**（`tsc` + `pnpm run test`），不是读缓存 —— 所以慢是正常的，
+   * 界面得显示"正在检查"和已经等了多久。也正因为真跑，`gate` 只对 `commitSha`
+   * 那一版有效：检查期间又有提交时 `stale` 会置真，这份结果就不能当依据了。
+   */
+  'release.check': {
+    input: z.object({ appId: Id }),
+    output: z.object({
+      /**
+       * 现在点发布会不会成功。
+       *
+       * 注意它**不是**按钮的 disabled 依据：门禁没过但用户坚持时仍然能发（`force`），
+       * 那时 `ready` 是 `false` 而按钮是可点的。它只用来给"绿 / 黄 / 红"一个判据。
+       */
+      ready: z.boolean(),
+      /**
+       * 拦在发布之前的事：正在生成（`APP_BUSY`）、没有提交（`RELEASE_NO_COMMITS`）、
+       * 工作区脏（`GIT_DIRTY_WORKTREE`）。
+       *
+       * 有值时**不会跑门禁**（`gate` 为 null）：工作区脏却去跑一遍测试，既白等几十秒，
+       * 又会让人以为"测试通过就快能发了"。真正该做的是把这一轮跑完。
+       */
+      blocked: z.object({ code: z.string(), message: z.string() }).nullable(),
+      /** 检查针对的是哪个提交。没有提交时为 null */
+      commitSha: z.string().nullable(),
+      /** 门禁结果。`blocked` 有值时为 null */
+      gate: GateOutcome.nullable(),
+      /**
+       * 检查跑完发现 HEAD 已经不是开始那一版了。
+       *
+       * 一份针对 A 的"通过"拿来给 B 用，比不检查更糟 —— 它给的是虚假的安心。
+       * 这时界面该说的是"重新检查一次"，而不是"可以发"。
+       */
+      stale: z.boolean(),
+      /** 这次预检花了多久（用户要理解为什么打开对话框要等一会儿） */
+      elapsedMs: z.number().int().nonnegative(),
+    }),
+  },
   'release.publish': {
     input: z.object({
       appId: Id,

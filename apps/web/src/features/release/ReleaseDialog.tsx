@@ -1,23 +1,34 @@
 /**
  * 发布对话框。
  *
- * 这里要讲清两件事。
+ * 这里要讲清三件事。
  *
  * **一、"发布"在当前阶段交付了什么。** 它没有把应用推上线（那要 Docker / 静态部署），
  * 而是把一个 commit 冻结成版本，推到本地备份库（一个标准裸库，`git clone` 出来就是
  * 这一版的完整代码）。与其含糊地说"发布成功"，不如把路径和 clone 命令直接给出来 ——
  * 用户能自己验证。
  *
- * **二、它现在会先检查一遍（M4 第 7 步）。** 类型检查 / 测试不过就不发。检查没过的界面
- * 不是"报个错就完"，而是三件事一起给：哪一项没过、为什么、以及一个显式的出口
- * （"我还是发"）。出口必须**看得见但不好误点** —— 藏起来会逼用户去翻命令行，
- * 一点就过会让门禁形同虚设，所以是"再点一次确认"。
+ * **二、打开对话框就开始预检。** 门禁只在点发布时跑的话，用户是"点了才知道过不过"，
+ * 而这个功能的全部价值恰恰是**在发之前**知道。所以一打开就跑 `release.check`：
+ * 能发是绿的、不能发直接把清单摊开、连发布的前提都不满足（工作区脏、没有提交）
+ * 就一句话说清并禁用按钮。
+ *
+ * **三、预检是真跑，不是读缓存。** 它真的会执行 `tsc` 与 `pnpm run test`，有测试的
+ * 应用可能要几十秒 —— 所以必须有"正在检查"和已等秒数，否则用户以为界面卡死了。
+ * 也正因为真跑，点发布时**服务端会再跑一遍**：两次之间代码、依赖都可能变，
+ * 拿上一次的结论当依据等于把门禁交给一个可能过期的答案。这一点界面上要说出来，
+ * 不然用户会奇怪"刚才不是检查过了吗"。
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { CheckOutcome, GitCommit, Release } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
-import type { PublishOutcome, PublishResult } from '../../hooks/useWorkspace.js'
+import type {
+  CheckOutcomeResult,
+  PublishOutcome,
+  PublishResult,
+  ReleaseCheck,
+} from '../../hooks/useWorkspace.js'
 
 function stampOf(at: number): string {
   const date = new Date(at)
@@ -108,6 +119,8 @@ export interface ReleaseDialogProps {
   onClose(): void
   /** `force` = 检查没过也发（服务端仍会跑检查，记录里标 `forced`） */
   onPublish(notes: string, force?: boolean): Promise<PublishOutcome>
+  /** 预检（`release.check`）。只读，但会真跑类型检查与测试 */
+  onCheck(): Promise<CheckOutcomeResult>
 }
 
 export function ReleaseDialog({
@@ -118,24 +131,66 @@ export function ReleaseDialog({
   publishing,
   onClose,
   onPublish,
+  onCheck,
 }: ReleaseDialogProps) {
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PublishResult | null>(null)
-  /** 门禁没过时的那份清单。有它就说明"上一次点发布被拦了" */
+  /** 预检结果。null = 还没出来（checking 为真时） */
+  const [preflight, setPreflight] = useState<ReleaseCheck | null>(null)
+  const [checking, setChecking] = useState(false)
+  /** 预检本身没跑成（网络 / 服务端崩）。它不等于"检查没过"，不能混成一个红条 */
+  const [checkError, setCheckError] = useState<string | null>(null)
+  /** 已经等了多少毫秒。检查会真跑测试，没有这个数字用户以为卡死了 */
+  const [waitedMs, setWaitedMs] = useState(0)
+  /** 点发布被拦时的那份清单 —— 预检通过之后代码又改了才会走到这里 */
   const [blocked, setBlocked] = useState<CheckOutcome[] | null>(null)
   /** 已经点过一次"仍然发布"，再点才真的发 */
   const [confirming, setConfirming] = useState(false)
 
-  // 每次打开都从干净状态开始：上次的"发布成功"卡片留着，会让人以为这次也发过了
+  const runCheck = useCallback(async (): Promise<void> => {
+    setChecking(true)
+    setCheckError(null)
+    setWaitedMs(0)
+    // 上一轮的结论先清掉：留着会出现"旧清单 + 正在检查"，人会以为那就是这一次的结果
+    setPreflight(null)
+    setBlocked(null)
+    setConfirming(false)
+    const outcome = await onCheck()
+    setChecking(false)
+    if (outcome.ok) setPreflight(outcome.result)
+    else setCheckError(outcome.message)
+  }, [onCheck])
+
+  /**
+   * 打开就跑一次预检。
+   *
+   * `openedFor` 是给 React StrictMode 的：开发模式下 effect 会跑两遍，而这个 effect
+   * 跑一遍就是**真跑一遍 `pnpm run test`**（几十秒，还占满 CPU）。按"这一次打开"去重 ——
+   * 不能靠调用方去重，因为它不知道我们为什么要跑两次。
+   */
+  const openedFor = useRef(false)
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      openedFor.current = false
+      return
+    }
+    if (openedFor.current) return
+    openedFor.current = true
     setNotes('')
     setError(null)
     setResult(null)
-    setBlocked(null)
-    setConfirming(false)
-  }, [open])
+    void runCheck()
+  }, [open, runCheck])
+
+  // 计时：只在"正在检查"期间走，每半秒刷一次（刷太勤没有意义，人眼也看不出）
+  useEffect(() => {
+    if (!checking) return
+    const startedAt = Date.now()
+    setWaitedMs(0)
+    const timer = setInterval(() => setWaitedMs(Date.now() - startedAt), 500)
+    return () => clearInterval(timer)
+  }, [checking])
 
   useEffect(() => {
     if (!open) return
@@ -148,6 +203,14 @@ export function ReleaseDialog({
 
   if (!open) return null
 
+  /** 发布的前提都不满足：连检查都没跑，按钮该灰着（不是"检查没过"，是"现在不能发"） */
+  const hardBlocked = preflight !== null && preflight.blocked !== null
+  /**
+   * 检查没过。两种来源都算：预检就红了，或者预检转绿之后点发布被服务端拦下
+   *（那几十秒里代码又变了）—— 两者对用户是同一件事：能发，但要先说清楚。
+   */
+  const gateFailed =
+    blocked !== null || (preflight !== null && preflight.gate !== null && !preflight.gate.ok)
   const submit = async (force = false): Promise<void> => {
     if (publishing) return
     setError(null)
@@ -165,23 +228,155 @@ export function ReleaseDialog({
     setConfirming(false)
   }
 
-  /** 主按钮：门禁没过时它就是"仍然发布"，而且第一次点只是把话说清楚 */
+  const shortSha = (sha: string): string => sha.slice(0, 7)
+
+  /**
+   * 主按钮。
+   *
+   * 检查没过时它**不是**发布 —— 是「重新检查」。这是有意的：绝大多数时候用户会去改
+   * 代码再来一遍，把"仍然发布"放成主按钮等于把逃生舱摆到驾驶座旁边。逃生舱要看得见
+   * （左边那个 ghost 按钮），但不好误点（点了先变色、再点一次才真的发）。
+   */
   const primary = (): void => {
-    if (blocked === null) {
-      void submit(false)
+    if (hardBlocked || publishing) return
+    if (gateFailed) {
+      if (!confirming) {
+        void runCheck()
+        return
+      }
+      void submit(true)
       return
     }
-    if (!confirming) {
-      setConfirming(true)
-      return
-    }
-    void submit(true)
+    void submit(false)
   }
 
   const primaryLabel = (): string => {
-    if (publishing) return blocked === null ? '检查并发布中…' : '发布中…'
-    if (blocked !== null) return confirming ? '确认：带着问题发布' : '仍然发布'
+    if (publishing) return '发布中…'
+    if (hardBlocked) return '先处理上面的问题'
+    if (checking) return '检查中…'
+    if (gateFailed) return confirming ? '确认：带着问题发布' : '重新检查'
     return result === null ? '发布' : '再发一版'
+  }
+
+  /**
+   * 逃生舱：「检查没过也发」。
+   *
+   * 第一次点只是把按钮变成红的并换文案 —— 双击不会误发，因为点的时候文案刚变
+   * （这是设计，不是巧合）。真正发出去需要再点一次那个红按钮。
+   */
+  const forceButton = (): ReactNode => {
+    if (!gateFailed || publishing) return null
+    return (
+      <Button
+        variant={confirming ? 'danger' : 'ghost'}
+        className={confirming ? 'mr-auto border border-bad/50' : 'mr-auto'}
+        size="sm"
+        disabled={checking}
+        onClick={() => {
+          if (!confirming) {
+            setConfirming(true)
+            return
+          }
+          void submit(true)
+        }}
+      >
+        {confirming ? '确认：带着问题发布' : '仍然发布'}
+      </Button>
+    )
+  }
+
+  /** 预检区块：四态（检查中 / 前提不满足 / 过了 / 没过）+ 一个"结果过期"的旁支 */
+  const preflightBlock = (): ReactNode => {
+    if (checking) {
+      return (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2">
+            <span className="size-3 shrink-0 animate-spin rounded-full border-[1.5px] border-line border-t-muted" />
+            <span className="text-[11.5px] text-muted">正在跑类型检查与测试…</span>
+            <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint">
+              {(waitedMs / 1000).toFixed(0)}s
+            </span>
+          </div>
+          <p className="text-[10.5px] leading-relaxed text-faint">
+            这一步会<span className="text-muted">真跑一遍</span>（不是读上一次的结果），有测试的应用可能要几十秒。
+          </p>
+        </div>
+      )
+    }
+
+    if (checkError !== null) {
+      return (
+        <div className="rounded-lg border border-line bg-panel px-3 py-2">
+          <p className="text-[11.5px] leading-relaxed text-muted">预检没跑起来：{checkError}</p>
+          <p className="mt-1 text-[10.5px] leading-relaxed text-faint">
+            这不代表代码有问题 —— 点发布时服务端还会完整检查一遍。
+          </p>
+        </div>
+      )
+    }
+
+    if (preflight === null) return null
+
+    if (preflight.blocked !== null) {
+      return (
+        <div className="rounded-lg border border-warn/40 bg-warn/5 px-3 py-2">
+          <p className="text-[11.5px] leading-relaxed text-ink">{preflight.blocked.message}</p>
+          <p className="mt-1 text-[10.5px] leading-relaxed text-faint">
+            现在不满足发布的前提，所以这一步<span className="text-muted">没有</span>跑类型检查和测试。
+          </p>
+        </div>
+      )
+    }
+
+    if (preflight.gate === null) return null
+
+    // 0.0s 会让人怀疑"它到底跑了没有"。没跑起来的情况（缺 typescript）本来就是瞬时的。
+    // 不带单位：JSX 那边统一补一个 `s`
+    const seconds = preflight.elapsedMs < 1000 ? '<1' : (preflight.elapsedMs / 1000).toFixed(1)
+    if (preflight.stale) {
+      return (
+        <div className="space-y-2">
+          <div className="rounded-lg border border-warn/40 bg-warn/5 px-3 py-2">
+            <p className="text-[11.5px] leading-relaxed text-ink">
+              检查期间又有新提交，这份结果讲的是{' '}
+              <span className="font-mono text-[11px]">{shortSha(preflight.commitSha ?? "")}</span> 那一版，不算数。
+            </p>
+            <p className="mt-1 text-[10.5px] leading-relaxed text-faint">
+              针对 A 版的"通过"拿去给 B 版用，比不检查更糟 —— 它给的是虚假的安心。再查一次。
+            </p>
+          </div>
+          <GateList checks={preflight.gate.checks} />
+        </div>
+      )
+    }
+
+    if (!preflight.gate.ok) {
+      return (
+        <div className="space-y-2">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[11.5px] text-bad">检查没通过，先别发</span>
+            <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint">{seconds}s</span>
+          </div>
+          <GateList checks={preflight.gate.checks} />
+          <p className="text-[10.5px] leading-relaxed text-faint">
+            修好再点「重新检查」；确实要发就点「仍然发布」，历史里会标「带问题」。
+          </p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[11.5px] text-ok">✓ 检查通过，可以发</span>
+          <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint">{seconds}s</span>
+        </div>
+        <GateList checks={preflight.gate.checks} />
+        <p className="text-[10.5px] leading-relaxed text-faint">
+          点发布会再跑一遍（结果不缓存 —— 两次之间代码或依赖都可能变），所以还会再等一次。
+        </p>
+      </div>
+    )
   }
 
   return (
@@ -202,9 +397,8 @@ export function ReleaseDialog({
             发布{appName === null ? '' : ` · ${appName}`}
           </h2>
           <p className="mt-0.5 text-[11.5px] leading-relaxed text-faint">
-            把当前提交冻结成一个版本，推到本地备份库。备份库是标准裸库，
-            <span className="text-muted"> git clone 出来就是这一版的完整代码</span>。
-            发布前会先跑一遍类型检查和测试。
+            把当前提交冻结成一个版本，推到本地备份库。备份库是标准裸库，{' '}
+            <span className="text-muted">git clone 出来就是这一版的完整代码</span>。
           </p>
         </div>
 
@@ -225,6 +419,18 @@ export function ReleaseDialog({
             </div>
           </div>
 
+          {preflightBlock()}
+
+          {blocked !== null && (
+            <div className="space-y-2">
+              <div className="flex items-baseline gap-2">
+                <span className="text-[11.5px] text-bad">检查没通过，先别发</span>
+                <span className="text-[10.5px] text-faint">修好再点发布；确实要发就点「仍然发布」</span>
+              </div>
+              <GateList checks={blocked} />
+            </div>
+          )}
+
           <label className="block space-y-1.5">
             <span className="text-[11.5px] text-muted">发布说明（可选）</span>
             <textarea
@@ -240,16 +446,6 @@ export function ReleaseDialog({
               会写进这次 tag 的正文，拿备份库的人也能看到。
             </span>
           </label>
-
-          {blocked !== null && (
-            <div className="space-y-2">
-              <div className="flex items-baseline gap-2">
-                <span className="text-[11.5px] text-bad">检查没通过，先别发</span>
-                <span className="text-[10.5px] text-faint">修好再点发布；确实要发就点「仍然发布」</span>
-              </div>
-              <GateList checks={blocked} />
-            </div>
-          )}
 
           {error !== null && blocked === null && (
             <p className="rounded-lg border border-bad/30 bg-[#241413] px-3 py-2 text-[11.5px] leading-relaxed text-bad">
@@ -326,27 +522,21 @@ export function ReleaseDialog({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-line-soft px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
           {confirming && (
-            <span className="mr-auto self-center text-[10.5px] leading-tight text-warn">
-              检查没过还发，历史里会标「带问题」
-            </span>
+            <p className="w-full text-right text-[10.5px] leading-tight text-warn">
+              再点一次就真的发出去 —— 历史里会标「带问题」
+            </p>
           )}
-          {/* 被拦下之后，用户最常见的下一步是"我去改代码，然后重试"。
-              没有这个按钮就只能关掉对话框再打开 —— 而重开还会把发布说明清空 */}
-          {blocked !== null && (
-            <Button variant="ghost" size="sm" disabled={publishing} onClick={() => void submit(false)}>
-              重新检查
-            </Button>
-          )}
+          {/* 逃生舱在最左：看得见，但不是主按钮 */}
+          {forceButton()}
           <Button variant="ghost" size="sm" disabled={publishing} onClick={onClose}>
             关闭
           </Button>
           <Button
-            variant={confirming ? 'danger' : 'primary'}
-            className={confirming ? 'border border-bad/50' : undefined}
+            variant="primary"
             size="sm"
-            disabled={publishing || headCommit === null}
+            disabled={publishing || checking || hardBlocked || headCommit === null}
             onClick={primary}
           >
             {primaryLabel()}

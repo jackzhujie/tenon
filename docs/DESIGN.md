@@ -1,7 +1,7 @@
-# DESIGN.md — 详细方案设计 v1.2.21
+# DESIGN.md — 详细方案设计 v1.2.22
 
 > 状态：已定稿，进入实施。本文档是本项目**唯一事实来源**，取代 `ARCHITECTURE.md` v0.1（Rust/Tauri 方案已废弃）。
-> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。 + **v1.2.17 补充（M4 第 3 步用量与预算：`harness.usage()` 是**会话账本**，跨重启不丢、且天然把子 Agent 与压缩摘要算进去 —— 前端累加必然少一半，所以逐条 `usage` 事件换成了全量的 `usage.update`；熔断不是"预测下一笔"，pi 没有 pre-request 钩子，只能"花超了就停" —— §5.6）**。 + **v1.2.18 补充（M4 第 4 步 e2e 子 Agent 的预览工具：**不新起浏览器，让页面反连回来领命令** —— 网关往 HTML 注一行脚本 + HTTP 长轮询（`upgrade` 要原样透传给 Vite，自己再握手必坏）；`sessionId` 存 `sessionStorage` 才能跨整页重载；刷新只重投幂等命令；注入时 `content-length` 与 `transfer-encoding` 必须**一起**处理；扩展必须既 `registry.install` 又进会话的 `extensions`，否则工具"不存在"且不报错 —— §5.7）**。 + **v1.2.19 补充（M4 第 5 步 Reviewer：评审的对象是**工作区**不是提交（一轮收尾才 commit，看提交等于永远看上一版）；工作区差异不能走 `git.statusMatrix`；`typecheck` 的判据是「跑完了 + 没诊断」，缺 `node_modules` / 缺 tsconfig / 超时都必须说"没跑成"而**不能**说"通过"；`scrubEnv` 会删掉 `ELECTRON_RUN_AS_NODE`，桌面版里跑 `tsc` 得把它显式补回来 —— §5.8）**。 + **v1.2.20 补充（M4 第 6 步 CodeAct：能力边界是**三层**不是一层提示词 —— 会话的 `tools`、工具的 `callers`、`modelTools` 子集；不设 `modelTools` 模型就绕过脚本直读；脚本里 `tools.write` 调不动是因为它根本没被注进沙箱；`CodemodeSandbox` 按 `import.meta.url` 找 wasm 与 worker，**打包成功不等于能跑** —— §5.9）**。 + **v1.2.21 补充（M4 第 7 步发布门禁：判据是**三态**不是布尔 —— `skip`（这个应用没有那项检查）不拦、`fail`（该检查的没检查成功）必拦，混成一个 `false` 会让「没配测试」和「测试挂了」同罪；「没跑成」算 `fail` 不算 `skip`，否则删掉 `node_modules` 就能绕过门禁；用户 `force` 时**仍然跑检查**，只影响拦不拦 —— §5.10）**。
+> 输入：`PROTOCOL.md`（妙搭逆向规格）+ 用户 11 条需求（2026-10-31）+ v1.1 定案（DB/插件/平台/命名）+ **v1.2 修正（数据库供给两档化、产品库改 `node:sqlite`、L2 插件分发三阶段、pi/Electron 平台边界澄清）** + **v1.2.1 修正（四个 spike 实测：`pool.max=1` 硬约束、`callsite` 双属性定位、LISTEN/NOTIFY 不可用 —— 见 `docs/SPIKES.md`）** + **v1.2.2 修正（M1 主干落地实测：isomorphic-git `statusMatrix` 会漏掉同长度改动、`pi.live` 无 token 增量 —— §4.5 / §12.2）** + **v1.2.3 修正（工具层接入实测：`pi-coding-agent` 工具签名 ≠ `pi-durable` 工具签名，必须过 adapter —— §4.3.1）** + **v1.2.4 修正（生成器与预览网关落地实测：模板变量残留、upgrade 两侧 socket 必须配对、`env` 覆盖对象不能当子进程环境 —— §8.7 / §9.1）** + **v1.2.5 修正（Web 渲染器 `apps/web` 落地实测：网关端口必须显式绑定否则 HMR 永远连不上、协议主入口不该进浏览器包、flex 容器缺 `flex-1` 会静默塌成 0 高 —— §9.1 / §14.6）** + **v1.2.6 修正（Electron 壳落地实测：页面改为 server 同源托管并在 index.html 注入 Token、`ELECTRON_RUN_AS_NODE` 泄漏会把 `electron .` 变成 node、esbuild 打 ESM 单文件必须注入 `createRequire` —— §2.2.1）** + **v1.2.7 修正（M2 全栈落地实测：Node ≥22.18 的原生类型擦除让 `ts-node/register` 彻底失效、PGlite 必须外部化才能进桌面包、`DATABASE_POOL_MAX` 的定位、`readiness` 从三格变四格 —— §6.4 / §9.1）** + **v1.2.8 修正（M2 第 2 步日志链路实测：`/__tenon/log` 必须在网关层拦截不转发上游、子进程输出要先 `stripAnsi` 再去重、`LogStore` 合并后照样推 SSE（前端按 id upsert）—— §9.1）** + **v1.2.9 修正（M2 第 3 步：跨档迁移从 `pg_dump` 管道改为纯 JS 逻辑拷贝（用户机器上没有那些二进制）、运行时 SDK 采用源码分发、全局 `@Catch()` 必须补响应、堆栈续行要并进上一条日志 —— §6.4 / §9.1）** + **v1.2.10 修正（日志链路明确不用 CDP 采集：CDP 只覆盖浏览器侧、要独占 target（用户按 F12 就被抢走）、attach 之前的首屏崩溃与 HMR 重刷窗口内的事件都会丢，Node 侧要开 `--inspect` 等于给本机开一个可执行代码的端口 —— 改为应用自报 + 子进程管道，CDP 只留作未来性能面板的可选增强。同时按用户决定跳过 Docker 产物 —— §11.1.1 / §17）** + **v1.2.11 修正（M3 第 3 步点选链路实测：inspector 只能是 dev 动态 import、token 走 hash 不走 query、`postMessage` 的 targetOrigin 只能 `*` 所以校验必须全在父窗口侧且 `loc.file` 当不可信输入过滤 —— §10.1 / §10.2）** + **v1.2.12 修正（M3 第 6 步 Diff 与回滚：`git.diff` 给结构化逐行差异而不是让前端解析文本、看单条提交要用 `git.show` 而非 `git.diff`、§12.3 的 `pg_dump` 路线在「零安装」下不成立 —— §12.2 / §12.3）**。 + **v1.2.14 修正（M3 第 8 步发布 push：isomorphic-git 的 `push` 只走 HTTP 传输，本地备份改用「对象 + ref 直接搬运」到标准裸库；`writeObject` 传 string 会写坏 tag 对象，内容必须转 Buffer；备份库必须在仓库外面，否则会被自己提交进去 —— §12.1 / §13.3）**。 + **v1.2.15 修正（M4 第 1 步子 Agent 落地实测：`api.conversation()` 拿到的是 `ConversationHandle`，**没有 `configure()`** —— 子会话的模型/工具/指令只能在 `harness.createConversation({ agent })` 那一刻定，所以 `subagent` 工具要拿 Harness（闭包注入）；`ConversationRecord` 上的所有权字段叫 `owner` 不是 `ownership`；`faux` 的响应工厂只服务一次请求（`shift()`），必须把自己塞回队尾，且父/子会话要**分道**，否则子会话会把父轮的台词吃掉 —— §5.1 / §5.2）**。 + **v1.2.16 修正（M4 第 2 步任务图：pi 的 `owner` 是**任务树**不是会话树 —— 子会话里的 generation task 在它眼里没有 owner，显示上要按 `conversations` 回挂到"派它的那个工具 task"；角色（explore/librarian）图里根本没有，只能从工具 task 的 `checkpoint.arguments` 取，且只在 `phase: 'execute'` 之后才有 —— 判据是"工具 task 且已拥有会话"；静止时节点被回收，所以面板"图空即不渲染"且**不攒历史** —— §5.5 / §7.3）**。 + **v1.2.17 补充（M4 第 3 步用量与预算：`harness.usage()` 是**会话账本**，跨重启不丢、且天然把子 Agent 与压缩摘要算进去 —— 前端累加必然少一半，所以逐条 `usage` 事件换成了全量的 `usage.update`；熔断不是"预测下一笔"，pi 没有 pre-request 钩子，只能"花超了就停" —— §5.6）**。 + **v1.2.18 补充（M4 第 4 步 e2e 子 Agent 的预览工具：**不新起浏览器，让页面反连回来领命令** —— 网关往 HTML 注一行脚本 + HTTP 长轮询（`upgrade` 要原样透传给 Vite，自己再握手必坏）；`sessionId` 存 `sessionStorage` 才能跨整页重载；刷新只重投幂等命令；注入时 `content-length` 与 `transfer-encoding` 必须**一起**处理；扩展必须既 `registry.install` 又进会话的 `extensions`，否则工具"不存在"且不报错 —— §5.7）**。 + **v1.2.19 补充（M4 第 5 步 Reviewer：评审的对象是**工作区**不是提交（一轮收尾才 commit，看提交等于永远看上一版）；工作区差异不能走 `git.statusMatrix`；`typecheck` 的判据是「跑完了 + 没诊断」，缺 `node_modules` / 缺 tsconfig / 超时都必须说"没跑成"而**不能**说"通过"；`scrubEnv` 会删掉 `ELECTRON_RUN_AS_NODE`，桌面版里跑 `tsc` 得把它显式补回来 —— §5.8）**。 + **v1.2.20 补充（M4 第 6 步 CodeAct：能力边界是**三层**不是一层提示词 —— 会话的 `tools`、工具的 `callers`、`modelTools` 子集；不设 `modelTools` 模型就绕过脚本直读；脚本里 `tools.write` 调不动是因为它根本没被注进沙箱；`CodemodeSandbox` 按 `import.meta.url` 找 wasm 与 worker，**打包成功不等于能跑** —— §5.9）**。 + **v1.2.21 补充（M4 第 7 步发布门禁：判据是**三态**不是布尔 —— `skip`（这个应用没有那项检查）不拦、`fail`（该检查的没检查成功）必拦，混成一个 `false` 会让「没配测试」和「测试挂了」同罪；「没跑成」算 `fail` 不算 `skip`，否则删掉 `node_modules` 就能绕过门禁；用户 `force` 时**仍然跑检查**，只影响拦不拦 —— §5.10）**。 + **v1.2.22 补充（发布预检：`release.check` 只读地回答「能不能发」，与 `publish` 共用 `inspectRelease`；前提不满足时**不跑门禁**；`stale` 用前后两次 HEAD 判定 —— 过期的「通过」比不检查更糟；**不缓存**，点发布会再跑一遍 —— §5.11）**。
 > 原则：clean-room —— 只借鉴行为规格与交互范式，不复制字节的代码、文案、资源、提示词。
 
 ## 0. 结论摘要（先看这张表）
@@ -958,11 +958,56 @@ server 打成 `server.mjs` 之后这两条路径全指向 `server.mjs` 旁边，
 ④ `scripts.test` 换成 `process.exit(1)`：拦下来了，且 `typecheck` 那项仍是 `pass`（说明拦的真是
 测试，不是「反正都不让发」）；⑤ 迁移测试从 v1 库升上来，老记录 `gateStatus` 是 `null`。
 
-**缺口（如实记）**：① 没有**预检** —— 用户点了发布才知道过不过，理想是对话框一打开就显示当前 HEAD
-的检查状态（要一个新的 `release.check` RPC，本轮没做）；② 门禁只看类型与测试，不看 `lint`
-（模板没有 eslint 配置，硬塞会把真风险淹掉 —— 与 §5.8 同一个欠账）；③ 发布的仍是本地备份库，
-「发到真远端」还没有 transport（§13.3）；④ 检查结果只在发布对话框里出现，主界面上没有「这个应用
-当前能不能发」的指示。
+**缺口（如实记）**：① 门禁只看类型与测试，不看 `lint`（模板没有 eslint 配置，硬塞会把真风险
+淹掉 —— 与 §5.8 同一个欠账）；② 发布的仍是本地备份库，「发到真远端」还没有 transport（§13.3）；
+③ 检查结果只在发布对话框里出现，主界面上没有「这个应用当前能不能发」的指示。
+（原来的第①条「没有预检」已经补上了，见 §5.11。）
+
+### 5.11 发布预检：把「点了才知道」变成「打开就知道」（v1.2.22 落地）
+
+`release.check` 只读地回答一个问题：**现在这一版能不能发**。对话框一打开就跑它。
+门禁只在 `publish` 里跑的话，用户是点了才知道，而这一步的全部价值恰恰是在发之前知道。
+
+**它与发布共用同一个函数。** `release.publish` 内部也调 `inspectRelease`，只是拿到结果后
+按 `blocked.code` 抛对应的错误码。两份实现必然漂移，而漂移的表现是「预检说能发、点下去却被拦」——
+一旦出现，用户就会绕开预检，这个功能等于不存在。
+
+**前提问题与代码问题是两种「不能发」。** 返回值里把它们分开：
+
+| 字段 | 什么时候有值 | 意味着 | 界面 |
+|---|---|---|---|
+| `blocked` | 正在生成 / 没有提交 / 工作区脏 | 现在**没到**检查代码那一步 | 黄条 + 按钮置灰 |
+| `gate.ok=false` | 检查跑完，有 `fail` 项 | 代码有问题，改完再查 | 红清单 + 主按钮「重新检查」 |
+| `stale` | 检查期间 HEAD 变了 | 这份结论讲的是上一版 | 黄条 + 「重新查一次」 |
+
+**前提不满足时不跑门禁**（`gate` 为 `null`）。工作区脏却去跑一遍 `tsc` 和测试，既白等几十秒，
+又让人以为「测试修好就快能发了」—— 真正该做的是把这一轮跑完。`gate` 是 `null` 而不是
+「跑了但没过」，这两个结论对用户的含义完全相反。
+
+**`stale` 是这一节最要紧的一格。** 检查是**真跑**（`tsc` + `pnpm run test`），可能几十秒；
+这期间 Agent 又提交了一轮，那份针对 A 版的「通过」就作废了。一份过期的通过**比不检查更糟**
+—— 它给的是虚假的安心。所以前后各读一次 HEAD，不一致就 `stale`，即使 `gate.ok` 为真
+`ready` 也是 `false`。`publish` 里遇到 `stale` 直接抛 `APP_BUSY` 让人重来：那时候挑哪一份结果
+去打 tag 都是错的（正常不该发生 —— 前端按钮是禁用的）。
+
+**不缓存。** 理由同上：缓存会让门禁看到一个过期的答案，而这个功能的全部价值就在于「答案是现在的」。
+代价是用户点发布时服务端会**再跑一遍**（预检那一遍不复用），界面上写明了这一点。
+唯一做的是**并发合并**：同一应用同时只跑一份（按 appId 的 in-flight 表），结果一出来就删。
+两次预检等于同一个目录里两套 `tsc` + 两套 `vitest`，后者会往 `node_modules/.vite` 写缓存，
+两个进程抢同一个目录是真实的故障源。
+
+**`ready` 不是按钮的 disabled 依据。** `ready=false` 有两种，一种是真不能发（`blocked`），
+一种是检查没过但用户有权坚持（`force`）。把 `ready` 接到 disabled 上等于把「仍然发布」焊死。
+
+**界面上主按钮是「重新检查」。** 检查没过时绝大多数人会去改代码再来一遍，把逃生舱（「仍然发布」）
+摆成主按钮等于把它放在驾驶座旁边。逃生舱降成左侧 ghost：点了先变红、文案变
+「确认：带着问题发布」，**再点一次**才真的发。第一次点击只改状态，所以双击不会误发。
+
+**证据。** ① 预检之后仓库里既没有 tag 也没有发布记录、备份库根本没建，紧接着不带 `force` 发布
+版本号仍是 `-1`；② 检查没过时 `blocked=null` + `gate.ok=false`，而 `publish` 报同一个原因；
+③ 工作区脏时 `gate=null`；④ 用 4 秒的慢测试造出窗口，中途提交一次 → `stale=true` 且
+`gate.ok=true` 但 `ready=false`；⑤ 两次并发预检的 `elapsedMs` 完全相同（同一份结果）；
+⑥ Electron 里截图走过两态（门禁失败 / 检查中）。
 
 ---
 

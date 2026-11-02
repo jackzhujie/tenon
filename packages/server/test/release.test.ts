@@ -10,6 +10,10 @@
  *
  * 前三条的用例用 `force: true`：它们测的是发布编排本身，应用里故意没装依赖（门禁会拦），
  * 那不是这些用例要验的东西。门禁本身在 `checks.test.ts` 与下面后面四条里验。
+ *
+ * 后半段是**预检**（`release.check`）：它只读地回答"现在能不能发"。最要紧的两条是
+ * 「查完什么都没留下」和「它说的与发布做的是同一件事」—— 预检说能发、点下去却被拦，
+ * 是这类功能最容易出的毛病，一旦出现用户就会绕开它。
  */
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -39,6 +43,15 @@ interface CheckOutcome {
   status: 'pass' | 'fail' | 'skip'
   summary: string
   detail: string | null
+  elapsedMs: number
+}
+
+interface Preflight {
+  ready: boolean
+  blocked: { code: string; message: string } | null
+  commitSha: string | null
+  gate: { ok: boolean; checks: CheckOutcome[] } | null
+  stale: boolean
   elapsedMs: number
 }
 
@@ -151,6 +164,19 @@ async function makeCheckable(repoDir: string, source: string): Promise<void> {
   )
   await mkdir(join(repoDir, 'src'), { recursive: true })
   await writeFile(join(repoDir, 'src', 'main.ts'), source)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((done) => setTimeout(done, ms))
+}
+
+/** 往应用的 package.json 里塞一个 test 脚本（模板本身没有），返回打包后的 JSON 文本 */
+async function withTestScript(repoDir: string, script: string): Promise<void> {
+  const pkg = JSON.parse(await readFile(join(repoDir, 'package.json'), 'utf8')) as {
+    scripts: Record<string, string>
+  }
+  pkg.scripts['test'] = script
+  await writeFile(join(repoDir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`)
 }
 
 /** 应用自己的 node_modules 里放一份 typescript（软链到仓库那份），门禁才跑得起来 */
@@ -337,4 +363,136 @@ describe('发布（release.publish）', () => {
     // 类型那项是好的 —— 说明拦下来的确实是测试，不是"反正都不让发"
     expect((error.details?.checks ?? []).find((check) => check.id === 'typecheck')?.status).toBe('pass')
   }, 60_000)
+})
+
+describe('发布预检（release.check）', () => {
+  it('★ 只读：查完不打 tag、不写记录、不消耗版本号，且结论与发布一致', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+    const committed = await gitops.commitAll(paths.repoDir, 'feat: 写对了类型')
+
+    const first = await rpc<Preflight>(server, 'release.check', { appId })
+    expect(first.ready).toBe(true)
+    // 前提没问题，所以不是 blocked 的那种"不能发" —— 这两个字段回答的是不同的问题
+    expect(first.blocked).toBeNull()
+    expect(first.commitSha).toBe(committed?.sha)
+    expect(first.gate?.ok).toBe(true)
+    expect(first.stale).toBe(false)
+
+    // 只读的全部含义：没有 tag、没有记录、备份库根本没建出来
+    expect(await gitops.listTags(paths.repoDir)).toEqual([])
+    expect((await rpc<{ releases: Release[] }>(server, 'release.list', { appId })).releases).toEqual([])
+    await expect(readFile(join(paths.backupRepo, 'HEAD'), 'utf8')).rejects.toThrowError()
+
+    // 查第二次结论一样（没有"查过就失效"的副作用）
+    const again = await rpc<Preflight>(server, 'release.check', { appId })
+    expect(again.ready).toBe(true)
+
+    // 最要紧的一条：预检说的和发布做的是同一件事 —— 不用 force 就能发出去，
+    // 版本号还是 -1（预检没偷走一个版本号）
+    const published = await rpc<PublishResult>(server, 'release.publish', { appId })
+    expect(published.release.version.endsWith('-1')).toBe(true)
+    expect(published.release.gateStatus).toBe('pass')
+  }, 90_000)
+
+  it('★ 检查没过：ready=false 但 blocked=null —— 是代码问题，不是前提问题', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, "export const answer: number = 'not a number'\n")
+    await installTypescript(paths.repoDir)
+    await gitops.commitAll(paths.repoDir, 'feat: 故意写错类型')
+
+    const pre = await rpc<Preflight>(server, 'release.check', { appId })
+    expect(pre.blocked).toBeNull()
+    expect(pre.ready).toBe(false)
+    expect(pre.gate?.ok).toBe(false)
+    expect(pre.gate?.checks[0]?.status).toBe('fail')
+
+    // 预检说不能发 → 发布真的发不出去，而且是同一个原因（不是两套判断）
+    const error = await rpcError(server, 'release.publish', { appId })
+    expect(error.code).toBe('RELEASE_CHECKS_FAILED')
+
+    // 预检本身仍然什么都没写
+    expect(await gitops.listTags(paths.repoDir)).toEqual([])
+  }, 90_000)
+
+  it('工作区脏时只说前提，不跑门禁（也就没有 gate 结论）', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await withTestScript(paths.repoDir, 'node -e "process.exit(1)"')
+    await gitops.commitAll(paths.repoDir, 'chore: 一个会红的测试')
+    // 上一轮写到一半：脏工作区
+    await writeFile(join(paths.repoDir, 'note.txt'), '写了一半\n')
+
+    const pre = await rpc<Preflight>(server, 'release.check', { appId })
+    expect(pre.blocked?.code).toBe('GIT_DIRTY_WORKTREE')
+    expect(pre.blocked?.message).toContain('note.txt')
+    // gate 是 null 而不是"跑了但没过"：工作区脏的时候去跑一遍测试，既白等几十秒，
+    // 又会让人以为"测试修好就快能发了"。这里没有测试结论可给
+    expect(pre.gate).toBeNull()
+    expect(pre.ready).toBe(false)
+  })
+
+  it('没有提交时看的是"没有内容可发"，不是"检查没过"', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    // 建应用会有一个初始提交，把它删掉，造出「仓库在、历史空」的状态
+    await rm(join(paths.repoDir, '.git'), { recursive: true, force: true })
+    await gitops.initRepo(paths.repoDir)
+
+    const pre = await rpc<Preflight>(server, 'release.check', { appId })
+    expect(pre.blocked?.code).toBe('RELEASE_NO_COMMITS')
+    expect(pre.commitSha).toBeNull()
+    expect(pre.gate).toBeNull()
+    expect(pre.ready).toBe(false)
+  })
+
+  it('★ 检查期间又有提交：门禁虽过也标 stale，不能说"可以发"', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+    // 慢 4 秒的测试：给这个用例留出"检查跑着的时候仓库又前进了一版"的窗口
+    await withTestScript(paths.repoDir, 'node -e "setTimeout(function () {}, 4000)"')
+    const first = await gitops.commitAll(paths.repoDir, 'feat: 一个慢测试')
+
+    const pending = rpc<Preflight>(server, 'release.check', { appId })
+    await sleep(1200)
+    await writeFile(join(paths.repoDir, 'note.txt'), '检查跑着的时候又改了一笔\n')
+    const second = await gitops.commitAll(paths.repoDir, 'feat: 检查期间的改动')
+    expect(second?.sha).toBeDefined()
+
+    const result = await pending
+    expect(result.commitSha).toBe(first?.sha)
+    expect(result.stale).toBe(true)
+    // 门禁本身是过的 —— 说明 ready=false 来自"结果过期"，而不是"检查没过"。
+    // 这两种情况对用户的含义完全相反：一个该重新检查，一个该改代码
+    expect(result.gate?.ok).toBe(true)
+    expect(result.ready).toBe(false)
+  }, 90_000)
+
+  it('同一个应用的两次预检合并成一次（不并发跑两套 tsc + 测试）', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+    await withTestScript(paths.repoDir, 'node -e "setTimeout(function () {}, 1200)"')
+    await gitops.commitAll(paths.repoDir, 'feat: 稍微慢一点的测试')
+
+    const [a, b] = await Promise.all([
+      rpc<Preflight>(server, 'release.check', { appId }),
+      rpc<Preflight>(server, 'release.check', { appId }),
+    ])
+    // 同一个结果对象才会连耗时都一样；真跑了两份的话这个数字不可能分毫不差
+    expect(a.elapsedMs).toBe(b.elapsedMs)
+    expect(a.commitSha).toBe(b.commitSha)
+  }, 90_000)
 })

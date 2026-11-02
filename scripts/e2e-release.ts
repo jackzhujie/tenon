@@ -42,6 +42,15 @@ interface Release {
   createdAt: number
 }
 
+interface Preflight {
+  ready: boolean
+  blocked: { code: string; message: string } | null
+  commitSha: string | null
+  gate: { ok: boolean; checks: { id: string; status: string; summary: string }[] } | null
+  stale: boolean
+  elapsedMs: number
+}
+
 interface PublishResult {
   release: Release
   version: string
@@ -128,7 +137,22 @@ try {
   check('第一轮产生 commit', first !== undefined)
   const head = await gitops.headSha(repo)
 
-  console.log('\n2) 门禁先拦一道：这个应用没装依赖，类型检查跑不起来（M4 第 7 步）')
+  console.log('\n2) 预检先说清楚，发布也确实被拦（M4 第 7 步 + 预检）')
+  const pre = await rpc<Preflight>('release.check', { appId })
+  check('预检说"现在发不出去"', pre.ready === false, String(pre.ready))
+  check(
+    '原因是检查没过，不是前提没满足（这两个字段回答不同的问题）',
+    pre.blocked === null && pre.gate?.ok === false,
+    JSON.stringify(pre.blocked ?? pre.gate?.ok ?? null),
+  )
+  check('预检针对的是当前 HEAD', pre.commitSha === head, `${String(pre.commitSha)} vs ${String(head)}`)
+  check(
+    '预检只读：查完既没有 tag 也没有发布记录，备份库还没建',
+    (await gitops.listTags(repo)).length === 0 &&
+      (await rpc<{ releases: unknown[] }>('release.list', { appId })).releases.length === 0,
+  )
+
+  // 门禁本身：这个应用没装依赖，类型检查跑不起来
   const blocked = await rpcError('release.publish', { appId, notes: '首个可交付版本' })
   check('检查没过时拒绝发布', blocked.code === 'RELEASE_CHECKS_FAILED', blocked.message)
   check('错误里说清是哪一项没过', blocked.message.includes('类型检查'), blocked.message)

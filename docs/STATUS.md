@@ -3,8 +3,9 @@
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
 > 最后更新：2026-11-02（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
 > + M4 第 1–7 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具
-> + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁）**：429 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
-> 40 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
+> + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁）
+> + **发布预检**（`release.check`：打开对话框就知道能不能发）**：435 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
 ---
@@ -35,6 +36,13 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 （`RELEASE_CHECKS_FAILED`），被拒的发布连 tag 都不留、也不消耗版本号。判断是三态 —— 「这个应用没有
 那项检查」放行并说明，「该检查的没检查成功」必拦。用户确实要发，可以点「仍然发布」（二次确认），
 但记录里会标成 `带问题`，半年后查得出来。
+
+**而且打开对话框就知道能不能发（预检 `release.check`）**：不用点了才知道。查一次是**真跑**
+一遍（`tsc` + `pnpm run test`），所以界面上有转圈和已等秒数；查完什么都不留下 —— 不打 tag、
+不写记录、不消耗版本号。三种结果长得不一样：前提不满足（工作区脏 / 没提交 / 正在生成）一句话
+说清并置灰按钮、连检查都不跑；检查没过直接把清单摊开，主按钮是「重新检查」；检查通过是绿的。
+还有一格 `stale`：检查期间仓库又前进了，那份「通过」讲的是上一版代码，界面会说「再查一次」
+而不是「可以发」—— 拿 A 版的通过给 B 版背书，比不检查更糟。
 
 **M4 第 1 步：能派活了**。Agent 不再只有一个大脑 —— 主角色（Builder）可以把「这个东西在哪」
 「这个库怎么用」这类只读的活交给子角色，自己专心改代码。子角色是**真的另一个会话**（独立 transcript、
@@ -84,12 +92,12 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 409 项单测 + 集成测试（约 175s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                       # 435 项单测 + 集成测试（约 190s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
 pnpm e2e:diff                    # ★ 36 项改动链路：git.log / git.show / git.revert 全走真 HTTP（含根提交与错误码）
-pnpm e2e:release                 # ★ 32 项发布链路：打 tag + 推本地裸库，用系统 git 做 fsck --strict 与 clone 验收
+pnpm e2e:release                 # ★ 44 项发布链路：预检只读 → 门禁拦截 → 打 tag + 推本地裸库，用系统 git 做 fsck --strict 与 clone 验收
 pnpm e2e:e2e                     # ★ 9 项自验收：真 Electron 里由 e2e 子 Agent 点页面 —— 注入的 bug 被断言抓到、修好后同一条断言通过
 pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁移 → Vite+Nest 双进程 → CRUD 经网关 → 重启后数据还在
 pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
@@ -259,7 +267,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 4 | **E2E 子 Agent 的预览工具**（`preview_read/assert/click/type/open`）+ 自验收流程（DoD ①） | ✅ 见 §4.12 | `packages/gateway/src/page.ts`（页面通道）、`packages/agent/src/tools/preview.ts`、`scripts/e2e-e2e-agent.ts` |
 | 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ✅ 见 §4.13 | `packages/core/src/git.ts`（`worktreeDiff`）、`packages/core/src/typecheck.ts`、`packages/agent/src/tools/review.ts` |
 | 6 | CodeAct：`codemode` 沙箱接入 | ✅ 见 §4.14 | `packages/agent/src/tools/codeact.ts`、`packages/agent/src/roles.ts`（`modelTools`）、`apps/desktop/build.mjs`（外部化 + `assertCodemodeLayout`） |
-| 7 | **发布前质量门禁**：`typecheck` / `test` 不过不许发（三态判据、`force` 留痕、迁移 2 加两列） | ✅ 见 §4.15 | `packages/agent/src/checks.ts`、`packages/server/src/release.ts`、`packages/core/src/pnpm.ts`、`packages/core/src/db.ts`（迁移 2） |
+| 7 | **发布前质量门禁**：`typecheck` / `test` 不过不许发（三态判据、`force` 留痕、迁移 2 加两列）；预检 `release.check` 见 §4.16 | ✅ 见 §4.15 | `packages/agent/src/checks.ts`、`packages/server/src/release.ts`、`packages/core/src/pnpm.ts`、`packages/core/src/db.ts`（迁移 2） |
 
 ### 4.3 M1 验收（DoD）
 
@@ -619,11 +627,43 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 **四个容易想歪的地方**（都记进 §5）：`skip` 与 `fail` 的分界（前者是配置性选择，后者是事故）；
 `force` 只改「拦不拦」不改「跑不跑」；`gateStatus` 不能有默认值；`pass` 包含「全部 skip」的情况。
 
-**还没做的**：发布前**预检**（要 `release.check` RPC，现在点了发布才知道过不过）；`lint` 没进闸门
-（模板没有 eslint 配置）；检查结果只在发布对话框里出现，主界面没有「当前能不能发」的指示；
-发布的仍是本地备份库，真远端 transport 未接。
+**后来补上的**：发布**预检**已经做了（见下一节）。还欠着的是：`lint` 没进闸门（模板没有 eslint 配置）；
+检查结果只在发布对话框里出现，主界面没有「当前能不能发」的指示；发布的仍是本地备份库，
+真远端 transport 未接。
 
-### 4.16 代码地图（只列已落地的）
+### 4.16 发布预检验收（`release.check`）—— ✅ 已完成
+
+门禁只在 `release.publish` 里跑的话，用户是"点了才知道过不过"，而这一步的全部价值恰恰是
+**在发之前**知道。所以对话框一打开就跑预检。
+
+- [x] **★ 只读** —— 查完**没有 tag、没有发布记录、备份库根本没建**，而且不消耗版本号
+      （紧接着不带 `force` 发布，版本号仍是 `-1`）。`release.check` 只回答，不做任何事
+- [x] **★ 与发布共用一份判据** —— 两者都调 `inspectRelease`。预检说能发、点下去却被拦，是这类
+      功能最容易出的毛病；一旦出现用户就会绕开它。集成测试里两条路径的结论被逐项对齐
+- [x] **★ 检查没过 ≠ 前提不满足** —— 前者 `blocked=null` + `gate.ok=false`（该改代码），
+      后者 `gate=null` + `blocked.code`（该等这一轮跑完）。两个字段回答两个问题，
+      界面上也长得不一样（一个是红清单，一个是黄条）
+- [x] **★ 前提不满足时不跑门禁** —— 工作区脏却去跑一遍 `tsc` 和测试，既白等几十秒，
+      又让人以为「测试修好就快能发了」。`gate` 是 `null` 而不是「跑了但没过」
+- [x] **★ `stale`：检查期间又有提交** —— 前后各读一次 HEAD，不一致就标 `stale`，
+      即使门禁通过 `ready` 也是 `false`。一份针对 A 版的「通过」拿去给 B 版用，
+      **比不检查更糟** —— 它给的是虚假的安心。集成测试用 4 秒的慢测试造出这个窗口
+- [x] **并发合并** —— 同一个应用的两次预检合并成一次（同一个 `elapsedMs` 为证）。两次预检
+      等于同一目录里两套 `tsc` + 两套 `vitest`，后者会往 `node_modules/.vite` 写缓存，抢目录是真实故障源。
+      这不叫缓存：结果一出就从表里删掉，下一次一定重新跑
+- [x] **界面三态 + 一个旁支** —— 检查中（转圈 + 已等秒数）、前提不满足（黄条 + 按钮置灰）、
+      没过（红清单）、过了（绿条）。`stale` 单独一条黄条：「重新检查一次」
+- [x] **★ 主按钮是「重新检查」不是「仍然发布」** —— 检查没过时绝大多数人会去改代码再来一遍，
+      把逃生舱摆成主按钮等于把它放在驾驶座旁边。逃生舱降成左侧 ghost，点了先变红、**再点一次才发**
+- [x] **真机走过一遍** —— 用 Electron 加载真界面截了两态：门禁失败（红清单 + 三个按钮）、
+      检查中（转圈 + `2s` + 置灰主按钮）。`0.0s` 那种显示改成 `<1s` —— 瞬时的检查让人怀疑它没跑
+- [x] **回归** —— `pnpm test` 429 → 435（预检 6 项），`e2e:release` 40 → 44，`smoke` 9/9
+
+**两个容易想歪的地方**（记进 §5）：`release.check` **不缓存**（缓存会让门禁看到过期答案，
+而这个功能的全部价值是「答案是现在的」）；`ready` **不是**按钮的 disabled 依据（门禁没过但用户
+坚持时仍能发，那时 `ready=false` 而按钮可点）。
+
+### 4.17 代码地图（只列已落地的）
 
 ```
 packages/
@@ -716,7 +756,9 @@ packages/
     ├── src/handlers.ts  #   `satisfies HandlerMap` → 漏实现编译期就报错；git.revert 的编排
     │                    #   「检查 → 还原数据 → 回滚代码」（覆盖库不可逆，回滚代码可逆）
     ├── src/revert-data.ts # ★ pickSnapshot：沿祖先链找最近一份库快照 + skippedCommits 语义（6 项测试）
-    ├── src/release.ts   # ★ 发布编排：闸门（生成中/有提交/工作区干净/门禁通过）→ 打 tag → 镜像 → 记账
+    ├── src/release.ts   # ★ 发布编排：预检（生成中/有提交/工作区干净/门禁通过）→ 打 tag → 镜像 → 记账
+│                    #   `inspectRelease` 同时服务 release.check（只读）与 release.publish（执行）
+│                    #   预检前后各读一次 HEAD：不一致标 stale，别拿 A 版的通过去给 B 版背书
 │                    #   门禁排在版本号之前（被拒不消耗 -n）；force 仍跑检查，记录标 forced
     ├── src/static.ts    #   同源托管 web 产物：页面免 Token + index.html 注入 __TENON__ 与 CSP
     ├── src/bin.ts       #   CLI 入口，打印 TENON_READY（TENON_WEB_DIR 可选）
@@ -897,6 +939,9 @@ scripts/
 | **门禁要排在版本号之前** | 否则被拒的发布会一路消耗 `-3`、`-4`、`-5`，用户看到版本号在涨、以为发过好几版，实际一版都没出去 |
 | **`vitest` 默认是 watch 模式** | `pnpm run test` 起 `vitest` 不加 `CI=1` 会**一直挂着**直到超时，然后被报成"测试超时"—— 那不是测试的问题，是跑法的问题。门禁里一律带 `CI=1` |
 | **`schemaVersion` 别在测试里写死数字** | 每加一条迁移就得改一次断言，那种测试会被人一路改成 `toBe(当前版本号)` 然后彻底失去意义。用 `MIGRATIONS[MIGRATIONS.length - 1].version` |
+| **预检的结论只对那个 sha 有效** | 用户看清单、写说明、点发布，中间可能隔几分钟，代码随时会变。所以 `release.publish` 里必须自己再跑一遍（不能复用预检结果），而 `release.check` 的返回里必须带 `commitSha` + `stale`（前后各读一次 HEAD）—— 拿 A 版的「通过」给 B 版背书，比不检查更糟 |
+| **`ready` 不是按钮的 disabled 依据** | `ready=false` 有两种：前提不满足（真不能发）和门禁没过（能发，但要 `force`）。把 `ready` 直接接到 disabled 上，等于把「仍然发布」这扇门焊死 —— 而它恰恰是用户比你更懂自己代码时的唯一出口 |
+| **别在 JSX 里写 markdown 的 `**加粗**`** | 它会原样渲染成两个星号，而且不报任何错。要强调就用 `<span className="text-muted">`。同理，JSX 里的换行会变成空格：「标准裸库，\n<span>git clone…</span>」渲染出「裸库， git clone」多一个空格 |
 
 
 ---
@@ -916,12 +961,12 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：48 个测试文件（429 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁）
+pnpm test                  # vitest：48 个测试文件（435 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
 pnpm e2e:diff              # ★ 改动/回滚：git.log / show / revert 全走真 HTTP
-pnpm e2e:release           # ★ 发布：门禁拦截 → force 留痕 → 打 tag + 推本地裸库，系统 git 验 fsck / clone
+pnpm e2e:release           # ★ 发布：预检只读 → 门禁拦截 → force 留痕 → 打 tag + 推本地裸库，系统 git 验 fsck / clone
 pnpm build:web             # 前端产物
 pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates} + server/node_modules
 pnpm pack:desktop          # electron-builder --dir → apps/desktop/release/mac/Tenon.app
@@ -979,15 +1024,15 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.21），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.22），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
 当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
 发布 push）；**M4 第 1–7 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 +
-e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁，
-**DoD ①②③ 已满足，五个子角色全部 ready**）。
-下一步是 M4 之后的那一步，先看 §4.2 的 M4 表与 §4.15 的「还没做的」。
-429 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 40 + e2e:e2e 9
+e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁）
++ **发布预检**（`release.check`，打开对话框就知道能不能发），**DoD ①②③ 已满足，五个子角色全部 ready**。
+下一步是 M4 之后的那一步，先看 §4.2 的 M4 表与 §4.17 的「还没做的」。
+435 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
 + e2e:fullstack + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
@@ -995,7 +1040,7 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 ④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了“哪个角色花了多少”（聚合层看不见归属）；
 ⑥ Reviewer 的 `lint` 未接（模板没有 eslint 配置），清单也只有文本、没有结构化事件/面板；
 ⑦ 脚本的 `// @options: timeout_ms` 能放大沙箱默认超时（上游语义），我们没夹；
-⑧ 发布没有**预检**（点了才知道过不过），门禁也不看 `lint`。
+⑧ 门禁不看 `lint`（模板没有 eslint 配置）；⑨ 主界面没有「这个应用现在能不能发」的指示。
 `pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`，
 动到 git / 回滚跑 `pnpm e2e:diff`，动到发布跑 `pnpm e2e:release`，动到 Agent 工具/角色跑 `pnpm e2e:e2e`。
 

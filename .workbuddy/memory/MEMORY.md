@@ -3,7 +3,7 @@
 本地优先、可自托管的**对话式 AI 全栈应用搭建平台**（桌面 + Web 同构）。产品名 Tenon，作用域 `@tenon/*`。
 隐喻：应用靠标准组件咬合，Agent 只做设计。⚠️ `LM Studio` 是第三方名，全局改名须保护。
 
-**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 133 条**）；方案 `docs/DESIGN.md`（v1.2.21）。
+**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 136 条**）；方案 `docs/DESIGN.md`（v1.2.22）。
 这里只留「不知道就会走错方向」的，细节查 STATUS §5，别重复。
 
 ## 三条铁律
@@ -14,8 +14,8 @@
 ## 状态（2026-11-02）
 M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–7 步** → DESIGN **v1.2.21**。
 八个包 + `apps/web`（渲染器）+ `apps/desktop`（壳）。
-全绿基线：typecheck 15 project / test **429** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
-e2e:diff **36** / e2e:release **40** / **e2e:e2e 9** / e2e:fullstack / smoke:desktop:packaged 8 / build:web 295KB。
+全绿基线：typecheck 15 project / test **435** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
+e2e:diff **36** / e2e:release **44** / **e2e:e2e 9** / e2e:fullstack / smoke:desktop:packaged 8 / build:web 299KB。
 M3 已通：定位注入 → 反查 → Alt+Click → 跨源回传 → 逐行差异 → 代码回滚 → 数据回滚 → 发布（tag + 本地裸库）。
 M4 第 1 步：**子 Agent 能派活**（`roles.ts` 是 1 主 + 5 子的唯一事实来源；`subagent` 建真子会话、
 只读白名单、递归从工具集上断；`explore`/`librarian` 可用，其余三角色待接工具）。
@@ -31,11 +31,13 @@ M4 第 6 步：**CodeAct 的脚本沙箱**（`codeact.ts`：CodemodeSandbox 60s/
 `roles.ts` 新增 `modelTools` / `extensions`；`build.mjs` 外部化 pi-codemode + quickjs-wasi 并自检）。
 M4 第 7 步：**发布前质量门禁**（`checks.ts` 的 `runTypecheck`/`runTestScript`/`runQualityGate`；
 三态判据、`force` 仍跑检查并留痕、迁移 2 给 `releases` 加两列、对话框摊开清单 + 二次确认）。
-**五个子角色全部 `ready`；M4 七步收口。**
-**下一步：M5 或欠账里的高优项**，先看 §4.2 的 M4 表与 §4.15 的「还没做的」。
-欠账：Docker compose 产物、真远端 push、发布**预检**（`release.check`）、真模型下的"改样式自验"、
-额度无跨应用总闸、用量答不了"哪个角色花了多少"、`lint` 未接（模板没 eslint 配置）、
-脚本能用 `// @options: timeout_ms` 放大沙箱默认超时。
+**发布预检 `release.check`**（只读地回答"能不能发"，与 publish 共用 `inspectRelease`；
+`stale` 用前后两次 HEAD 判、不缓存、同 appId 并发合并；对话框打开即查）。
+**五个子角色全部 `ready`；M4 七步收口 + 预检补完。**
+**下一步：M5 或欠账里的高优项**，先看 §4.2 的 M4 表与 §4.17 的「还没做的」。
+欠账：Docker compose 产物、真远端 push、真模型下的"改样式自验"、额度无跨应用总闸、
+用量答不了"哪个角色花了多少"、`lint` 未接（模板没 eslint 配置）、
+脚本能用 `// @options: timeout_ms` 放大沙箱默认超时、主界面没有"当前能不能发"的指示。
 
 ## 已定的架构选择（推翻要重做很多）
 - 两边都 **Fastify 5 + TS ESM**（server 与生成应用后端是 NestJS 11 + TypeORM + PG 方言）
@@ -105,6 +107,13 @@ M4 第 7 步：**发布前质量门禁**（`checks.ts` 的 `runTypecheck`/`runTe
   结果照样写进 `releases.gate_status = 'forced'`（老记录的这两列必须是 `null`，给默认值就是伪造历史）
 - **`vitest` 默认 watch**：`pnpm run test` 不加 `CI=1` 会一直挂着，最后被报成"测试超时"（不是测试的问题）
 - **测试里别写死 `schemaVersion`**：加一条迁移就红，而那种断言最后一定会被改成 `toBe(当前版本号)` 然后失去意义
+
+- **预检的结论只对那个 sha 有效**：用户看清单、写说明、点发布之间代码随时会变 →
+  `publish` 必须自己再跑一遍（不复用预检结果），返回里必须带 `commitSha` + `stale`。
+  拿 A 版的「通过」给 B 版背书，比不检查更糟
+- **`ready` 不是按钮的 disabled 依据**：`ready=false` 有两种 —— 前提不满足（真不能发）
+  和门禁没过（能发，要 force）。接上去等于把「仍然发布」焊死
+- **别在 JSX 里写 markdown 的 `**加粗**`**（原样渲染星号且不报错）；JSX 换行会变成空格
 
 ## 本机环境
 Node v22.22.2 / pnpm 9.15.9。**所有命令都要** `env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE`

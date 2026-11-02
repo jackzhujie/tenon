@@ -60,6 +60,11 @@ export type GitShow = RpcOutput<'git.show'>
 /** `release.publish` 的返回 */
 export type PublishResult = RpcOutput<'release.publish'>
 
+/** `release.check` 的返回（预检：只读，但会真跑测试） */
+export type ReleaseCheck = RpcOutput<'release.check'>
+
+export type CheckOutcomeResult = { ok: true; result: ReleaseCheck } | { ok: false; message: string }
+
 export type PublishOutcome =
   | { ok: true; result: PublishResult }
   /**
@@ -454,6 +459,14 @@ export interface Workspace {
    * `force` 是"检查没过也发" —— 服务端仍然会跑检查，只是不拦，记录里标 `forced`。
    */
   publish(notes: string, force?: boolean): Promise<PublishOutcome>
+  /**
+   * 发布预检（`release.check`）：现在这一版能不能发。
+   *
+   * **会真跑 `tsc` 与 `pnpm run test`**，所以一次可能要几十秒 —— 调用方要显示进度，
+   * 否则用户以为界面卡死了。它只读：不打 tag、不写记录、不消耗版本号。
+   */
+  checkRelease(): Promise<CheckOutcomeResult>
+
   /**
    * 设额度（`budget.set`）。两个值一起传：空 = 这条不设限，0 = 这个应用不许再花。
    * 失败返回原因，由额度面板就地显示 —— 那里才知道用户刚输了什么。
@@ -855,6 +868,20 @@ export function useWorkspace(): Workspace {
   )
 
   /**
+   * 发布预检。**不碰全局状态**：它的结果是对话框本地的事，关掉就该消失；
+   * 放进 reducer 反而会留下一份"上次检查通过"的残影，让下次打开显得已经查过了。
+   */
+  const checkRelease = useCallback(async (): Promise<CheckOutcomeResult> => {
+    const appId = activeAppIdRef.current
+    if (appId === null) return { ok: false, message: '还没有选中应用' }
+    try {
+      return { ok: true, result: await rpc('release.check', { appId }) }
+    } catch (err) {
+      return { ok: false, message: messageOf(err) }
+    }
+  }, [])
+
+  /**
    * 设额度。成功之后服务端会推一次 `usage.update`，这里也直接用返回值换掉快照 ——
    * 不等那一条事件，用户点完「保存」应当立刻看到输入框解锁。
    */
@@ -899,6 +926,7 @@ export function useWorkspace(): Workspace {
     showCommit,
     revertCommit,
     publish,
+    checkRelease,
     setBudget,
   }
 }

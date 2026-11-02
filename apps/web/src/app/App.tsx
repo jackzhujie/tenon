@@ -161,6 +161,7 @@ export function App() {
         publishing={state.publishing}
         onClose={() => setReleaseOpen(false)}
         onPublish={workspace.publish}
+        onCheck={workspace.checkRelease}
       />
 
       {state.error !== null && !state.booting && (
