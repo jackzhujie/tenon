@@ -35,14 +35,14 @@
 |---|---|
 | [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、进度表、下一步拆解、已知陷阱 |
 | [**四个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度的真实数字 |
-| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.20）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
+| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.21）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
 | [逆向工作手册](docs/REVERSE_ENGINEERING.md) | 内部研究用（不随开源发布） |
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.20**；四个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 进行中**：
+M0 逆向研究完成；方案 **v1.2.21**；四个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 前七步完成**：
 七个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `db-provisioner` / `server`）+ 两个 app
 （渲染器 `apps/web`，浏览器与窗口共用一套代码；壳 `apps/desktop`，只做生命周期）。
 
@@ -96,8 +96,14 @@ M0 逆向研究完成；方案 **v1.2.20**；四个技术 spike 全部跑通。*
 边界靠三层而不是提示词：会话里有哪些工具、工具能被谁调、递给模型哪些（只给 `codemode`）。
 所以脚本里 `tools.write` 调不动不是提示词拦的，是它根本没被注进沙箱。
 
-409 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
-32 项发布 e2e（**用系统 git 当裁判**：`fsck --strict` + `clone`）+ 9 项自验收 e2e + 全栈 e2e
+**坏东西发不出去了**：打 tag 之前先跑应用自己的 `typecheck` 与 `test`，不过就拦下 —— 而且被拒的
+发布连 tag 都不留、也不消耗版本号（否则你会看到版本号一路涨却一版都没发出去）。判断是三态：
+「这个应用没有那项检查」（没有 test 脚本 / 没有 tsconfig）**放行但说出来**，「有 tsconfig 却没装
+typescript」「测试红了」「超时了」必拦 —— 混成一个"不通过"会让没写测试的应用永远发不出去，
+而这个功能会在两周内被人关掉。用户确实要发就点「仍然发布」（二次确认），记录里标成 `带问题`。
+
+429 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
+40 项发布 e2e（**用系统 git 当裁判**：`fsck --strict` + `clone`）+ 9 项自验收 e2e + 全栈 e2e
 + 8 项桌面冒烟全绿。
 安装包默认路径上不带任何需按平台编译的原生模块（打包脚本会审计并打印清单）。
 
@@ -107,12 +113,12 @@ M0 逆向研究完成；方案 **v1.2.20**；四个技术 spike 全部跑通。*
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 409 项单测 / 集成测试（约 175s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 429 项单测 / 集成测试（约 180s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
 pnpm e2e:diff               # 36 项改动/回滚链路：git.log / show / revert 全走真 HTTP
-pnpm e2e:release            # 32 项发布链路：打 tag → 推本地裸库 → 系统 git 验 fsck / clone
+pnpm e2e:release            # 40 项发布链路：门禁拦截 → force 留痕 → 打 tag → 推本地裸库 → 系统 git 验 fsck / clone
 pnpm e2e:e2e                # ★ 9 项自验收：真 Electron 里由 e2e 子 Agent 点页面，注入的 bug 被断言抓到、修好后同一条断言通过
 pnpm e2e:fullstack          # ★ 全栈真机链路（要联网装 Nest）：起库 → 迁移 → 双进程 → CRUD → 重启后数据还在
 pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app

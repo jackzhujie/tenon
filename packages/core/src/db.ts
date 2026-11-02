@@ -79,6 +79,21 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idx_error_groups_app ON error_groups(app_id, last_seen DESC);
     `,
   },
+  {
+    version: 2,
+    name: 'release-gate',
+    /*
+     * 发布门禁的留痕（M4 第 7 步）。
+     *
+     * 两列都必须可空：迁移 2 之前的发布记录**没有跑过门禁**，那时候还没有这个功能。
+     * 给个默认 `'pass'` 会把历史记录全部伪造成"检查通过了" —— 而这是这个功能唯一
+     * 不能出的错：留痕的价值全在"它说的是真的"。
+     */
+    sql: `
+      ALTER TABLE releases ADD COLUMN gate_status TEXT;
+      ALTER TABLE releases ADD COLUMN gate_summary TEXT;
+    `,
+  },
 ]
 
 type Row = Record<string, unknown>

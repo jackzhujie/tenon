@@ -25,6 +25,50 @@ export type App = z.infer<typeof App>
 export const ReleaseKind = z.enum(['docker', 'static', 'push'])
 export type ReleaseKind = z.infer<typeof ReleaseKind>
 
+/**
+ * 发布前检查（M4 第 7 步）。
+ *
+ * 三态而不是布尔，是因为「没过」有两种完全不同的意思：
+ * - `fail`：**该检查的东西检查失败了** —— 类型有错、测试红了、`tsc` 崩了/超时。
+ * - `skip`：**这个应用没有这项检查** —— 没有 tsconfig、package.json 里没有 test 脚本。
+ *
+ * 混成一个 `false` 会让"没配测试"和"测试挂了"看起来一样，而这两件事的处置方式相反：
+ * 前者照发不误，后者必须拦。所以判断能不能发只看有没有 `fail`，`skip` 不拦但要说出来。
+ */
+export const CheckId = z.enum(['typecheck', 'test'])
+export type CheckId = z.infer<typeof CheckId>
+
+export const CheckStatus = z.enum(['pass', 'fail', 'skip'])
+export type CheckStatus = z.infer<typeof CheckStatus>
+
+export const CheckOutcome = z.object({
+  id: CheckId,
+  status: CheckStatus,
+  /** 一句话结论，直接显示给用户（"类型检查通过（2 个 tsconfig，4.1s）"） */
+  summary: z.string(),
+  /** 失败/跳过时的补充输出（已截断）；通过时通常是 null */
+  detail: z.string().nullable(),
+  elapsedMs: z.number().int().nonnegative(),
+})
+export type CheckOutcome = z.infer<typeof CheckOutcome>
+
+export const GateOutcome = z.object({
+  /** 没有任何一项 `fail`。`skip` 不算失败 */
+  ok: z.boolean(),
+  checks: z.array(CheckOutcome),
+})
+export type GateOutcome = z.infer<typeof GateOutcome>
+
+/**
+ * 这一版是怎么发出去的。
+ * - `pass`：检查跑过且没有 fail（**包括全部 skip 的情况** —— 那是"没得检查"，不是"偷偷发的"）
+ * - `forced`：检查没过，用户明确选择"我知道，仍然发布"
+ *
+ * 老记录（迁移 2 之前）是 `null`：那时候还没有门禁，不能倒推成 pass，也不能说人家是 forced。
+ */
+export const ReleaseGateStatus = z.enum(['pass', 'forced'])
+export type ReleaseGateStatus = z.infer<typeof ReleaseGateStatus>
+
 export const Release = z.object({
   id: z.string(),
   appId: z.string(),
@@ -34,6 +78,9 @@ export const Release = z.object({
   artifactPath: z.string().nullable(),
   imageRef: z.string().nullable(),
   notes: z.string().nullable(),
+  gateStatus: ReleaseGateStatus.nullable(),
+  /** 门禁摘要（"类型检查 ✓ · 测试 ⏭ 没有 test 脚本"），历史列表里直接显示 */
+  gateSummary: z.string().nullable(),
   createdAt: z.number(),
 })
 export type Release = z.infer<typeof Release>

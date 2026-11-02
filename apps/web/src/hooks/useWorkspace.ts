@@ -16,6 +16,7 @@ import type {
   App,
   AppStatus,
   BudgetDimension,
+  CheckOutcome,
   GitCommit,
   LogEntry,
   NormalizedMessage,
@@ -61,7 +62,14 @@ export type PublishResult = RpcOutput<'release.publish'>
 
 export type PublishOutcome =
   | { ok: true; result: PublishResult }
-  | { ok: false; message: string }
+  /**
+   * 失败时把 `code` 与检查清单一起带回来。
+   *
+   * 只有 message 的话，对话框没法区分"工作区脏了"和"类型检查没过" —— 前者是
+   * 一句话说清的事，后者要逐项列出来，还要给一个"我就要发"的出口。这两件事的
+   * 界面差得远，靠解析 message 猜是不行的。
+   */
+  | { ok: false; message: string; code: string; checks: CheckOutcome[] | null }
 
 /** 只关心成不成的动作：失败原因交给就地显示的地方，不弹全局错误条 */
 export type Outcome = { ok: true } | { ok: false; message: string }
@@ -441,8 +449,11 @@ export interface Workspace {
    * `dbRestore` 为真时把库一起还原到这一版之前（服务端会先停预览）。
    */
   revertCommit(sha: string, dbRestore?: boolean): Promise<void>
-  /** 发布（`release.publish`）。失败的原因返回给调用方，由对话框就地显示 */
-  publish(notes: string): Promise<PublishOutcome>
+  /**
+   * 发布（`release.publish`）。失败的原因返回给调用方，由对话框就地显示。
+   * `force` 是"检查没过也发" —— 服务端仍然会跑检查，只是不拦，记录里标 `forced`。
+   */
+  publish(notes: string, force?: boolean): Promise<PublishOutcome>
   /**
    * 设额度（`budget.set`）。两个值一起传：空 = 这条不设限，0 = 这个应用不许再花。
    * 失败返回原因，由额度面板就地显示 —— 那里才知道用户刚输了什么。
@@ -813,20 +824,29 @@ export function useWorkspace(): Workspace {
    * 错误应该出现在对话框里（"工作区还有没提交的改动"这句话离开上下文就没意义了）。
    */
   const publish = useCallback(
-    async (notes: string): Promise<PublishOutcome> => {
+    async (notes: string, force?: boolean): Promise<PublishOutcome> => {
       const appId = activeAppIdRef.current
-      if (appId === null) return { ok: false, message: '还没有选中应用' }
+      if (appId === null) return { ok: false, message: '还没有选中应用', code: 'APP_NOT_FOUND', checks: null }
       dispatch({ kind: 'publishing', publishing: true })
       try {
         const trimmed = notes.trim()
         const result = await rpc('release.publish', {
           appId,
           ...(trimmed === '' ? {} : { notes: trimmed }),
+          ...(force === true ? { force: true } : {}),
         })
         await refreshReleases(appId)
         return { ok: true, result }
       } catch (err) {
-        return { ok: false, message: messageOf(err) }
+        // `details.checks` 是服务端带上来的那份清单（协议里 `RELEASE_CHECKS_FAILED` 才有）
+        const details = err instanceof TenonRpcError ? err.details : undefined
+        const checks = (details as { checks?: CheckOutcome[] } | undefined)?.checks ?? null
+        return {
+          ok: false,
+          message: messageOf(err),
+          code: err instanceof TenonRpcError ? err.code : 'NETWORK',
+          checks,
+        }
       } finally {
         dispatch({ kind: 'publishing', publishing: false })
       }

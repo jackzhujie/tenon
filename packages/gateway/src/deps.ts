@@ -10,9 +10,9 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { TenonError } from '@tenon/protocol'
+import { resolvePnpm } from '@tenon/core'
 import { nodeRunEnv } from './child.js'
 
 export interface EnsureDepsOptions {
@@ -33,38 +33,9 @@ export interface DepsResult {
 const READY_MARKER = join('node_modules', 'vite', 'package.json')
 const LOG_TAIL = 20
 
-/**
- * 找到一个能用的包管理器。
- *
- * 顺序是"越确定越靠前"：
- * 1. `TENON_PNPM` —— 用户/测试显式指定，最高优先级
- * 2. **随包自带的 pnpm**（桌面版 `Resources/server/node_modules/pnpm/bin/pnpm.cjs`）——
- *    这是"双击装完却起不来预览"的根治办法：用户机器上不该假设有 pnpm，
- *    从 Dock 启动的 GUI 进程 PATH 还很短
- * 3. 和 node 同目录的 pnpm —— nvm / 官方安装器常见布局
- * 4. `PATH` 里的 `pnpm` —— 最后兜底
- */
-interface PackageManager {
-  command: string
-  /** 是 JS 入口就得用 node 跑（`.bin/pnpm` 那种 shell 包装不能直接 spawn） */
-  isScript: boolean
-}
-
-function resolvePnpm(env: NodeJS.ProcessEnv): PackageManager {
-  const explicit = env['TENON_PNPM']
-  if (explicit !== undefined && explicit !== '') {
-    return { command: explicit, isScript: /\.(?:c|m)?js$/.test(explicit) }
-  }
-  // `import.meta.url` 在打包后是 `<Resources>/server/server.mjs`，正好指向随包目录；
-  // 开发态是 `packages/gateway/src/deps.ts`，那个路径不存在 → 自动落到下一档
-  const bundled = fileURLToPath(new URL('./node_modules/pnpm/bin/pnpm.cjs', import.meta.url))
-  if (existsSync(bundled)) return { command: bundled, isScript: true }
-
-  // nvm / 官方安装器里 pnpm 通常和 node 同目录；GUI 启动时 PATH 常常没有它
-  const sibling = join(dirname(process.execPath), 'pnpm')
-  if (existsSync(sibling)) return { command: sibling, isScript: false }
-  return { command: 'pnpm', isScript: false }
-}
+// 「哪个 pnpm 能用」由一个实现回答：`@tenon/core` 的 `resolvePnpm`。
+// 发布前跑 test 脚本（`packages/agent/src/checks.ts`）用的是同一份 —— 两份实现早晚会
+// 漂移成两套规则，而这类漂移的表现是"预览装得动依赖、发布却跑不了测试"。
 
 function tail(lines: string[]): string {
   return lines.slice(-LOG_TAIL).join('\n')

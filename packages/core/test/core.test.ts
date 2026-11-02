@@ -2,7 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { SecretBox, TenonDatabase, openCore } from '../src/index.js'
+import { MIGRATIONS, SecretBox, TenonDatabase, openCore } from '../src/index.js'
+
+/** 别写死数字：每加一条迁移都要改断言，那种测试会被人一路改成 `toBe(版本号)` 然后失去意义 */
+const LATEST_SCHEMA = MIGRATIONS[MIGRATIONS.length - 1]?.version
 
 let dir: string
 
@@ -17,7 +20,7 @@ afterEach(async () => {
 describe('tenon.db（node:sqlite 产品库）', () => {
   it('打开即迁移到最新版本，且四张核心表都在', () => {
     const db = TenonDatabase.open(join(dir, 'tenon.db'))
-    expect(db.schemaVersion).toBe(1)
+    expect(db.schemaVersion).toBe(LATEST_SCHEMA)
     const tables = db
       .all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .map((row) => row.name)
@@ -36,7 +39,7 @@ describe('tenon.db（node:sqlite 产品库）', () => {
   it('重复打开不会重跑迁移（幂等）', () => {
     TenonDatabase.open(join(dir, 'tenon.db')).close()
     const db = TenonDatabase.open(join(dir, 'tenon.db'))
-    expect(db.schemaVersion).toBe(1)
+    expect(db.schemaVersion).toBe(LATEST_SCHEMA)
     db.close()
   })
 })

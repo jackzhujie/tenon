@@ -16,24 +16,21 @@
  *    标成错误会让模型换个姿势重试工具。
  * 3. **"没跑成"绝不报成"通过"**。缺 `node_modules`、没有 `tsconfig`、`tsc` 超时 —— 三种情况
  *    各自有一句明确的话，且都不出现 `✓`。评审里最坏的假绿就是这一条。
+ *
+ * 跑 `tsc` 的实现搬去了 `../checks.ts`：发布门禁（M4 第 7 步）要的是同一件事，只能有一个
+ * "什么算通过"的答案。这里只剩"把它讲给模型听"。
  */
-import { spawn } from 'node:child_process'
-import { stat } from 'node:fs/promises'
-import { join } from 'node:path'
 import type { Extension, ToolRegistration } from '@earendil-works/pi-durable'
 import { defineExtension } from '@earendil-works/pi-durable'
 import { Type } from 'typebox'
-import { formatTscReport, gitops, parseTscOutput, scrubEnv } from '@tenon/core'
+import { gitops } from '@tenon/core'
+import { runTypecheck } from '../checks.js'
 
 export const REVIEW_EXTENSION = 'tenon.review'
 export const REVIEW_TOOL_NAMES = ['git_diff', 'typecheck'] as const
 
 /** 一次回给模型的 diff 上限。超了就截断并说明 —— 评审不需要读完一份两百行的补丁 */
 const MAX_PATCH_BYTES = 48 * 1024
-/** `tsc` 的错误输出上限（正常也就几 KB；配错时可能刷屏） */
-const MAX_TSC_BYTES = 128 * 1024
-const DEFAULT_TSC_TIMEOUT_MS = 60_000
-const MAX_TSC_TIMEOUT_MS = 120_000
 
 export interface ReviewToolsOptions {
   /** 应用仓库目录（`apps/<id>/repo`） */
@@ -64,87 +61,8 @@ function clip(text: string, maxBytes: number): { text: string; clipped: boolean 
   return { text: `${safe.replace(/\uFFFD+$/, '')}\n…（已截断，原文 ${(bytes / 1024).toFixed(0)}KB）`, clipped: true }
 }
 
-/** 找 tsc 的入口：模板把 typescript 装在应用自己的 devDependencies 里 */
-async function resolveTscEntry(repoDir: string): Promise<string | undefined> {
-  const candidate = join(repoDir, 'node_modules', 'typescript', 'bin', 'tsc')
-  return (await stat(candidate).catch(() => undefined)) === undefined ? undefined : candidate
-}
-
-/** 要跑哪几个 tsconfig：根 `tsconfig.json` 必跑，`tsconfig.server.json`（Nest 模板）也要跑 */
-async function resolveConfigs(repoDir: string): Promise<string[]> {
-  const names = ['tsconfig.json', 'tsconfig.server.json', 'tsconfig.app.json']
-  const found: string[] = []
-  for (const name of names) {
-    if ((await stat(join(repoDir, name)).catch(() => undefined)) !== undefined) found.push(name)
-  }
-  return found
-}
-
-interface TscRun {
-  code: number | undefined
-  stdout: string
-  stderr: string
-  timedOut: boolean
-  elapsedMs: number
-}
-
-/**
- * 跑一次 tsc。
- *
- * `ELECTRON_RUN_AS_NODE` 必须**显式补回来**：`scrubEnv` 会把它删掉（那是为了防止生成应用的
- * 子进程里"再起一个 electron 当成 node 跑了"）。但这里我们要相反的东西 —— 桌面版里
- * `process.execPath` 是 `Tenon.app` 的可执行文件，不设这个变量就会**真的弹出一个窗口**，
- * 而 `tsc` 一行也不会跑。只在"我们自己是 Electron"时才补，普通 node 下它本来就不需要。
- */
-function runTsc(options: {
-  nodePath: string
-  tscEntry: string
-  config: string
-  cwd: string
-  timeoutMs: number
-}): Promise<TscRun> {
-  const env = scrubEnv(process.env)
-  if (process.versions.electron !== undefined) env.ELECTRON_RUN_AS_NODE = '1'
-  const started = Date.now()
-  return new Promise((resolvePromise) => {
-    const child = spawn(
-      options.nodePath,
-      [options.tscEntry, '--noEmit', '--pretty', 'false', '-p', options.config],
-      { cwd: options.cwd, env },
-    )
-    let stdout = ''
-    let stderr = ''
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-    }, options.timeoutMs)
-    child.stdout?.on('data', (chunk: Buffer) => {
-      if (stdout.length < MAX_TSC_BYTES) stdout += chunk.toString('utf8')
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (stderr.length < MAX_TSC_BYTES) stderr += chunk.toString('utf8')
-    })
-    child.on('error', (err) => {
-      clearTimeout(timer)
-      resolvePromise({
-        code: undefined,
-        stdout,
-        stderr: `${stderr}\n${err.message}`,
-        timedOut,
-        elapsedMs: Date.now() - started,
-      })
-    })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolvePromise({ code: code ?? undefined, stdout, stderr, timedOut, elapsedMs: Date.now() - started })
-    })
-  })
-}
-
 export function createReviewTools(options: ReviewToolsOptions): ToolRegistration[] {
   const { repoDir } = options
-  const timeoutMs = Math.min(options.timeoutMs ?? DEFAULT_TSC_TIMEOUT_MS, MAX_TSC_TIMEOUT_MS)
 
   const gitDiff: ToolRegistration = {
     name: 'git_diff',
@@ -221,51 +139,27 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
     replay: 'safe',
     async execute(args) {
       const input = args as { timeoutMs?: number }
-      const budget = Math.min(
-        typeof input.timeoutMs === 'number' && input.timeoutMs > 0 ? Math.floor(input.timeoutMs) : timeoutMs,
-        MAX_TSC_TIMEOUT_MS,
-      )
+      const result = await runTypecheck(repoDir, {
+        ...(options.nodePath === undefined ? {} : { nodePath: options.nodePath }),
+        ...(options.tscEntry === undefined ? {} : { tscEntry: options.tscEntry }),
+        // 顺序要紧：构造参数是默认值，模型传的那个才是覆盖
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        ...(typeof input.timeoutMs === 'number' && input.timeoutMs > 0 ? { timeoutMs: input.timeoutMs } : {}),
+      })
 
-      const configs = await resolveConfigs(repoDir)
-      if (configs.length === 0) {
+      if (result.reason === 'no-config') {
         return ok(
           '⏭ 这个应用没有 tsconfig.json —— 类型检查无从跑起。\n' +
             '注意：**这不等于通过**。如果改动里有 .ts/.tsx，请在风险清单里写一句"没有配置类型检查"。',
         )
       }
-
-      const tscEntry = options.tscEntry ?? (await resolveTscEntry(repoDir))
-      if (tscEntry === undefined) {
+      if (result.reason === 'no-typescript') {
         return ok(
           '✗ 没跑成：仓库的 node_modules 里没有 typescript（依赖还没装好）。\n' +
             '**这不等于通过。** 让用户先把预览打开（会装依赖），或者用 read 人工看改动。',
         )
       }
-      // 测试里可能只给 tscEntry 不给 nodePath
-      const nodePath = options.nodePath ?? process.execPath
-
-      const runs = await Promise.all(
-        configs.map((config) => runTsc({ nodePath, tscEntry, config, cwd: repoDir, timeoutMs: budget })),
-      )
-
-      const sections: string[] = []
-      let allOk = true
-      for (let index = 0; index < configs.length; index += 1) {
-        const config = configs[index] as string
-        const run = runs[index] as TscRun
-        const parsed = parseTscOutput(run.stdout, run.stderr)
-        const okRun = !run.timedOut && run.code === 0 && parsed.diagnostics.length === 0
-        // 「跑完了 + 没诊断」才算过：只看诊断会把 tsc 崩了/超时当成通过
-        const report = formatTscReport(parsed, okRun, {
-          config,
-          elapsedMs: run.elapsedMs,
-          exitCode: run.code,
-        })
-        if (!report.ok) allOk = false
-        sections.push(report.text)
-      }
-
-      return ok(sections.join('\n'))
+      return ok(result.sections.join('\n'))
     },
   }
 

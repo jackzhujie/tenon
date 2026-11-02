@@ -57,6 +57,7 @@ export const ErrorCode = z.enum([
 
   'RELEASE_NO_COMMITS',
   'RELEASE_FAILED',
+  'RELEASE_CHECKS_FAILED',
 ])
 export type ErrorCode = z.infer<typeof ErrorCode>
 
@@ -106,6 +107,8 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['EXPORT_FAILED', 500],
   ['RELEASE_NO_COMMITS', 409],
   ['RELEASE_FAILED', 500],
+  // 409 而不是 500：检查没过不是系统故障，是「当前状态不允许」，用户改代码就能过
+  ['RELEASE_CHECKS_FAILED', 409],
   ['INTERNAL', 500],
 ]
 

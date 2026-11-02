@@ -1,4 +1,4 @@
-import type { Release, ReleaseKind } from '@tenon/protocol'
+import type { Release, ReleaseGateStatus, ReleaseKind } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
 import { newId } from '../ids.js'
 
@@ -11,6 +11,9 @@ interface ReleaseRow {
   artifact_path: string | null
   image_ref: string | null
   notes: string | null
+  /** 迁移 2 之前的老记录是 NULL（那时候还没有门禁），不能读成 'pass' */
+  gate_status: string | null
+  gate_summary: string | null
   created_at: number
 }
 
@@ -24,6 +27,8 @@ function toRelease(row: ReleaseRow): Release {
     artifactPath: row.artifact_path,
     imageRef: row.image_ref,
     notes: row.notes,
+    gateStatus: row.gate_status as ReleaseGateStatus | null,
+    gateSummary: row.gate_summary,
     createdAt: row.created_at,
   }
 }
@@ -36,6 +41,8 @@ export interface CreateReleaseInput {
   artifactPath?: string | null
   imageRef?: string | null
   notes?: string | null
+  gateStatus?: ReleaseGateStatus | null
+  gateSummary?: string | null
 }
 
 /** 发布记录。M1 只落地读写，真正的导出/推送在 M2 之后。 */
@@ -56,8 +63,9 @@ export class ReleaseStore {
     const id = newId('rel')
     const createdAt = Date.now()
     this.db.run(
-      `INSERT INTO releases (id, app_id, version, commit_sha, kind, artifact_path, image_ref, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO releases
+         (id, app_id, version, commit_sha, kind, artifact_path, image_ref, notes, gate_status, gate_summary, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       input.appId,
       input.version,
@@ -66,6 +74,8 @@ export class ReleaseStore {
       input.artifactPath ?? null,
       input.imageRef ?? null,
       input.notes ?? null,
+      input.gateStatus ?? null,
+      input.gateSummary ?? null,
       createdAt,
     )
     const row = this.db.get<ReleaseRow>('SELECT * FROM releases WHERE id = ?', id)

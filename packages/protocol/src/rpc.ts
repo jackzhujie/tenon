@@ -11,6 +11,7 @@ import {
   App,
   DiffFile,
   FileNode,
+  GateOutcome,
   GitCommit,
   GitFileChange,
   LogEntry,
@@ -327,6 +328,14 @@ export const rpcMethods = {
       appId: Id,
       /** 发布说明。会写进 annotated tag 的正文，也存进发布记录 */
       notes: z.string().max(2000).optional(),
+      /**
+       * 检查没过也发。
+       *
+       * **仍然会跑检查**（结果要留痕、用户要看见自己放过了什么），只是不拦。
+       * 记录里标成 `forced` —— 半年后有人问"这版为什么带着类型错误上线"，
+       * 答案得在记录里，而不是谁的记忆里。
+       */
+      force: z.boolean().optional(),
     }),
     output: z.object({
       release: Release,
@@ -337,6 +346,8 @@ export const rpcMethods = {
       branch: z.string(),
       /** 这次真正写进备份库的对象数；0 表示备份库本来就已经是最新的 */
       objects: z.number().int().nonnegative(),
+      /** 这次跑过的检查。发成功之后前端也要显示"它是怎么过的" */
+      gate: GateOutcome,
     }),
   },
 

@@ -3,7 +3,7 @@
 本地优先、可自托管的**对话式 AI 全栈应用搭建平台**（桌面 + Web 同构）。产品名 Tenon，作用域 `@tenon/*`。
 隐喻：应用靠标准组件咬合，Agent 只做设计。⚠️ `LM Studio` 是第三方名，全局改名须保护。
 
-**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 126 条**）；方案 `docs/DESIGN.md`（v1.2.20）。
+**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 133 条**）；方案 `docs/DESIGN.md`（v1.2.21）。
 这里只留「不知道就会走错方向」的，细节查 STATUS §5，别重复。
 
 ## 三条铁律
@@ -12,10 +12,10 @@
 3. **pi 全家与 PGlite 是实验性 API** → `save-exact` 锁版本 + adapter 包一层
 
 ## 状态（2026-11-02）
-M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–6 步** → DESIGN **v1.2.20**。
+M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–7 步** → DESIGN **v1.2.21**。
 八个包 + `apps/web`（渲染器）+ `apps/desktop`（壳）。
-全绿基线：typecheck 15 project / test **409** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
-e2e:diff **36** / e2e:release **32** / **e2e:e2e 9** / e2e:fullstack / smoke:desktop:packaged 8 / build:web 293KB。
+全绿基线：typecheck 15 project / test **429** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
+e2e:diff **36** / e2e:release **40** / **e2e:e2e 9** / e2e:fullstack / smoke:desktop:packaged 8 / build:web 295KB。
 M3 已通：定位注入 → 反查 → Alt+Click → 跨源回传 → 逐行差异 → 代码回滚 → 数据回滚 → 发布（tag + 本地裸库）。
 M4 第 1 步：**子 Agent 能派活**（`roles.ts` 是 1 主 + 5 子的唯一事实来源；`subagent` 建真子会话、
 只读白名单、递归从工具集上断；`explore`/`librarian` 可用，其余三角色待接工具）。
@@ -29,10 +29,12 @@ M4 第 5 步：**Reviewer 出风险清单**（`worktreeDiff` 工作区 vs HEAD �
 `typecheck` 跑应用自己的多 tsconfig；reviewer 转 `ready`，无任何写工具）。
 M4 第 6 步：**CodeAct 的脚本沙箱**（`codeact.ts`：CodemodeSandbox 60s/128MB + 上游 codemode 扩展；
 `roles.ts` 新增 `modelTools` / `extensions`；`build.mjs` 外部化 pi-codemode + quickjs-wasi 并自检）。
-**五个子角色全部 `ready`**。
-**下一步：M4 第 7 步**（发布前质量门禁：typecheck / test 不过不许发），先看 §4.2 的 M4 表。
-欠账：Docker compose 产物、真远端 push、发布质量门禁、真模型下的"改样式自验"、额度无跨应用总闸、
-用量答不了"哪个角色花了多少"、Reviewer 的 `lint` 未接（模板没 eslint 配置）、
+M4 第 7 步：**发布前质量门禁**（`checks.ts` 的 `runTypecheck`/`runTestScript`/`runQualityGate`；
+三态判据、`force` 仍跑检查并留痕、迁移 2 给 `releases` 加两列、对话框摊开清单 + 二次确认）。
+**五个子角色全部 `ready`；M4 七步收口。**
+**下一步：M5 或欠账里的高优项**，先看 §4.2 的 M4 表与 §4.15 的「还没做的」。
+欠账：Docker compose 产物、真远端 push、发布**预检**（`release.check`）、真模型下的"改样式自验"、
+额度无跨应用总闸、用量答不了"哪个角色花了多少"、`lint` 未接（模板没 eslint 配置）、
 脚本能用 `// @options: timeout_ms` 放大沙箱默认超时。
 
 ## 已定的架构选择（推翻要重做很多）
@@ -95,6 +97,14 @@ M4 第 6 步：**CodeAct 的脚本沙箱**（`codeact.ts`：CodemodeSandbox 60s/
 - **`CodemodeSandbox` 的两条 `import.meta.url`（worker + wasm）在打包后全失效，而构建照样成功** →
   `build.mjs` 里 external + 整包拷 `pi-codemode` 与 `quickjs-wasi`（含 `dist/`，不含 `extensions/*.so`），
   并留了 `assertCodemodeLayout()` 自检。`require.resolve` 那个包会报 `No "exports" main defined` → 用 `realpath`
+
+- **发布门禁的判据是三态**：`skip`（这个应用没这项检查）放行、`fail`（该检查的没检查成功）必拦。
+  合成布尔会让"没配测试"和"测试挂了"同罪 —— 前者永远发不出去、后者红了照发，两种都会让功能被关掉
+- **「没跑成」是 `fail` 不是 `skip`**：有 tsconfig 却没装 typescript 归到 skip，等于删掉 node_modules 就能绕过门禁
+- **`force` 只改「拦不拦」不改「跑不跑」**：用户有权坚持发，但没权不知道自己在放过什么；
+  结果照样写进 `releases.gate_status = 'forced'`（老记录的这两列必须是 `null`，给默认值就是伪造历史）
+- **`vitest` 默认 watch**：`pnpm run test` 不加 `CI=1` 会一直挂着，最后被报成"测试超时"（不是测试的问题）
+- **测试里别写死 `schemaVersion`**：加一条迁移就红，而那种断言最后一定会被改成 `toBe(当前版本号)` 然后失去意义
 
 ## 本机环境
 Node v22.22.2 / pnpm 9.15.9。**所有命令都要** `env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE`

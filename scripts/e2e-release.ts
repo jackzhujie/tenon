@@ -37,6 +37,8 @@ interface Release {
   kind: string
   artifactPath: string | null
   notes: string | null
+  gateStatus: 'pass' | 'forced' | null
+  gateSummary: string | null
   createdAt: number
 }
 
@@ -47,6 +49,7 @@ interface PublishResult {
   backupPath: string
   branch: string
   objects: number
+  gate: { ok: boolean; checks: { id: string; status: string; summary: string }[] }
 }
 
 let failures = 0
@@ -99,7 +102,10 @@ async function rpc<T>(method: string, input: unknown): Promise<T> {
 }
 
 /** 期望失败的调用：把错误码拿回来断言，而不是让它抛 */
-async function rpcError(method: string, input: unknown): Promise<{ code: string; message: string }> {
+async function rpcError(
+  method: string,
+  input: unknown,
+): Promise<{ code: string; message: string; details?: { checks?: { id: string; status: string }[] } }> {
   const response = await fetch(`${server.url}/rpc/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
@@ -122,16 +128,33 @@ try {
   check('第一轮产生 commit', first !== undefined)
   const head = await gitops.headSha(repo)
 
-  console.log('\n2) release.publish：打 tag + 推到备份库 + 记一条 release')
-  const published = await rpc<PublishResult>('release.publish', { appId, notes: '首个可交付版本' })
+  console.log('\n2) 门禁先拦一道：这个应用没装依赖，类型检查跑不起来（M4 第 7 步）')
+  const blocked = await rpcError('release.publish', { appId, notes: '首个可交付版本' })
+  check('检查没过时拒绝发布', blocked.code === 'RELEASE_CHECKS_FAILED', blocked.message)
+  check('错误里说清是哪一项没过', blocked.message.includes('类型检查'), blocked.message)
+  check(
+    '清单随错误一起回来（对话框靠它画三行）',
+    blocked.details?.checks?.length === 2,
+    JSON.stringify(blocked.details ?? {}),
+  )
+  check('被拒时不消耗版本号（仓库里没有 tag）', (await gitops.listTags(repo)).length === 0)
+
+  console.log('\n3) 硬发（force）：能发出去，但记录里留痕')
+  const published = await rpc<PublishResult>('release.publish', {
+    appId,
+    notes: '首个可交付版本',
+    force: true,
+  })
   check('版本号是 v<日期>-1', /^v\d{4}\.\d{2}\.\d{2}-1$/.test(published.version), published.version)
   check('发布的就是当前 HEAD', published.commitSha === head, `${published.commitSha} vs ${String(head)}`)
   check('备份库落在 ~/.tenon/backups/<appId>.git', published.backupPath === paths.backupRepo, published.backupPath)
   check('记录 kind 是 push', published.release.kind === 'push')
   check('发布说明进了记录', published.release.notes === '首个可交付版本')
   check('真的写了对象（不是空转）', published.objects > 0, `objects=${String(published.objects)}`)
+  check('记录标成 forced（检查没过被人工放过）', published.release.gateStatus === 'forced', String(published.release.gateStatus))
+  check('摘要写清哪项没过', (published.release.gateSummary ?? '').includes('类型检查 ✗'), String(published.release.gateSummary))
 
-  console.log('\n3) 系统 git 裁判：备份库是个合法的裸库')
+  console.log('\n4) 系统 git 裁判：备份库是个合法的裸库')
   const fsck = await git(['-C', published.backupPath, 'fsck', '--strict', '--no-progress'])
   check('git fsck --strict 通过', fsck.code === 0, fsck.stderr.trim())
   check(
@@ -158,7 +181,7 @@ try {
   const blob = await git(['-C', published.backupPath, 'cat-file', '-p', `${published.version}:src/notes.md`])
   check('tag 里带着那一刻的文件内容', blob.stdout === '第一轮写下的内容\n', blob.stdout)
 
-  console.log('\n4) 别人 clone 下来能直接用')
+  console.log('\n5) 别人 clone 下来能直接用')
   const cloneDir = join(cloneRoot, 'app')
   const cloned = await git(['clone', '--quiet', published.backupPath, cloneDir])
   check('git clone 成功', cloned.code === 0, cloned.stderr.trim())
@@ -168,10 +191,10 @@ try {
   const status = await git(['-C', cloneDir, 'status', '--porcelain'])
   check('clone 出来是干净工作区', status.stdout.trim() === '', status.stdout)
 
-  console.log('\n5) 再改一轮、再发一版：备份库前进而不是被覆盖')
+  console.log('\n6) 再改一轮、再发一版：备份库前进而不是被覆盖')
   await writeFile(join(repo, 'src', 'notes.md'), '第二版内容\n')
   const second = await gitops.commitAll(repo, 'feat: 改一版')
-  const secondPublish = await rpc<PublishResult>('release.publish', { appId })
+  const secondPublish = await rpc<PublishResult>('release.publish', { appId, force: true })
   check('同一天第二个版本是 -2', secondPublish.version.endsWith('-2'), secondPublish.version)
   check('第二次只写增量对象', secondPublish.objects < published.objects, `${String(secondPublish.objects)} vs ${String(published.objects)}`)
   check('新提交是 HEAD', secondPublish.commitSha === second?.sha)
@@ -185,12 +208,17 @@ try {
   await git(['clone', '--quiet', secondPublish.backupPath, cloneDir])
   check('重新 clone 拿到最新一版', (await readFile(join(cloneDir, 'src', 'notes.md'), 'utf8')) === '第二版内容\n')
 
-  console.log('\n6) release.list：新发的在前')
+  console.log('\n7) release.list：新发的在前，门禁留痕也在')
   const listed = await rpc<{ releases: Release[] }>('release.list', { appId })
   check('两条发布记录', listed.releases.length === 2, `实际 ${String(listed.releases.length)}`)
   check('最新的排第一', listed.releases[0]?.version === secondPublish.version)
+  check(
+    '两条记录都留着 forced 的痕（不是倒推成 pass）',
+    listed.releases.every((release) => release.gateStatus === 'forced'),
+    listed.releases.map((release) => String(release.gateStatus)).join(','),
+  )
 
-  console.log('\n7) 闸门：工作区脏 / 没有提交 / 应用不存在')
+  console.log('\n8) 闸门：工作区脏 / 没有提交 / 应用不存在')
   await writeFile(join(repo, 'src', 'notes.md'), '写到一半\n')
   const dirty = await rpcError('release.publish', { appId })
   check('工作区有未提交改动时拒绝', dirty.code === 'GIT_DIRTY_WORKTREE', dirty.message)

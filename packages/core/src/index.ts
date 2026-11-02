@@ -14,6 +14,7 @@ import { ReleaseStore } from './stores/releases.js'
 import { SettingsStore } from './stores/settings.js'
 
 export * from './paths.js'
+export * from './pnpm.js'
 export * from './db.js'
 export * from './env.js'
 export * from './ids.js'

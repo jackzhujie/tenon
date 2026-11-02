@@ -311,7 +311,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'release.publish': async (input) => {
       const app = core.apps.require(input.appId)
-      return publishRelease({ core, app, notes: input.notes })
+      return publishRelease({ core, app, notes: input.notes, force: input.force === true })
     },
 
     'settings.get': async () => ({ values: core.settings.all() }),
