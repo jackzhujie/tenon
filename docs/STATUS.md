@@ -4,7 +4,8 @@
 > 最后更新：2026-11-02（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
 > + M4 第 1–7 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具
 > + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁）
-> + **发布预检**（`release.check`：打开对话框就知道能不能发）**：435 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + **发布预检**（`release.check`：打开对话框就知道能不能发）
+> + **M5 第 1 步**（chord 宿主接入 spike，10 项，`pnpm spike:chord`）**：435 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -43,6 +44,12 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 说清并置灰按钮、连检查都不跑；检查没过直接把清单摊开，主按钮是「重新检查」；检查通过是绿的。
 还有一格 `stale`：检查期间仓库又前进了，那份「通过」讲的是上一版代码，界面会说「再查一次」
 而不是「可以发」—— 拿 A 版的通过给 B 版背书，比不检查更糟。
+
+**M5 开工了，但先撞了一遍地基（第 1 步：chord spike）**：组件体系整套押在 chord 上，所以先验它。
+10 项全绿，同时撞出两条会静默坏事的约束 —— **对象默认 `lifetime:"referenced"`，root 一结束就连 state 一起销毁**
+（组件不显式 `linger`，悬浮球/审批流每发一次请求进度就归零，还不报错）；**断链时调用会挂住**（静默丢帧、不发
+close），所以 web facet 的每个调用都得自己带超时。好消息是打包没有坑：726KB 单文件、164ms、跑通，
+不用像 pi-codemode 那样外部化。
 
 **M4 第 1 步：能派活了**。Agent 不再只有一个大脑 —— 主角色（Builder）可以把「这个东西在哪」
 「这个库怎么用」这类只读的活交给子角色，自己专心改代码。子角色是**真的另一个会话**（独立 transcript、
@@ -182,7 +189,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 |---|---|---|
 | **`docs/STATUS.md`**（本文件） | 现状、下一步、陷阱 | **每次开工先读** |
 | `docs/DESIGN.md` | **唯一事实来源**，v1.2.9，1700+ 行 | 写涉及架构的代码前，按需读对应章节 |
-| **`docs/SPIKES.md`** | 四个 spike 的实测数字与结论（含被推翻的假设）| 碰 DB / pi / 网关 / 定位插件前必读 |
+| **`docs/SPIKES.md`** | 五个 spike 的实测数字与结论（含被推翻的假设）| 碰 DB / pi / 网关 / 定位插件 / chord 前必读 |
 | `docs/ARCHITECTURE.md` | 一分钟速览 + 四条原则 | 给别人介绍时 |
 | `docs/PI-CHEATSHEET.md` | pi 全生态真实 API（读源码所得）| **写任何 pi 相关代码前必查**（比官方文档全）|
 | `docs/PROTOCOL.md` | 妙搭行为规格（clean-room）| 不确定某个交互该怎么做时 |
@@ -194,7 +201,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 
 ## 4. 进度与下一步
 
-### 4.1 第一周：4 个 spike —— ✅ **已全部完成（2026-10-31）**
+### 4.1 spike（第一周 4 个 + M5 前置 1 个）—— ✅ **已全部完成**
 
 | # | 验证什么 | 结果 |
 |---|---|---|
@@ -202,6 +209,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 2 | App Gateway 代理 **Vite HMR WebSocket** | ✅ 8/8。HMR update **134ms**；上游换端口网关 URL 不变 |
 | 3 | `data-tenon-loc` 在 JSX 上准确对应 `file:line`（经组合组件） | ✅ 7/7。改为 `loc`（原生）+ `callsite`（组合组件）双属性，9/9 可回溯 |
 | 4 | **`PGlite + pg-gateway + TypeORM`** 稳定性与 P95 | ⚠️ **有条件通过**：20 并发 P95 14ms(读)/24ms(写)、零超时；但 **`pool.max>1` 会让并发事务互相回滚 → 必须为 1** |
+| 5 | **chord 宿主接入**（M5 前置，2026-11-02）：契约 / 变体 / 跨 host / 热重载 / 打包 | ✅ 10/10。**默认 `lifetime:"referenced"` 会让 state 随 root 静默归零 → 组件必须 `linger`**；断链调用会挂住；单文件打包 726KB 无坑 |
 
 详细数字、可复跑命令、被推翻的假设：**`docs/SPIKES.md`**。
 
@@ -268,6 +276,19 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ✅ 见 §4.13 | `packages/core/src/git.ts`（`worktreeDiff`）、`packages/core/src/typecheck.ts`、`packages/agent/src/tools/review.ts` |
 | 6 | CodeAct：`codemode` 沙箱接入 | ✅ 见 §4.14 | `packages/agent/src/tools/codeact.ts`、`packages/agent/src/roles.ts`（`modelTools`）、`apps/desktop/build.mjs`（外部化 + `assertCodemodeLayout`） |
 | 7 | **发布前质量门禁**：`typecheck` / `test` 不过不许发（三态判据、`force` 留痕、迁移 2 加两列）；预检 `release.check` 见 §4.16 | ✅ 见 §4.15 | `packages/agent/src/checks.ts`、`packages/server/src/release.ts`、`packages/core/src/pnpm.ts`、`packages/core/src/db.ts`（迁移 2） |
+
+**M5 组件体系（官方内置定型）**
+
+| # | 步骤 | 状态 | 落在哪 |
+|---|---|---|---|
+| 1 | **chord 宿主接入 spike**：契约 / 变体 / 跨 host / 热重载 / 打包（10 项） | ✅ 见 §4.17 | `spikes/chord/` |
+| 2 | **bundled 插件加载器**：`resources/plugins/<id>/` 只读源 + 清单（依赖/权限/宿主兼容）+ 装配声明 `app.components.json` | ⬜ | — |
+| 3 | **第一个真组件：AI 小助手**（contract + server facet + web facet + `app.shell.overlay` 插槽） | ⬜ | — |
+| 4 | **`install_component` 工具**：写装配声明 + 生成 `src/components.generated.ts` + 改 `AGENTS.md` 索引 | ⬜ | — |
+| 5 | **卸载即清理**（代码 + 装配声明 + `AGENTS.md`，幂等；DoD ②） | ⬜ | — |
+| 6 | **插件页**：列表 / 独立开关 / 来源标识 / "官方 Hub 筹备中"占位（DoD ④） | ⬜ | — |
+| 7 | 另两个官方插件（Excel 导出 / 审批流）+ L1 内置积木清单 | ⬜ | — |
+| 8 | 组件热重载不丢状态（DoD ③）+ 端到端验收（DoD ①） | ⬜ | — |
 
 ### 4.3 M1 验收（DoD）
 
@@ -663,7 +684,33 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 而这个功能的全部价值是「答案是现在的」）；`ready` **不是**按钮的 disabled 依据（门禁没过但用户
 坚持时仍能发，那时 `ready=false` 而按钮可点）。
 
-### 4.17 代码地图（只列已落地的）
+### 4.17 M5 第 1 步验收（chord 宿主接入 spike）—— ✅ 已完成
+
+M5 整套押在 chord 上（DESIGN §21「不要自研插件框架」），所以先 spike 再落实现。
+`pnpm spike:chord`（`spikes/chord/`，10 项全绿，chord `1.4.0` + typebox `1.3.27` 锁精确版本）。
+
+| # | 验证项 | 实测 |
+|---|---|---|
+| 1 | 契约 → `serve` → `get` → 方法 → 状态 | ✅ `append(2)` 返回 `rows=2`，root 结束 `rows=5`/`revision=2` |
+| 2 | 状态订阅 | ✅ 收到 `[0, 2, 5]`（先 hydrate 再逐次变更）|
+| 3 | 方法抛错的语义 | ✅ `invalid/script` 原样回到调用方 |
+| 4 | **默认生命周期** | ⚠️ root 结束**对象销毁** → 新 root 读到 `rows=0` |
+| 5 | `serve(…, { linger })` 跨 root 保 state | ✅ 读到 4 |
+| 6 | `principal` + `variants` | ✅ guest = `viewer`（另一个对象，`rows=0`）；强调 `append` → `not_in_variant`；owner 不受影响 |
+| 7 | 跨 host（`memoryLinkPair` + `kind:'client'`）| ✅ ui 写 7 → ui 重读 7 → server 读 7 |
+| 8 | 断链语义 | ⚠️ `sever()` 后调用 **1.5s 内挂住**（不返回不抛）|
+| 9 | 热重载 `host.reload` | ✅ `hits` 仍是 2、`stamp` `v1→v2`、`codeVersion` 1→2 |
+| 10 | esbuild 单文件 | ✅ 726KB / 164ms / `BUNDLE_OK 2` |
+
+**三条会改变实现方式的事实**（都写进 DESIGN 了）：① 组件 `serve` 必须显式 `linger`，否则 state 静默归零；
+② 断链调用会挂住 → web facet 每个调用自带超时；③ chord 可与 server 同打包，**不需要**像 pi-codemode 那样外部化。
+推翻的假设：`'ask' in ref` 恒为 `true`（Ref 代理），判权限只能真调一次认 `not_in_variant`；
+无参方法的实现签名是 `(ctx)` 不是 `(args, ctx)`；`invalid(reason, message)` 是两个参数。
+
+细节与逐项数字：`docs/SPIKES.md` §7。**下一步 = M5 第 2 步：把 `Sheet` 这种 probe 换成一个真组件**（AI 小助手，
+契约 + server facet + web facet + `install_component` 工具 + 插槽渲染），第 1 步只验了"能跑"，还没验"能装进应用"。
+
+### 4.18 代码地图（只列已落地的）
 
 ```
 packages/
@@ -942,6 +989,10 @@ scripts/
 | **预检的结论只对那个 sha 有效** | 用户看清单、写说明、点发布，中间可能隔几分钟，代码随时会变。所以 `release.publish` 里必须自己再跑一遍（不能复用预检结果），而 `release.check` 的返回里必须带 `commitSha` + `stale`（前后各读一次 HEAD）—— 拿 A 版的「通过」给 B 版背书，比不检查更糟 |
 | **`ready` 不是按钮的 disabled 依据** | `ready=false` 有两种：前提不满足（真不能发）和门禁没过（能发，但要 `force`）。把 `ready` 直接接到 disabled 上，等于把「仍然发布」这扇门焊死 —— 而它恰恰是用户比你更懂自己代码时的唯一出口 |
 | **别在 JSX 里写 markdown 的 `**加粗**`** | 它会原样渲染成两个星号，而且不报任何错。要强调就用 `<span className="text-muted">`。同理，JSX 里的换行会变成空格：「标准裸库，\n<span>git clone…</span>」渲染出「裸库， git clone」多一个空格 |
+| **chord 对象默认 `lifetime: "referenced"`：state 随 root 静默归零** | 最后一个引用释放，对象连同 state 一起销毁，**不报错、不告警**（实测：root 里把 `rows` 加到 5，新 root 再 `get` 同一个 input 读到 0）。组件的 `serve` 必须显式给 `linger`；`lifetime: "host"` 只适合无 input 的单例。这类"每次调用都正常返回、只是数据没了"的错，测试里极难发现 |
+| **`'method' in ref` 判不出权限** | Ref 是代理，`in` 恒为 `true`。要知道 guest 有没有某个方法，只能**真调一次**并认 `not_in_variant` |
+| **chord 断链时调用会挂住，不抛错** | `sever()`（双向静默丢帧、不发 close）之后调用方法，1.5s 内既不返回也不抛。所以 web facet 的每个调用都得自带超时 + 心跳，不能等"断了会告诉我" |
+| **无参方法的实现签名是 `(ctx)`** | 有入参才是 `(args, ctx)`；写错会被类型检查拦住（不静默）。`invalid` 也是两个参数：`invalid(reason, message)` |
 
 
 ---
@@ -972,7 +1023,7 @@ pnpm build:desktop         # 桌面产物：dist/{main.mjs,server,web,templates}
 pnpm pack:desktop          # electron-builder --dir → apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop         # 桌面冒烟（开发态）：真起 Electron，8 项断言
 pnpm smoke:desktop:packaged # 同上，但跑打包后的 Tenon.app
-pnpm typecheck             # 8 个 packages + 2 个 apps + 4 个 spikes + scripts（15 个项目）
+pnpm typecheck             # 8 个 packages + 2 个 apps + 5 个 spikes + scripts（16 个项目）
 
 # 模板里的副本从 runtime-sdk 同步（改了 src/browser 或 src/nest 之后）
 node packages/runtime-sdk/scripts/sync-templates.mjs          # 写入
@@ -986,6 +1037,7 @@ pnpm spike:db       # PGlite + TypeORM 压测（含正确性探针）→ spikes/
 pnpm spike:agent    # pi-durable 闭环 + 崩溃续跑            → spikes/agent/results/spike-agent.json
 pnpm spike:gateway  # 网关 HMR 代理
 pnpm spike:loc      # 定位插件精度
+pnpm spike:chord    # chord 宿主：契约/变体/跨 host/热重载/打包（10 项，也是 M5 的回归网）
 ```
 
 服务端环境变量：`TENON_HOME`（数据目录，默认 `~/.tenon`；桌面版默认 `<userData>/home`）、
@@ -1023,17 +1075,19 @@ pnpm spike:loc      # 定位插件精度
 ```
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
-先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
+先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（五个 spike 的实测结论，
 尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.22），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
 当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
 发布 push）；**M4 第 1–7 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 +
 e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁）
-+ **发布预检**（`release.check`，打开对话框就知道能不能发），**DoD ①②③ 已满足，五个子角色全部 ready**。
-下一步是 M4 之后的那一步，先看 §4.2 的 M4 表与 §4.17 的「还没做的」。
++ **发布预检**（`release.check`），**DoD ①②③ 已满足，五个子角色全部 ready**。
+**M5 已开工**：第 1 步是 chord 宿主接入 spike（`pnpm spike:chord` 10/10），
+撞出「对象默认 referenced → state 随 root 静默归零（必须 `linger`）」与「断链调用会挂住」两条硬约束。
+下一步是 **M5 第 2 步（bundled 插件加载器 + 装配声明）**，先看 §4.2 的 M5 表与 §4.18 的代码地图。
 435 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:fullstack + 桌面包全绿。
++ e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；

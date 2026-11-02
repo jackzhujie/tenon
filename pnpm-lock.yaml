@@ -223,6 +223,22 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
+  spikes/chord:
+    dependencies:
+      '@earendil-works/chord':
+        specifier: 1.4.0
+        version: 1.4.0
+      typebox:
+        specifier: 1.3.27
+        version: 1.3.27
+    devDependencies:
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+
   spikes/db:
     dependencies:
       '@electric-sql/pglite':

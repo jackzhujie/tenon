@@ -3,7 +3,7 @@
 本地优先、可自托管的**对话式 AI 全栈应用搭建平台**（桌面 + Web 同构）。产品名 Tenon，作用域 `@tenon/*`。
 隐喻：应用靠标准组件咬合，Agent 只做设计。⚠️ `LM Studio` 是第三方名，全局改名须保护。
 
-**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 136 条**）；方案 `docs/DESIGN.md`（v1.2.22）。
+**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 140 条**）；方案 `docs/DESIGN.md`（v1.2.23）。
 这里只留「不知道就会走错方向」的，细节查 STATUS §5，别重复。
 
 ## 三条铁律
@@ -12,10 +12,11 @@
 3. **pi 全家与 PGlite 是实验性 API** → `save-exact` 锁版本 + adapter 包一层
 
 ## 状态（2026-11-02）
-M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–7 步** → DESIGN **v1.2.21**。
+M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–7 步 + M5 第 1 步** → DESIGN **v1.2.23**。
 八个包 + `apps/web`（渲染器）+ `apps/desktop`（壳）。
-全绿基线：typecheck 15 project / test **435** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
-e2e:diff **36** / e2e:release **44** / **e2e:e2e 9** / e2e:fullstack / smoke:desktop:packaged 8 / build:web 299KB。
+全绿基线：typecheck 16 project / test **435** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
+e2e:diff **36** / e2e:release **44** / **e2e:e2e 9** / e2e:fullstack / **spike:chord 10** /
+smoke:desktop:packaged 8 / build:web 299KB。
 M3 已通：定位注入 → 反查 → Alt+Click → 跨源回传 → 逐行差异 → 代码回滚 → 数据回滚 → 发布（tag + 本地裸库）。
 M4 第 1 步：**子 Agent 能派活**（`roles.ts` 是 1 主 + 5 子的唯一事实来源；`subagent` 建真子会话、
 只读白名单、递归从工具集上断；`explore`/`librarian` 可用，其余三角色待接工具）。
@@ -34,7 +35,11 @@ M4 第 7 步：**发布前质量门禁**（`checks.ts` 的 `runTypecheck`/`runTe
 **发布预检 `release.check`**（只读地回答"能不能发"，与 publish 共用 `inspectRelease`；
 `stale` 用前后两次 HEAD 判、不缓存、同 appId 并发合并；对话框打开即查）。
 **五个子角色全部 `ready`；M4 七步收口 + 预检补完。**
-**下一步：M5 或欠账里的高优项**，先看 §4.2 的 M4 表与 §4.17 的「还没做的」。
+**M5 第 1 步：chord 宿主接入 spike**（`spikes/chord`，`pnpm spike:chord` 10/10；chord 1.4.0 + typebox 1.3.27
+锁精确版本）。撞出两条硬约束：**对象默认 `lifetime:"referenced"` → root 结束连 state 一起销毁且不报错
+（组件必须显式 `linger`）**；**断链静默丢帧 → 调用挂住不抛（每个调用自带超时）**。好消息：可与 server
+同打包（726KB / 164ms），不用像 pi-codemode 那样外部化。
+**下一步：M5 第 2 步 —— bundled 插件加载器 + 装配声明 `app.components.json`**（M5 八步表在 §4.2）。
 欠账：Docker compose 产物、真远端 push、真模型下的"改样式自验"、额度无跨应用总闸、
 用量答不了"哪个角色花了多少"、`lint` 未接（模板没 eslint 配置）、
 脚本能用 `// @options: timeout_ms` 放大沙箱默认超时、主界面没有"当前能不能发"的指示。
@@ -114,6 +119,12 @@ M4 第 7 步：**发布前质量门禁**（`checks.ts` 的 `runTypecheck`/`runTe
 - **`ready` 不是按钮的 disabled 依据**：`ready=false` 有两种 —— 前提不满足（真不能发）
   和门禁没过（能发，要 force）。接上去等于把「仍然发布」焊死
 - **别在 JSX 里写 markdown 的 `**加粗**`**（原样渲染星号且不报错）；JSX 换行会变成空格
+
+- **chord 对象默认 `lifetime:"referenced"`：state 随 root 静默归零**（新 root 读回 0，不报错）。
+  组件 `serve` 必须给 `linger`；`lifetime:"host"` 只适合无 input 的单例
+- **`'x' in ref` 判不出变体权限**（Ref 是代理，恒 true）→ 只能真调一次认 `not_in_variant`
+- **chord 断链时调用会挂住不抛**（sever 后 1.5s 无响应）→ web facet 每个调用自带超时 + 心跳
+- **无参方法实现签名是 `(ctx)`**，有入参才是 `(args, ctx)`；`invalid(reason, message)` 是两个参数
 
 ## 本机环境
 Node v22.22.2 / pnpm 9.15.9。**所有命令都要** `env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE`

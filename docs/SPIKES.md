@@ -1,12 +1,12 @@
-# SPIKES.md — M1 第一周四个 spike 的实测结论
+# SPIKES.md — 实测结论（M1 第一周四个 + M5 前置一个）
 
-> 执行日期：2026-10-31　环境：macOS arm64 / Node v22.22.2 / pnpm 9.15.9
-> 代码：`spikes/db`、`spikes/agent`、`spikes/gateway`、`spikes/loc`（可 `pnpm spike:*` 重跑）
+> 执行日期：2026-10-31（spike 1–4）、2026-11-02（spike 5）　环境：macOS arm64 / Node v22.22.2 / pnpm 9.15.9
+> 代码：`spikes/db`、`spikes/agent`、`spikes/gateway`、`spikes/loc`、`spikes/chord`（可 `pnpm spike:*` 重跑）
 > 结论只认实测数字，不认"应该能行"。
 
 ## 0. 一句话结论
 
-**四个 spike 全部通过，方案不需要回退；但撞出一条必须改的硬约束——`pglite` 档的 `pool.max` 必须是 1，DESIGN 原文写的「1~2」会导致数据被回滚掉。**
+**五个 spike 全部通过，方案不需要回退；但撞出两条必须改的硬约束 —— `pglite` 档的 `pool.max` 必须是 1（DESIGN 原文写「1~2」会让并发事务互相抹掉），以及 chord 的对象默认 `lifetime: "referenced"`，root 一结束 state 就静默归零（组件必须显式 `linger`）。**
 
 | # | 验证项 | 结果 | 对方案的影响 |
 |---|---|---|---|
@@ -14,6 +14,7 @@
 | 2 | App Gateway 代理 Vite HMR WebSocket | ✅ 8/8（HMR 134ms）| 无（按预期可用），补一条"上游换端口只改指向"的实现 |
 | 3 | `data-tenon-loc` 定位精度 | ✅ 7/7（9/9 定位可回溯）| 注入改为 `loc` + `callsite` 双属性；生成组件必须透传 props |
 | 4 | PGlite + pg-gateway + TypeORM | ⚠️ **有条件通过** | **`pool.max=1` 硬约束**；LISTEN/NOTIFY 不可用 |
+| 5 | chord 宿主接入（契约 / 变体 / 跨 host / 热重载 / 打包） | ✅ 10/10 | **组件必须 `linger`**；断链调用会挂住 → 必须自己超时；单文件打包无坑（726KB / 164ms）|
 
 ---
 
@@ -179,3 +180,58 @@ net.Socket ──pg-gateway(fromNodeSocket)──> 单条全局串行队列 ─�
 4. **`resume()` 不能忘**：server 启动序列里少了这一句，崩溃恢复能力等于没有。
 5. **HMR 首帧要早挂监听**：网关/客户端都要在握手前把 `message` 监听挂好，否则丢 `connected`。
 6. **taskGraph 静止时为空**：状态面板要在跑动中采样，静止时应展示"上次运行结果"而不是"没有任务"。
+
+---
+
+## 7. Spike 5：chord 宿主接入（M5 前置，2026-11-02）
+
+`pnpm spike:chord`（`spikes/chord/`，10 项，全绿）。chord `1.4.0` + typebox `1.3.27`，锁精确版本（铁律 3）。
+
+### 7.1 结论先说
+
+三条会改变 M5 实现方式的事实，**都不是文档里读到的是踩出来的**：
+
+1. **对象默认 `lifetime: "referenced"` —— 最后一个引用释放，对象连同 state 一起销毁，且不报任何错。**
+   实测：一个 root 里把 `rows` 加到 5，root 结束后新 root 再 `get` 同一个 input，读到 **0**（新建的对象）。
+   组件的状态要跨请求活着，必须在 `serve(type, factory, { linger })` 上给 linger（实测给 60s 后读到 4，符合预期）。
+   **这条如果不知道，写出来的悬浮球/审批流每发一次请求进度就归零，而且测试里很难发现**（每次都"正常返回"）。
+2. **断链不会报错，调用会挂住。** `memoryLink.sever()`（frames 双向静默丢弃、不发 close）之后调用方法，
+   1.5s 内**既不返回也不抛**（判定 `hanged`）。所以 Web facet 的每一次调用都得自己带超时，
+   不能指望"断了会告诉我"。
+3. **打包没有坑。** esbuild 打成单文件 **726KB**、构建 **164ms**、`node bundle.mjs` 正常跑出 `BUNDLE_OK 2`。
+   这点与 pi-codemode 相反（那边 worker/wasm 打包后静默失效），说明 chord 可以跟 server 一起打成 `server.mjs`，
+   不必像 codemode 那样外部化整包。
+
+### 7.2 逐项实测
+
+| # | 验证项 | 结果 |
+|---|---|---|
+| 1 | 契约 → `serve` → `root`/`get` → 方法 → 状态 | ✅ 一次 `append(2)` 返回 `rows=2`；root 结束时 `rows=5`、`revision=2` |
+| 2 | 状态订阅（`state.subscribe`）| ✅ 收到 `[0, 2, 5]`：先 hydrate 当前值，再逐次给变更 |
+| 3 | 方法里抛错的语义 | ✅ `invalid('script', …)` 原样回到调用方：`invalid: invalid/script: boom 是故意的` |
+| 4 | **默认生命周期** | ⚠️ `rows` 从 5 变 **0** —— 对象被销毁重建（见 7.1 第 1 条）|
+| 5 | `serve(…, { linger })` 跨 root 保 state | ✅ 读到 4 |
+| 6 | `principal` + `variants` 的权限分流 | ✅ guest 拿到 `viewer`、`rows=0`（另一个对象）；强行调 `append` → `not_in_variant: … append is not a method of variant viewer`；owner 那份仍是 4 |
+| 7 | 跨 host（`memoryLinkPair`，模拟浏览器那半边）| ✅ ui 写 7 → ui 重开 root 读 7 → server 自己读 7 |
+| 8 | 断链语义 | ⚠️ `sever()` 之后调用 **1.5s 内挂住**（不返回、不抛）|
+| 9 | 热重载（`host.reload([facet])`）| ✅ `hits` 仍是 2（state 保住），`stamp` 从 `v1` 变 `v2`，`codeVersion` 1 → 2 |
+| 10 | esbuild 单文件 | ✅ 726KB / 164ms / 退出码 0 |
+
+### 7.3 被推翻的假设（写代码前以为是怎样的）
+
+| 以为是 | 实际是 | 后果 |
+|---|---|---|
+| "一个 `(type, input, principal)` 是同一个对象，state 自然跨调用" | 只在**有引用时**是同一个；引用放手就销毁 | 必须 `linger`，否则状态静默归零 |
+| "`'append' in ref` 能判断 guest 有没有这个能力" | 恒为 `true`（Ref 是代理，`in` 不区分变体）| 要验权限得**真调一次**并断言 `not_in_variant` |
+| "断了会抛 `unavailable`" | 静默丢帧，调用挂死 | 每个调用自带超时，界面要有"连接丢失"态 |
+| "无参方法的实现是 `(args, ctx)`" | 是 `(ctx)`（有入参才是 `(args, ctx)`）| 类型签名写错会编译报错，好在不静默 |
+| "`invalid(message)`" | `invalid(reason, message)` | — |
+
+### 7.4 对 DESIGN §21 的影响（已改）
+
+| 位置 | 原文 | 改为 |
+|---|---|---|
+| §21.3 | 只写"按声明加载 facet" | 补：组件 `serve` 必须显式 `linger`（否则状态随 root 销毁）；`lifetime: "host"` 只适合无 input 的单例 |
+| §21.5 | 未提断链 | 补：链路静默丢帧，调用会挂住 → web facet 每个调用自带超时 + 心跳 |
+| §21.2 | 未提变体探测 | 补：`in` 判断权限无效，必须试调并认 `not_in_variant` |
+| §2 / 附录 | 未提打包 | 补：chord 可与 server 同打包（726KB），不需外部化（与 pi-codemode 相反）|

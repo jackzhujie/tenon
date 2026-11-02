@@ -34,7 +34,7 @@
 | 文档 | 内容 |
 |---|---|
 | [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、进度表、下一步拆解、已知陷阱 |
-| [**四个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度的真实数字 |
+| [**五个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度、chord 宿主接入的真实数字 |
 | [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.22）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
@@ -42,7 +42,7 @@
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.22**；四个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 前七步完成**：
+M0 逆向研究完成；方案 **v1.2.23**；五个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 七步完成，M5 已开工**：
 七个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `db-provisioner` / `server`）+ 两个 app
 （渲染器 `apps/web`，浏览器与窗口共用一套代码；壳 `apps/desktop`，只做生命周期）。
 
@@ -127,15 +127,16 @@ pnpm e2e:diff               # 36 项改动/回滚链路：git.log / show / rever
 pnpm e2e:release            # 44 项发布链路：预检只读 → 门禁拦截 → force 留痕 → 打 tag → 推本地裸库 → 系统 git 验 fsck / clone
 pnpm e2e:e2e                # ★ 9 项自验收：真 Electron 里由 e2e 子 Agent 点页面，注入的 bug 被断言抓到、修好后同一条断言通过
 pnpm e2e:fullstack          # ★ 全栈真机链路（要联网装 Nest）：起库 → 迁移 → 双进程 → CRUD → 重启后数据还在
+pnpm spike:chord            # 10 项：chord 宿主（契约 / 变体 / 跨 host / 热重载 / 打包），M5 的回归网
 pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后不留孤儿进程
 ```
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**下一步**：M4 继续 —— E2E 子 Agent 的预览工具与自验收流程（DoD ①）、Reviewer、CodeAct。
+**下一步**：M5 第 2 步 —— bundled 插件加载器 + 应用装配声明（chord 地基已由 `pnpm spike:chord` 10 项验过）。
 M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，
-M4 验收见 §4.9（子 Agent）/ §4.10（任务图）/ §4.11（用量与预算）。
+M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17。
 实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
 ## License

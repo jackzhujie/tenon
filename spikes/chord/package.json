@@ -1,0 +1,17 @@
+{
+  "name": "@tenon/spike-chord",
+  "private": true,
+  "type": "module",
+  "description": "Spike 5：chord 宿主接入（契约 / 变体 / 状态复制 / 跨 host / 热重载 / 打包）",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15"
+  }
+}
