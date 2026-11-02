@@ -52,3 +52,9 @@ export {
   type PageReply,
   type PageSessionInfo,
 } from './page.js'
+export {
+  COMPONENT_SCRIPT_PATH,
+  COMPONENT_WS_PATH,
+  injectComponentScript,
+  type ComponentBridge,
+} from './components.js'

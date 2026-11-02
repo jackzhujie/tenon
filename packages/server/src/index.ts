@@ -13,6 +13,7 @@ import { PreviewManager, type PreviewManagerOptions } from '@tenon/gateway'
 import { scaffoldApp } from '@tenon/generator'
 import { buildServer, type TenonServer } from './app.js'
 import { ComponentRuntime } from './components.js'
+import { createComponentBridge, type AppComponentBridge } from './components-link.js'
 import { SseBus } from './sse.js'
 
 export { buildServer, dispatch, type BuildServerOptions, type TenonServer } from './app.js'
@@ -106,6 +107,16 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     publish: (event) => {
       bus.publish(event)
     },
+    /*
+     * 组件的浏览器半边（M5 第 3 步 b）：每个应用一个网关，所以这里按 appId 现建一个桥。
+     * 桥自己不认识装配声明 —— 它每次都问 `ComponentRuntime`（幂等），
+     * 这样"组件在预览之后才激活完"也能被接上。
+     */
+    components: (appId) => {
+      const bridge = createComponentBridge({ appId, runtime: components })
+      bridges.set(appId, bridge)
+      return bridge
+    },
     ...(options.preview ?? {}),
   })
   const agent = createAgentRuntime({
@@ -128,6 +139,8 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
      */
     getPageDriver: options.pageDriver ?? ((appId) => preview.pages(appId)),
   })
+  /** 每个应用的组件链路：进程退出/预览重起时要能收干净（wss 不会自己关） */
+  const bridges = new Map<string, AppComponentBridge>()
   const components = new ComponentRuntime({
     home: core.home,
     agent,
@@ -168,6 +181,8 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       await server.app.close()
       // 先停预览：dev server 是我们 spawn 的，进程别留在外面
       await preview.close()
+      for (const bridge of bridges.values()) await bridge.close().catch(() => {})
+      bridges.clear()
       await components.close()
       await agent.close()
       core.close()

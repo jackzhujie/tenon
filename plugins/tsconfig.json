@@ -1,4 +1,8 @@
 {
   "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // 组件的 web facet 跑在浏览器里（DOM）。server facet 用不到这些全局，但多一份 lib 无害
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
   "include": ["**/*.ts"]
 }

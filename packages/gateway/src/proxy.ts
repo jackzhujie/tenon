@@ -27,6 +27,12 @@ import {
   type PageBridge,
   type PageHello,
 } from './page.js'
+import {
+  COMPONENT_SCRIPT_PATH,
+  COMPONENT_WS_PATH,
+  injectComponentScript,
+  type ComponentBridge,
+} from './components.js'
 
 export interface Route {
   /** 路径前缀，`/` 表示兜底 */
@@ -73,6 +79,14 @@ export interface GatewayOptions {
    * 不给就完全是原来的行为（有用例钉住"没有 page 时响应原样透传"）。
    */
   page?: PageBridge
+  /**
+   * 组件桥（M5 第 3 步 b）：管住 `/__tenon/component.js` 与 `/__tenon/component` 两条路径，
+   * 外加往 HTML 里插一行组件脚本。
+   *
+   * 网关**不认识 chord** —— 它只把 socket 和 HTTP 交给 bridge；怎么握手、接了之后说什么，
+   * 全在 server 那一侧（`components-link.ts`）。这样两边的测试都不需要对方。
+   */
+  components?: ComponentBridge
 }
 
 const LOOPBACK = '127.0.0.1'
@@ -285,6 +299,39 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
       return
     }
 
+    /*
+     * 组件脚本：与页面通道同理，归平台不归 Vite。内容由 bridge **现取**
+     * （组件可能在预览起来之后才激活完），拿到 null 就是 404 —— 页面里那行
+     * `<script>` 也就根本不会被插进去。
+     */
+    const components = options.components
+    if (components !== undefined && path === COMPONENT_SCRIPT_PATH) {
+      void components.script().then(
+        (code) => {
+          if (code === null) {
+            res.writeHead(404, {
+              'content-type': 'text/plain; charset=utf-8',
+              'cache-control': 'no-store',
+            })
+            res.end('这个应用没有要注入的组件')
+            return
+          }
+          res.writeHead(200, {
+            'content-type': 'application/javascript; charset=utf-8',
+            'content-length': String(Buffer.byteLength(code)),
+            // 组件会随装配声明变，必须 no-store —— 缓存住的话"卸载了但球还在"
+            'cache-control': 'no-store',
+          })
+          res.end(code)
+        },
+        () => {
+          res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('组件脚本读不出来')
+        },
+      )
+      return
+    }
+
     const target = routeFor(req.url ?? '/')
     const upstream = httpRequest(
       {
@@ -303,7 +350,9 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
          * 其它响应一律原样流式转发，行为与以前完全一致。
          */
         const injectable =
-          page !== undefined && type.includes('text/html') && upstreamRes.headers['content-encoding'] === undefined
+          (page !== undefined || components !== undefined) &&
+          type.includes('text/html') &&
+          upstreamRes.headers['content-encoding'] === undefined
         if (!injectable) {
           res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers)
           upstreamRes.pipe(res)
@@ -312,7 +361,19 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
         const chunks: Buffer[] = []
         upstreamRes.on('data', (chunk: Buffer) => chunks.push(chunk))
         upstreamRes.on('end', () => {
-          const html = injectPageScript(Buffer.concat(chunks).toString('utf8'))
+          void (async () => {
+          const raw = Buffer.concat(chunks).toString('utf8')
+          const injected = page === undefined ? raw : injectPageScript(raw)
+          /*
+           * 组件脚本**取到了才插**。取不到就原样返回 —— 往页面里塞一个必然 404 的
+           * <script> 只会在控制台留一条错，让"到底装没装组件"更难答。
+           * 这里 await 的成本是一次缓存命中（bridge 内部按文件缓存）。
+           */
+          const code = components === undefined ? null : await components.script()
+          const html =
+            code === null || components === undefined
+              ? injected
+              : injectComponentScript(injected, components.scriptUrl)
           const body = Buffer.from(html, 'utf8')
           const headers = { ...upstreamRes.headers }
           /*
@@ -326,6 +387,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
           headers['content-length'] = String(body.length)
           res.writeHead(upstreamRes.statusCode ?? 502, headers)
           res.end(body)
+          })()
         })
       },
     )
@@ -340,6 +402,22 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
   server.on('upgrade', (req, socket: Socket, head: Buffer) => {
     stats.upgrade += 1
     sockets.add(socket)
+
+    /*
+     * 组件链路：**不能透传给 Vite**（那边只认 vite-hmr 的握手）。交给 bridge 做 WS 握手
+     * 并把链路接到 chord host 上。返回 false = 这个应用没有要连的组件，直接销毁 ——
+     * 留着一个半开的 socket 就是在慢慢漏 FD。
+     */
+    if (options.components !== undefined && (req.url ?? '').split('?')[0] === COMPONENT_WS_PATH) {
+      void options.components.upgrade(req, socket, head).then(
+        (accepted) => {
+          if (!accepted) socket.destroy()
+        },
+        () => socket.destroy(),
+      )
+      socket.on('close', () => sockets.delete(socket))
+      return
+    }
 
     const target = routeFor(req.url ?? '/')
     const upstream = connect(target.port, target.host ?? host, () => {
@@ -402,6 +480,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
       if (closed) return
       closed = true
       for (const socket of sockets) socket.destroy()
+      await options.components?.close?.()
       await new Promise<void>((resolve) => server.close(() => resolve()))
     },
   }

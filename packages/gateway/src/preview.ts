@@ -19,6 +19,7 @@
  */
 import { existsSync } from 'node:fs'
 import { appPaths, scrubEnv, type TenonHome } from '@tenon/core'
+import type { ComponentBridge } from './components.js'
 import { DatabaseManager, type DatabaseProvider, type DbSnapshot } from '@tenon/db-provisioner'
 import type {
   LogEntry,
@@ -72,6 +73,13 @@ export interface PreviewManagerOptions {
   /** 后端就绪上限。首次 ts-node 编译整棵 Nest 依赖树比较慢，默认 120s */
   apiReadyTimeoutMs?: number
   log?: (line: string) => void
+  /**
+   * 组件桥（M5 第 3 步 b）。每个应用一个网关，所以这里能拿到 appId。
+   *
+   * 返回 null 表示"这个应用没有组件要接"——网关行为与以前**完全一致**（有用例钉住）。
+   * 由 server 提供实现：它才知道装配声明、facet 文件与 chord host。
+   */
+  components?: (appId: string) => ComponentBridge | null
 }
 
 const DEFAULT_READY_TIMEOUT = 90_000
@@ -460,6 +468,11 @@ export class PreviewManager {
         },
         // 页面通道：网关把 /__tenon/page* 吃掉，再往 HTML 里插一行脚本
         page,
+        // 组件：脚本注入 + 一条 WS 链路（网关不认识 chord，只把 socket 交出去）
+        ...(() => {
+          const bridge = this.options.components?.(run.appId) ?? null
+          return bridge === null ? {} : { components: bridge }
+        })(),
       })
       run.gateway = gateway
       run.url = gateway.url

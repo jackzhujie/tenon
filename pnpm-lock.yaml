@@ -224,9 +224,16 @@ importers:
       fastify:
         specifier: 5.12.7
         version: 5.12.7
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
 
   spikes/agent:
     dependencies:

@@ -290,7 +290,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 1 | **chord 宿主接入 spike**：契约 / 变体 / 跨 host / 热重载 / 打包（10 项） | ✅ 见 §4.17 | `spikes/chord/` |
 | 2 | **bundled 插件加载器**：`resources/plugins/<id>/` 只读源 + 清单（依赖/权限/宿主兼容）+ 装配声明 `app.components.json` + `component.list` | ✅ 见 §4.18 | `packages/component-host/`、`plugins/bundled/`、`apps/desktop/src/{paths,main}.ts`、`apps/desktop/{build.mjs,electron-builder.yml}` |
 | 3a | **第一个真组件（服务端半边）**：契约 + server facet + 插件构建 + 宿主装载 + 注入的模型能力 | ✅ 见 §4.19 | `plugins/bundled/tenon.official.ai-assistant/`、`scripts/build-plugins.ts`、`packages/agent/src/assistant.ts`、`packages/server/src/components.ts` |
-| 3b | **第一个真组件（界面半边）**：web facet + 传输（WS 链路）+ `app.shell.overlay` 插槽渲染 | ⬜ | — |
+| 3b | **第一个真组件（界面半边）**：web facet + 传输（WS 链路）+ `app.shell.overlay` 插槽渲染 | 🚧 半成品：注入与端点已通，**WS 链路未通**，见 §4.21 | `packages/gateway/src/components.ts`、`packages/server/src/components-link.ts`、`plugins/bundled/tenon.official.ai-assistant/web.ts` |
 | 4 | **`install_component` 工具**：写装配声明 + 生成 `src/components.generated.ts` + 改 `AGENTS.md` 索引 | ⬜ | — |
 | 5 | **卸载即清理**（代码 + 装配声明 + `AGENTS.md`，幂等；DoD ②） | ⬜ | — |
 | 6 | **插件页**：列表 / 独立开关 / 来源标识 / "官方 Hub 筹备中"占位（DoD ④） | ⬜ | — |
@@ -922,6 +922,21 @@ plugins/bundled/         # 官方内置组件（只读内容，随安装包发�
 `core` 不依赖 `generator`：铺模板走 `AppStore.create` 的 `scaffold` 钩子，由 `server` 注入（DESIGN §8.7）。
 
 ---
+
+### 4.21 M5 第 3 步（b）现状：注入通了，链路没通 —— 🚧
+
+**做到了**：web facet 写完并打包（736KB，含 chord 浏览器侧）；网关注入
+`<script type="module" src="/__tenon/component.js?appId=…">`；脚本端点同源可取；
+**没有 web facet 时一个字节都不插**；WS 升级请求不再被转给 Vite（无组件时直接销毁）。
+`packages/server/test/component-link.test.ts` 里两条用例钉住这些。
+
+**没做到**：chord 的 `WebSocketLink` 接 `ws` 这条组合跑不通 —— 握手成功、客户端 `ctx.get`
+能拿到引用，随后报 `invalid/protocol: link to peer: ack 2 outside 0..2`，调用不再返回。
+Spike 5 用的 `memoryLinkPair` 完全正常，所以问题在"真实 WebSocket 上的窗口/序号"，
+不是接线本身；关掉 `acceptPacked` 也没解决。那条用例因此标了 `it.skip`（注释写了原因）。
+
+**下一步**：先做一个小 spike 把 `webSocketLink(ws)` 两端跑通（试单端压缩、`binaryType`、
+`accept` 与建客户端的时序），通了就取消那条 skip —— 它才是"浏览器那半边真能说话"的唯一证据。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 

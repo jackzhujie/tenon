@@ -12,7 +12,10 @@
     "type": "free"
   },
   "facets": {
-    "server": "server.js"
+    "server": "server.js",
+    "web": "web.js"
   },
-  "slots": []
+  "slots": [
+    "app.shell.overlay"
+  ]
 }
