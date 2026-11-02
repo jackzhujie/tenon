@@ -332,6 +332,13 @@ export function ReleaseDialog({
               检查没过还发，历史里会标「带问题」
             </span>
           )}
+          {/* 被拦下之后，用户最常见的下一步是"我去改代码，然后重试"。
+              没有这个按钮就只能关掉对话框再打开 —— 而重开还会把发布说明清空 */}
+          {blocked !== null && (
+            <Button variant="ghost" size="sm" disabled={publishing} onClick={() => void submit(false)}>
+              重新检查
+            </Button>
+          )}
           <Button variant="ghost" size="sm" disabled={publishing} onClick={onClose}>
             关闭
           </Button>
