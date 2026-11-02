@@ -42,7 +42,9 @@ export const SUBAGENT_TOOL = 'subagent'
 const DELEGATION_RULES = `You can delegate read-only investigation with the \`subagent\` tool:
 - role=explore: find where something is implemented. Use it instead of reading ten files yourself.
 - role=librarian: answer "how does this library / this project do X" from what is on disk.
-Roles whose tools are not wired up yet (codeact, e2e, reviewer) come back with an explicit "not available" message — do not retry them.
+- role=e2e: check the running app in the preview — it reads and clicks the real page, not the source. Use it after you change behaviour.
+- role=reviewer: review what you just changed before it gets committed (diff + typecheck) and get a risk list. Use it when the change touches contracts, migrations or error paths.
+Role codeact is not wired up yet — it comes back with an explicit "not available" message, do not retry it.
 Delegate one concrete question per call, then use the answer. Do not delegate the thinking you are supposed to do.`
 
 export interface SubagentToolOptions {
@@ -84,7 +86,8 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
     name: SUBAGENT_TOOL,
     description:
       'Delegate a read-only investigation to a sub agent and get its conclusion back. ' +
-      'Roles: explore (locate code), librarian (answer from docs and on-disk type definitions). ' +
+      'Roles: explore (locate code), librarian (answer from docs and on-disk type definitions), ' +
+      'e2e (verify the running page in the preview), reviewer (risk list on the current change). ' +
       'One concrete question per call. The sub agent cannot edit files.',
     parameters: Type.Object({
       role: Type.Union(

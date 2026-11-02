@@ -47,6 +47,9 @@ const ALL = [
   'preview_click',
   'preview_type',
   'preview_open',
+  // M4 第 5 步：reviewer 的两个判据工具
+  'git_diff',
+  'typecheck',
 ].map(fake)
 
 describe('角色表', () => {
@@ -82,14 +85,28 @@ describe('角色表', () => {
   })
 
   it('没接好的角色带 pending 说明，已接好的不带', () => {
-    for (const id of ['explore', 'librarian', 'e2e'] as RoleId[]) {
+    for (const id of ['explore', 'librarian', 'e2e', 'reviewer'] as RoleId[]) {
       expect(ROLES[id].readiness, id).toBe('ready')
       expect(ROLES[id].pending, id).toBeUndefined()
     }
-    for (const id of ['codeact', 'reviewer'] as RoleId[]) {
+    for (const id of ['codeact'] as RoleId[]) {
       expect(ROLES[id].readiness, id).toBe('planned')
       expect(ROLES[id].pending, id).toBeTruthy()
     }
+  })
+
+  it('reviewer 拿得到判据工具，但一个写工具都没有（评审不改代码）', () => {
+    const reviewer = toolsForRole(ROLES.reviewer, ALL).map((tool) => tool.name)
+    expect(reviewer.sort()).toEqual(['git_diff', 'glob', 'grep', 'ls', 'read', 'typecheck'])
+    for (const forbidden of ['write', 'edit', 'bash', 'subagent', 'preview_click']) {
+      expect(reviewer).not.toContain(forbidden)
+    }
+  })
+
+  it('e2e 与 reviewer 的工具集不重叠（“会点页面的”和“会看差异的”是两个人）', () => {
+    const e2e = new Set(ROLES.e2e.tools)
+    const both = ROLES.reviewer.tools.filter((name) => e2e.has(name))
+    expect(both).toEqual([])
   })
 
   it('角色标记能原样认回来（faux 靠它分道，认错就会串台词）', () => {

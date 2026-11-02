@@ -26,6 +26,7 @@ export * from './tools/coding.js'
 export * from './tools/search.js'
 export * from './tools/subagent.js'
 export * from './tools/preview.js'
+export * from './tools/review.js'
 export { ChatService } from './chat.js'
 
 export interface AgentRuntimeOptions {

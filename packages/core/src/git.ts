@@ -326,14 +326,19 @@ function lineDiff(
   }
 }
 
+/** 前 4KB 里有 NUL 就当二进制：不必解码，也不该把二进制塞给模型 */
+function isBinary(content: Uint8Array): boolean {
+  for (let k = 0; k < Math.min(content.byteLength, 4096); k += 1) {
+    if (content[k] === 0) return true
+  }
+  return false
+}
+
 async function blobText(dir: string, oid: string | undefined): Promise<string | undefined> {
   if (oid === undefined) return undefined
   const { blob } = await git.readBlob({ fs, dir, oid })
   if (blob.byteLength > MAX_DIFF_BYTES) return undefined
-  // 二进制判定：含 NUL 就当不可 diff
-  for (let k = 0; k < Math.min(blob.byteLength, 4096); k += 1) {
-    if (blob[k] === 0) return undefined
-  }
+  if (isBinary(blob)) return undefined
   return Buffer.from(blob).toString('utf8')
 }
 
@@ -461,6 +466,99 @@ async function buildDiff(
     })
   }
   return { changes, files, patch: files.map((file) => file.patch).join('') }
+}
+
+/** 工作区里最多列出多少个文件（超出的只报数，让 Agent 自己 grep） */
+const MAX_WORKTREE_FILES = 40
+
+/**
+ * 工作区（还没提交的改动）相对 HEAD 的结构化差异。
+ *
+ * 为什么需要它：Reviewer 的工作时机是**提交之前** —— 主角色刚改完代码、这一轮还没结束。
+ * `diff()` / `showCommit()` 比的都是两棵树，看不到工作区。
+ *
+ * 为什么不用 `git.statusMatrix` / `WORKDIR` walker：同一个坑（见 `workingTreeChanges` 的注释）——
+ * stat 快路径会把"同长度、同一毫秒"的改动判成没变。对评审的后果比 commit 轻（少看一个文件，
+ * 不至于坏数据），但"评审说没问题、其实没看到那个文件"恰恰是最坏的一种绿。
+ * 所以这里同样**按内容自算 blob oid**，宁可多读一遍盘。
+ */
+export interface WorktreeDiff extends DiffResult {
+  /** 比对基准（HEAD 的 sha）；空仓库（还没有第一个提交）为 undefined */
+  base: string | undefined
+  /** 因为太多而没展开的文件数（会在 patch 尾部说明） */
+  omitted: number
+}
+
+export async function worktreeDiff(dir: string): Promise<WorktreeDiff> {
+  if (!(await isRepo(dir))) {
+    throw new TenonError('GIT_NOT_INITIALIZED', `不是 git 仓库：${dir}`)
+  }
+  const base = await headSha(dir)
+  const { upserts, deletes } = await workingTreeChanges(dir)
+  const committed = await headTreeOids(dir)
+
+  const entries: Array<{ path: string; status: GitFileChange['status']; fromOid?: string }> = [
+    ...upserts.map((path) => ({
+      path,
+      status: (committed.has(path) ? 'modified' : 'added') as GitFileChange['status'],
+      fromOid: committed.get(path),
+    })),
+    ...deletes.map((path) => ({
+      path,
+      status: 'deleted' as GitFileChange['status'],
+      fromOid: committed.get(path),
+    })),
+  ]
+  entries.sort((x, y) => x.path.localeCompare(y.path))
+
+  const shown = entries.slice(0, MAX_WORKTREE_FILES)
+  const changes: GitFileChange[] = []
+  const files: DiffFile[] = []
+
+  for (const entry of shown) {
+    const before = entry.fromOid === undefined ? undefined : await blobText(dir, entry.fromOid)
+    // 新一侧读盘而不是读 git 对象：工作区的内容还没进对象库（也可能永远不进）
+    const raw =
+      entry.status === 'deleted' ? undefined : await readFile(join(dir, entry.path)).catch(() => undefined)
+    // 超大文件与二进制同路：不算差异，只标出来（读 20MB 的文本去 LCS 是纯浪费）
+    const after =
+      raw === undefined || raw.byteLength > MAX_DIFF_BYTES || isBinary(raw) ? undefined : raw.toString('utf8')
+
+    const binary = entry.status !== 'deleted' && raw !== undefined && after === undefined
+    if (binary) {
+      const header = `--- a/${entry.path}\n+++ b/${entry.path}\n`
+      files.push({
+        path: entry.path,
+        status: entry.status,
+        insertions: 0,
+        deletions: 0,
+        lines: [],
+        binary: true,
+        patch: `${header}@@ 二进制或超大文件，不做逐行 diff @@\n`,
+      })
+      changes.push({ path: entry.path, status: entry.status })
+      continue
+    }
+
+    const computed = lineDiff(entry.path, before ?? null, after ?? null)
+    files.push({ path: entry.path, status: entry.status, ...computed })
+    changes.push({
+      path: entry.path,
+      status: entry.status,
+      insertions: computed.insertions,
+      deletions: computed.deletions,
+    })
+  }
+
+  const omitted = entries.length - shown.length
+  const tail =
+    omitted > 0
+      ? `@@ 还有 ${omitted} 个文件未展开（单次上限 ${MAX_WORKTREE_FILES}）：${entries
+          .slice(MAX_WORKTREE_FILES)
+          .map((entry) => entry.path)
+          .join(', ')} @@\n`
+      : ''
+  return { base, changes, files, patch: files.map((file) => file.patch).join('') + tail, omitted }
 }
 
 export interface RevertPlan {

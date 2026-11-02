@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { gitops } from '../src/index.js'
 
-const { commitAll, diff, initRepo, log, revert, showCommit } = gitops
+const { commitAll, diff, initRepo, log, revert, showCommit, worktreeDiff } = gitops
 
 let dir: string
 
@@ -171,5 +171,72 @@ describe('Git 一等公民（isomorphic-git）', () => {
     await writeFile(join(dir, 'a.txt'), 'only\n')
     const first = await commitAll(dir, 'init')
     await expect(revert(dir, first!.sha)).rejects.toThrowError(/第一个提交/)
+  })
+
+  /*
+   * worktreeDiff 是给 Reviewer 用的：他动手的时机是**提交之前**，
+   * 而 diff()/showCommit() 比的都是两棵树，看不见工作区。
+   */
+  describe('worktreeDiff（工作区 vs HEAD，评审用）', () => {
+    it('看到还没提交的新增/修改/删除，基准是 HEAD', async () => {
+      await writeFile(join(dir, 'keep.txt'), 'same\n')
+      await writeFile(join(dir, 'edit.txt'), 'one\ntwo\n')
+      await writeFile(join(dir, 'gone.txt'), 'bye\n')
+      const first = await commitAll(dir, 'init')
+
+      await writeFile(join(dir, 'edit.txt'), 'one\nTWO\n')
+      await writeFile(join(dir, 'fresh.txt'), 'brand new\n')
+      await rm(join(dir, 'gone.txt'))
+
+      const result = await worktreeDiff(dir)
+      expect(result.base).toBe(first!.sha)
+      const byPath = new Map(result.changes.map((c) => [c.path, c.status]))
+      expect(byPath.get('edit.txt')).toBe('modified')
+      expect(byPath.get('fresh.txt')).toBe('added')
+      expect(byPath.get('gone.txt')).toBe('deleted')
+      // 没动过的文件不该出现
+      expect(byPath.has('keep.txt')).toBe(false)
+      expect(result.patch).toContain('+TWO')
+      expect(result.patch).toContain('+brand new')
+      expect(result.patch).toContain('-bye')
+    })
+
+    it('同长度、同一毫秒的改动也看得到（不能走 stat 快路径）', async () => {
+      await writeFile(join(dir, 'a.txt'), 'v1\n')
+      await commitAll(dir, 'init')
+      await writeFile(join(dir, 'a.txt'), 'v2\n')
+
+      const result = await worktreeDiff(dir)
+      expect(result.changes.map((c) => c.path)).toEqual(['a.txt'])
+      expect(result.patch).toContain('-v1')
+      expect(result.patch).toContain('+v2')
+    })
+
+    it('工作区干净时什么都不报（不能凭空造出一份"改动"）', async () => {
+      await writeFile(join(dir, 'a.txt'), 'v1\n')
+      await commitAll(dir, 'init')
+      const result = await worktreeDiff(dir)
+      expect(result.changes).toEqual([])
+      expect(result.files).toEqual([])
+      expect(result.patch).toBe('')
+    })
+
+    it('空仓库（还没有第一个提交）也能用，base 为 undefined', async () => {
+      await writeFile(join(dir, 'a.txt'), 'first\n')
+      const result = await worktreeDiff(dir)
+      expect(result.base).toBeUndefined()
+      expect(result.changes[0]).toMatchObject({ path: 'a.txt', status: 'added' })
+    })
+
+    it('文件太多时只展开前 40 个，其余只报名字（评审不该被一份大补丁淹掉）', async () => {
+      for (let index = 0; index < 45; index += 1) {
+        await writeFile(join(dir, `f${String(index).padStart(2, '0')}.txt`), `${index}\n`)
+      }
+      const result = await worktreeDiff(dir)
+      expect(result.files).toHaveLength(40)
+      expect(result.omitted).toBe(5)
+      expect(result.patch).toContain('还有 5 个文件未展开')
+      expect(result.patch).toContain('f44.txt')
+    })
   })
 })

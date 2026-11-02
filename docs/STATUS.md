@@ -2,8 +2,8 @@
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
 > 最后更新：2026-11-02（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
-> + M4 第 1、2、3、4 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具）**：
-> 375 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + M4 第 1–5 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具
+> + Reviewer 出风险清单）**：405 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 36 项改动/回滚 e2e + 32 项发布 e2e（系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -62,12 +62,18 @@ pi 静止时会回收任务节点，所以"空"不是没数据，是没人跑了
 （HTTP 长轮询，不新起浏览器、不加依赖）。所以"改完的按钮点一下对不对"这件事，
 现在有 DOM 里的证据，而不是靠读源码猜（§4.12 / DESIGN §5.7）。
 
+**提交前也能叫人来审了（M4 第 5 步）**：主角色改完代码能派活给 reviewer，它只拿四个只读工具
+加两个判据工具 —— `git_diff`（**工作区**对 HEAD，不是已提交版本：评审发生在提交之前）
+与 `typecheck`（跑应用自己的 `tsc`，多 tsconfig）。回来是一份**最多五条、带 `path:line`
+与修法的风险清单**，外加一句"查了什么、什么没查成"。关键在于它**不会把没查成说成没问题**：
+缺 `node_modules`、缺 `tsconfig`、超时，三种都明说"没跑成"（§4.13 / DESIGN §5.8）。
+
 先跑这几条验证它还活着：
 
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 375 项单测 + 集成测试（约 150s，含 PGlite 冷启动）
+pnpm test                       # 405 项单测 + 集成测试（约 165s，含 PGlite 冷启动）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -240,8 +246,8 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 2 | **任务图**：`watchTaskGraph` 逐帧归一化 → `taskgraph.update` 事件 + `taskgraph.get` RPC + 预览下方任务条（DoD ②） | ✅ 见 §4.10 | `packages/core/src/taskgraph.ts`、`packages/agent/src/taskgraph.ts`、`features/tasks/TaskGraphPanel.tsx` |
 | 3 | **用量与预算**：`harness.usage()` 会话账本 → `usage.update` 全量快照 + `usage.get`/`budget.set` RPC + 顶栏用量面板 + 两个拦截点（开跑前 402 / 半路 abort，DoD ③） | ✅ 见 §4.11 | `packages/core/src/usage.ts`、`packages/agent/src/usage.ts`、`packages/protocol/src/usage-format.ts`、`features/usage/UsagePanel.tsx` |
 | 4 | **E2E 子 Agent 的预览工具**（`preview_read/assert/click/type/open`）+ 自验收流程（DoD ①） | ✅ 见 §4.12 | `packages/gateway/src/page.ts`（页面通道）、`packages/agent/src/tools/preview.ts`、`scripts/e2e-e2e-agent.ts` |
-| 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ⏳ **下一步** | — |
-| 6 | CodeAct：`codemode` 沙箱接入 | ⏳ | — |
+| 5 | Reviewer：`git_diff` + `typecheck` 工具，出风险清单 | ✅ 见 §4.13 | `packages/core/src/git.ts`（`worktreeDiff`）、`packages/core/src/typecheck.ts`、`packages/agent/src/tools/review.ts` |
+| 6 | CodeAct：`codemode` 沙箱接入 | ⏳ **下一步** | — |
 | 7 | 发布前质量门禁（typecheck / test 不过不许发） | ⏳ | — |
 
 ### 4.3 M1 验收（DoD）
@@ -508,7 +514,38 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 不会录制/回放一串操作）；`preview_*` 只覆盖鼠标点击与输入，没有 hover / 拖拽 / 滚动；
 断言只能看文字、数量、值，没有截图对比；多标签页只有最后一个连上的页面会被驱动。
 
-### 4.13 代码地图（只列已落地的）
+### 4.13 M4 第 5 步验收（Reviewer：git_diff + typecheck）—— ✅ 已完成
+
+- [x] **★ 审的是工作区，不是提交** —— `git_diff` 默认 `HEAD ↔ 工作区`，因为 `commitAll` 在一轮
+      收尾才跑，Reviewer 动手时改动还没提交；`commit:"HEAD"` 才看上一版。集成测试里主角色先 `write`
+      再派活，断言 diff 里能看到那一行新文案
+- [x] **★ 工作区差异不能走 `statusMatrix`** —— 同长度同毫秒的改动会被 stat 快路径判成"没变"。
+      `worktreeDiff()` 按内容自算 blob oid；`git.test.ts` 有一条专门造 `v1\n → v2\n`
+- [x] **★ 类型检查的判据是「跑完了 + 没诊断」** —— 只看诊断会把 `tsc` 崩了 / 超时 / 配置错报成通过。
+      `formatTscReport` 的 `ok` 由调用方那个布尔决定，`core/typecheck.test.ts` 有一条专盯这个
+- [x] **三种"没跑成"各有各的话** —— 没有 `tsconfig.json` / 缺 `node_modules` 里的 typescript /
+      超时被杀，三种输出都不含 `✓`，且都写"这不等于通过"
+- [x] **真跑 tsc，不是桩** —— 单测用本仓库装的 typescript 编一个临时项目：通过、`TS2322` 报错、
+      从应用自己的 `node_modules` 里找 tsc（真实路径）、多 tsconfig（`nest-api` 两套）四条
+- [x] **类型错误是信息不是工具错误** —— `isError: false`，理由与 `preview_assert` 一致：
+      标成错误会让模型换个姿势重试工具，而它该把这一条写进清单
+- [x] **没有任何写工具** —— reviewer 的工具集是 `read/ls/glob/grep/git_diff/typecheck`；
+      `roles.test.ts` 与集成测试两处都断言它拿不到 `write/edit/bash/subagent`
+- [x] **清单是格式约定** —— 提示词写死「最多五条、最严重在前、`[blocker|risk|nit] path:line — 问题 — 修法`」，
+      最后一行交代"查了什么、什么没查成"
+- [x] **工作区干净时它不编风险** —— `git_diff` 明说"干净"，并指路 `commit:"HEAD"`；
+      集成测试断言这句话真的回去了
+- [x] **桌面版里跑 tsc 要补回 `ELECTRON_RUN_AS_NODE`** —— `scrubEnv` 会删掉它，不补就会在 `.app` 里
+      **弹出一个窗口**而 `tsc` 一行不跑。只在 `process.versions.electron` 存在时才补
+
+**为什么没有单独的 e2e 脚本**：前四步的 e2e 验的都是"浏览器里那件事"，这一步不碰浏览器 ——
+两个工具用的是真 git 与真 `tsc`，证据放在单测与一条服务端集成测试里（更接近真相，也更便宜）。
+
+**还没做的**：`lint` 没接（模板没有 eslint 配置，硬塞会把真风险淹掉）；清单只有文本，
+没有结构化事件 / 面板；`typecheck` 只看类型，不跑测试；评审结论不会自动变成"不许提交"
+（发布质量门禁是 M4 第 7 步）。
+
+### 4.14 代码地图（只列已落地的）
 
 ```
 packages/
@@ -521,11 +558,14 @@ packages/
 │   ├── src/db.ts        #   node:sqlite + PRAGMA user_version 线性迁移
 │   ├── src/git.ts       #   isomorphic-git：commitAll / log / diff / showCommit / planRevert / revert（回滚 = 新提交）
 │   │                    #   + createReleaseTag（annotated）/ mirrorTo（对象+ref 搬到裸库）/ uncommittedChanges
+│   │                    #   + worktreeDiff（★ 工作区 vs HEAD，评审用；同样自算 blob oid，40 文件上限）
 │   ├── src/schema-change.ts # ★ 快照触发判据：migrations/ + *.entity.ts + shared/schema.ts（路径约定，7 项测试）
 │   ├── src/release.ts   # ★ 版本号 v<yyyy.MM.dd>-<n>（纯函数，同日递增；记录与 tag 一起参考避免撞号）
 │   ├── src/taskgraph.ts # ★ 任务图归一化：kind 去 pi. 前缀 / 会话派生回挂父节点 / 角色继承 / 按树序压平
 │   │                    #   + tasksNeedingRole（只挑"工具 task 且已拥有会话"的去查角色）
 │   ├── src/usage.ts     # ★ 用量算术：账本求和、本轮差值（夹到 0）、breached（>= 语义）/ levelOf
+│   ├── src/typecheck.ts # ★ tsc 输出解析与摘要：parseTscOutput（续行并入）/ formatTscReport
+│   │                    #   —— "没跑成"与"通过"在函数签名上就是两回事（ok 由调用方给）
 │   ├── src/setting-keys.ts # 额度键 `budget.app.<appId>` + readBudget（读坏 / 负数一律当"不设限"）
 │   ├── src/secrets.ts   #   AES-256-GCM + 0600 密钥文件（桌面版换 safeStorage）
 │   └── src/stores/      #   apps / releases / settings / providers
@@ -542,6 +582,8 @@ packages/
 │   ├── src/tools/coding.ts  # read/write/edit/bash ↔ pi-durable 的 adapter（DESIGN §4.3.1）
 │   ├── src/tools/search.ts  # ★ ls / glob / grep：纯 node:fs + 进程内正则（不用 pi 的会下载 rg/fd 的版本）
 │   ├── src/tools/subagent.ts # ★ 派活：真子会话 + 幂等复用 + 白名单；子会话里没有 subagent
+│   ├── src/tools/review.ts   # ★ git_diff（工作区 vs HEAD）/ typecheck（跑应用自己的 tsc，多 tsconfig）
+│   │                    #   只给 reviewer；桌面版里要给子进程补回 ELECTRON_RUN_AS_NODE
 │   └── src/docs.ts      #   tenon.app / tenon.plan（defineDoc）
 ├── generator/           # 模板铺进 repo（DESIGN §8.7）
 │   ├── src/scaffold.ts  #   scaffoldApp：渲染模板 → 写文件；已有 package.json 就拒绝
@@ -752,6 +794,11 @@ scripts/
 | **改完代码不能用"计数回到 0"当起点** | React Fast Refresh **保留 state**：HMR 之后计数器还是旧值，整页不重载就永远验不到干净起点。所以有 `preview_open`（显式整页重载）。另外整页重载会换 `document`，但 `sessionStorage` 还在 —— sessionId 存那儿才能跨 reload 延续同一条通道 |
 | **刷新时只能重投幂等命令** | `read` / `assert` 重投是安全的（读两次没有副作用），`click` / `type` 重投就可能点出两个东西、输入两遍。`PageBridge.hello()` 按命令名分档，别一律重投 |
 | **`poll` 遇到不认识的 sessionId 要回 `'reset'` 而不是 `null`** | 回 `null` 页面会立刻再问一遍 —— 空转打满 CPU，而且从日志上看不出任何异常。页面收到 `reset` 就换新会话 |
+| **评审要看的是工作区，不是提交** | `commitAll` 在一轮**收尾**才跑，所以 Reviewer 被派活时改动还没提交。给它 `diff()`/`showCommit()` 等于让它永远审上一版。`worktreeDiff()` 比的是 `HEAD ↔ 工作盘`，且同样**自算 blob oid**（`statusMatrix` 会漏同长度同毫秒的改动 —— 对评审是"少看一个文件"，而"说没问题、其实没看到"是最坏的绿） |
+| **`typecheck` 的判据是「跑完了 + 没诊断」，不是「没诊断」** | 只看输出会把 `tsc` 崩了、超时、tsconfig 写错全报成"通过"。`formatTscReport` 的 `ok` 由调用方给的那个布尔决定；`okRun = !timedOut && code === 0 && 诊断为空`，三者缺一不可 |
+| **"没跑成"必须和"通过"长得不一样** | 没有 `tsconfig.json`、`node_modules` 里没有 typescript、超时被杀 —— 三种都明说"没跑成…这不等于通过"，且输出里**不出现 `✓`**。评审里的假绿比红贵得多：它会让人放心提交 |
+| **`scrubEnv` 会删掉 `ELECTRON_RUN_AS_NODE`** | 那是为了防止生成应用的子进程"把 electron 当 node 跑"。但 `typecheck` 是**我们自己的**子进程：`.app` 里 `process.execPath` 是 Tenon 自己，不补这个变量就会**真弹出一个窗口**而 `tsc` 一行不跑。只在 `process.versions.electron` 存在时才补 |
+| **评审工具要按应用自己的 `tsconfig` 跑** | 写死 `tsc --noEmit` 只覆盖根 `tsconfig.json`；`nest-api` 的后端在 `tsconfig.server.json` 里，漏掉等于"后端一行都没检查照样绿"。存在就跑，别猜 |
 
 
 ---
@@ -834,19 +881,20 @@ pnpm spike:loc      # 定位插件精度
 继续 Tenon（榫）项目，路径 /Users/mac/project/miaoda。
 
 先读 docs/STATUS.md（现状、下一步、陷阱），再读 docs/SPIKES.md（四个 spike 的实测结论，
-尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.18），
+尤其 §1 的 pool.max=1 硬约束）。涉及架构再查 docs/DESIGN.md（唯一事实来源 v1.2.19），
 写 pi 相关代码前必查 docs/PI-CHEATSHEET.md。
 
 当前阶段：**M3 已收口**（源码定位注入 → Alt+Click 反查 → 框选 → Diff 视图 → 代码回滚 → 数据回滚 →
-发布 push）；**M4 第 1–4 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 +
-e2e 子 Agent 的预览工具，**DoD ①②③ 已满足**）。
-下一步是 M4 第 5 步，先看 §4.2 的 M4 表决定从哪块进。
-375 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:e2e 9
+发布 push）；**M4 第 1–5 步已落地**（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 +
+e2e 子 Agent 的预览工具 + Reviewer 出风险清单，**DoD ①②③ 已满足**）。
+下一步是 M4 第 6 步（CodeAct 的 `codemode` 沙箱），先看 §4.2 的 M4 表决定从哪块进。
+405 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 32 + e2e:e2e 9
 + e2e:fullstack + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；
-④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了"哪个角色花了多少"（聚合层看不见归属）。
+④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了“哪个角色花了多少”（聚合层看不见归属）；
+⑥ Reviewer 的 `lint` 未接（模板没有 eslint 配置），清单也只有文本、没有结构化事件/面板。
 `pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`，
 动到 git / 回滚跑 `pnpm e2e:diff`，动到发布跑 `pnpm e2e:release`，动到 Agent 工具/角色跑 `pnpm e2e:e2e`。
 

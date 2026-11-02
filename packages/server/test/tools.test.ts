@@ -164,8 +164,10 @@ describe('工具层（write / edit / bash）', () => {
       'subagent',
       'write',
     ])
-    // 预览工具在 registry 里（e2e 子角色要用），但不在主角色的工具集里
+    // 预览工具与评审工具在 registry 里（e2e / reviewer 子角色要用），但不在主角色的工具集里
     expect(session?.tools.map((tool) => tool.name)).toContain('preview_assert')
+    expect(session?.tools.map((tool) => tool.name)).toContain('git_diff')
+    expect(session?.tools.map((tool) => tool.name)).toContain('typecheck')
 
     // 光有工具对象不够：还要确认它在真跑的这条路上确实能被调用
     running.agent.model?.script([

@@ -18,6 +18,7 @@ import { appPaths } from '@tenon/core'
 import type { ModelChoice, ResolvedModel } from './models.js'
 import { codingExtension } from './tools/coding.js'
 import { previewExtension, type PageDriverProvider } from './tools/preview.js'
+import { reviewExtension } from './tools/review.js'
 import { subagentExtension } from './tools/subagent.js'
 
 const ctx = BACKGROUND_CONTEXT
@@ -32,8 +33,9 @@ export interface HarnessSession {
   /**
    * registry 里**全部**可用的工具（含只给子角色的）。
    *
-   * 注意它与"主角色实际拿到的"不是一回事：`preview_*` 只进 registry、不进根会话的配置，
-   * 主角色要靠 `subagent` 派给 e2e 角色才用得到（见 `open()` 里的 rootTools）。
+   * 注意它与"主角色实际拿到的"不是一回事：`preview_*` / `git_diff` / `typecheck` 只进
+   * registry、不进根会话的配置，主角色要靠 `subagent` 派给 e2e / reviewer 角色才用得到
+   * （见 `open()` 里的 rootTools）。
    */
   readonly tools: readonly ToolRegistration[]
   /** 主角色实际拿到的工具（`configure` 时选中的那一份，是 `tools` 的子集） */
@@ -107,11 +109,20 @@ export class HarnessPool {
       appId,
       getDriver: (id) => this.options.getPageDriver?.(id),
     })
+    /*
+     * 评审工具（M4 第 5 步）：同样只给子角色。`git_diff` / `typecheck` 对主角色不是必需的，
+     * 而“自己改的自己审”本来就不是一道关 —— 要审就派活给 reviewer，让它拿证据说话。
+     */
+    const review = reviewExtension({ repoDir: paths.repoDir })
     // `subagent` 需要 Harness（子会话的模型/工具只能在创建那一刻定），而扩展必须在
     // `Harness.open` 之前建好 —— 所以给一个懒读取器，调用发生时它一定已经有值。
     let harnessRef: Harness | undefined
     // registry 全量：子角色按白名单从这里面挑
-    const tools: ToolRegistration[] = [...(coding.tools ?? []), ...(preview.tools ?? [])]
+    const tools: ToolRegistration[] = [
+      ...(coding.tools ?? []),
+      ...(preview.tools ?? []),
+      ...(review.tools ?? []),
+    ]
     const subagent = subagentExtension({
       getHarness: () => harnessRef,
       getTools: () => tools,
@@ -124,17 +135,18 @@ export class HarnessPool {
      */
     const rootTools: ToolRegistration[] = [...(coding.tools ?? []), ...(subagent.tools ?? [])]
     /*
-     * 扩展列表 = "这个应用的工具与提示词世界"。`preview` 必须在这里 ——
+     * 扩展列表 = "这个应用的工具与提示词世界"。`preview` / `review` 必须在这里 ——
      * 只 `registry.install` 是不够的：**工具要靠扩展才能被会话解析到**，
      * 否则子会话里那些调用会直接"工具不存在"，而模型会若无其事地继续往下说
      * （实测症状：e2e 说"页面上找不到"，但页面通道一次都没被调用过）。
-     * 它没有 section，所以主角色不会因此多出一段"你去验页面"的说明。
+     * 两个扩展都没有 section，所以主角色不会因此多出"你去验页面 / 你去评审"的说明。
      */
-    const extensions: Extension[] = [coding, subagent, preview]
+    const extensions: Extension[] = [coding, subagent, preview, review]
 
     const registry = createRegistry()
     registry.install(coding)
     registry.install(preview)
+    registry.install(review)
     registry.install(subagent)
 
     const harness = await Harness.open(

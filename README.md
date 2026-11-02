@@ -35,14 +35,14 @@
 |---|---|
 | [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、进度表、下一步拆解、已知陷阱 |
 | [**四个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度的真实数字 |
-| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.18）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
+| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.19）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
 | [逆向工作手册](docs/REVERSE_ENGINEERING.md) | 内部研究用（不随开源发布） |
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.18**；四个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 进行中**：
+M0 逆向研究完成；方案 **v1.2.19**；四个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 进行中**：
 七个包（`protocol` / `core` / `agent` / `generator` / `gateway` / `db-provisioner` / `server`）+ 两个 app
 （渲染器 `apps/web`，浏览器与窗口共用一套代码；壳 `apps/desktop`，只做生命周期）。
 
@@ -86,7 +86,12 @@ M0 逆向研究完成；方案 **v1.2.18**；四个技术 spike 全部跑通。*
 `pnpm e2e:e2e` 的 9 项就是这条闭环：注入一个 `+2` 的 bug → 断言失败并报出实测值 →
 改回 `+1` → 整页重载 → **同一条断言通过**。
 
-375 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
+**提交前能叫人来审了**：主角色改完代码能派活给 reviewer，它只拿只读工具加两个判据工具 ——
+`git_diff`（**工作区**对 HEAD，不是已提交版本：评审发生在提交之前）与 `typecheck`（跑应用自己的
+`tsc`，多个 tsconfig 一起跑）。回来是一份最多五条、带 `path:line` 与修法的风险清单，外加一句
+“查了什么、什么没查成”。它**不会把没查成说成没问题**：缺依赖、缺 tsconfig、超时三种都明说“没跑成”。
+
+405 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e + 36 项改动/回滚 e2e +
 32 项发布 e2e（**用系统 git 当裁判**：`fsck --strict` + `clone`）+ 9 项自验收 e2e + 全栈 e2e
 + 8 项桌面冒烟全绿。
 安装包默认路径上不带任何需按平台编译的原生模块（打包脚本会审计并打印清单）。
@@ -97,7 +102,7 @@ M0 逆向研究完成；方案 **v1.2.18**；四个技术 spike 全部跑通。*
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 375 项单测 / 集成测试（约 150s，含 PGlite 冷启动）
+pnpm test                   # 405 项单测 / 集成测试（约 165s，含 PGlite 冷启动）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
