@@ -25,6 +25,7 @@
  *   TENON_REAL_HOME=/some/dir   复用已有 home（省掉每次装 React 的几十秒）
  *   TENON_REAL_BUDGET_TOKENS=400000   额度（默认 40 万 token，超了当场熔断）
  *   TENON_REAL_MODEL=auto             让脚本问端点要模型清单自己挑（配 TENON_REAL_MODEL_HINT=flash）
+ *   TENON_REAL_PRICE_IN / _OUT        单价（美元/百万 token）。给了就会验"账单算得对不对"
  *   TENON_REAL_CONTEXT / _MAX_TOKENS  上下文与单次输出上限（默认 200k / 32k）
  */
 import { spawn } from 'node:child_process'
@@ -60,6 +61,14 @@ const modelId = process.env['TENON_REAL_MODEL'] ?? (useMock ? 'mock-model-1' : '
 const baseUrl = useMock ? (mock?.url ?? '') : (process.env['TENON_REAL_BASE_URL'] ?? 'https://api.openai.com/v1')
 const label = useMock ? '本地排练用假 provider' : (process.env['TENON_REAL_LABEL'] ?? new URL(baseUrl).host)
 const budgetTokens = Number(process.env['TENON_REAL_BUDGET_TOKENS'] ?? 400_000)
+/*
+ * 可选：给这个模型填个价（美元 / 百万 token）。填了就能验"账单算得对不对" ——
+ * 不填的话 costUsd 恒为 0，而那**不是"便宜"，是"没算"**。
+ * 注意：这里填的是**你手上的价格**，不是我们编的（不同时间点的报价不一样）。
+ */
+const priceIn = Number(process.env['TENON_REAL_PRICE_IN'] ?? '')
+const priceOut = Number(process.env['TENON_REAL_PRICE_OUT'] ?? '')
+const hasPrice = Number.isFinite(priceIn) && Number.isFinite(priceOut) && (priceIn > 0 || priceOut > 0)
 /*
  * 上下文与单次输出上限。provider profile 的默认值（128k / 8k）是按"通用模型"定的，
  * 而一次"写一整个页面"很容易超过 8k 输出 —— 被截断的表现是一段写了一半的 JSX，
@@ -374,6 +383,19 @@ try {
   const created = await rpc<{ app: { id: string } }>('app.create', { name: '真模型验收' })
   const appId = created.app.id
   const repoDir = appPaths(resolveHome(env), appId).repoDir
+  if (hasPrice) {
+    const saved = await rpc<{ applied: { changed: boolean; error: string | null } }>('price.set', {
+      profileId: profile.id,
+      modelId: resolvedModel,
+      inputPerMTok: priceIn,
+      outputPerMTok: priceOut,
+      cacheReadPerMTok: 0,
+      cacheWritePerMTok: 0,
+    })
+    console.log(`   价格：输入 ${priceIn} / 输出 ${priceOut} 美元每百万 token${saved.applied.changed ? '（已生效）' : ''}`)
+  } else {
+    console.log('   价格：未填（TENON_REAL_PRICE_IN / _OUT）—— 这一跑的 costUsd 会是 0，那是"没算"不是"便宜"')
+  }
   await rpc('budget.set', { appId, maxCostUsd: null, maxTokens: budgetTokens })
   console.log(`   appId = ${appId}，额度 ${budgetTokens} token\n`)
 
@@ -547,7 +569,20 @@ try {
   )
   const t = total.snapshot.totals
   console.log(`   三段合计：耗时 ${((gen.ms + install.ms) / 1000).toFixed(1)}s（不含浏览器），token ${t.input + t.output}（入 ${t.input} / 出 ${t.output}）`)
-  console.log(`   成本：$${t.costUsd} —— **恒为 0**，因为 provider profile 没有价格表（见 STATUS §4.27）`)
+  if (hasPrice) {
+    /*
+     * 用我们自己的算术复算一遍：pi 的 cost 就是 (tokens / 1e6) * 单价。
+     * 对不上说明单位错了（差 1000 倍那种错，界面上看起来一切正常）。
+     */
+    const expected = (t.input * priceIn + t.output * priceOut) / 1_000_000
+    const drift = expected === 0 ? Math.abs(t.costUsd) : Math.abs(t.costUsd - expected) / expected
+    console.log(
+      `   成本：${t.costUsd.toFixed(6)}（复算 ${expected.toFixed(6)}，偏差 ${(drift * 100).toFixed(2)}%）`,
+    )
+    check('账单算得对（与 (token/1e6)*单价 一致）', drift < 0.02, `costUsd=${t.costUsd} expected=${expected}`)
+  } else {
+    console.log(`   成本：${t.costUsd} —— 没填价格时不显示为"便宜"，面板会标「未定价」`)
+  }
   console.log(`   额度水平：${total.snapshot.level}`)
   const commits = await rpc<{ commits: unknown[] }>('git.log', { appId, limit: 50 })
   console.log(`   commit 数：${commits.commits.length}`)

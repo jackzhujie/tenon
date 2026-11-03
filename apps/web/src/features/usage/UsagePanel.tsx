@@ -90,7 +90,13 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
 
   const level = usage?.level ?? 'ok'
   const chip = usage === null ? '用量' : formatTokens(usage.totals.totalTokens)
-  const cost = usage === null ? '' : formatCost(usage.totals.costUsd)
+  /*
+   * 没配价格时**不能显示 $0.00**：那不是"便宜"，是"没算"。用户看到 $0 会以为
+   * 离额度还很远，于是拿它当保护伞 —— 这是这个面板最容易骗人的一格。
+   */
+  const cost =
+    usage === null ? '' : usage.priced ? formatCost(usage.totals.costUsd) : '未定价'
+  const costOf = (usd: number): string => (usage?.priced === true ? formatCost(usd) : '未定价')
 
   /*
    * 解释横幅看 `exceeded`，不只认事件。
@@ -184,7 +190,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
               value={
                 usage === null
                   ? '—'
-                  : `${formatTokens(usage.turn.totalTokens)} · ${formatCost(usage.turn.costUsd)}`
+                  : `${formatTokens(usage.turn.totalTokens)} · ${costOf(usage.turn.costUsd)}`
               }
             />
             {usage !== null &&
@@ -193,7 +199,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
                   key={model}
                   label={model}
                   muted
-                  value={`${formatTokens(totals.totalTokens)} · ${formatCost(totals.costUsd)}`}
+                  value={`${formatTokens(totals.totalTokens)} · ${costOf(totals.costUsd)}`}
                 />
               ))}
           </div>

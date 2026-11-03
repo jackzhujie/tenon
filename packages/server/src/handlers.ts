@@ -87,6 +87,8 @@ async function zeroUsage(appId: string, core: CoreServices): Promise<UsageSnapsh
     budget,
     level: levelOf(ZERO_USAGE, budget),
     exceeded: breached(ZERO_USAGE, budget),
+    // 没有模型就没有价格可言：这一格为 false 时界面不该显示 "$0.00"，那是在骗人
+    priced: false,
   }
 }
 
@@ -121,14 +123,36 @@ function pushTenonLog(
  * 之所以两个分支都回 `ModelState` 而不是抛错：**设置本身已经写进去了**（磁盘上是新值），
  * 换不过去只说明"这回还用不了"。抛错会让用户以为保存失败，从而反复保存。
  */
-async function applyAndReport(agent: AgentRuntime): Promise<ModelState> {
-  const result = await agent.applyModel()
+async function applyAndReport(agent: AgentRuntime, options: { force?: boolean } = {}): Promise<ModelState> {
+  const result = await agent.applyModel(options)
   if (!result.ok) return { model: null, error: result.error, changed: false }
   return {
     model: { mode: result.mode, providerId: result.providerId, modelId: result.modelId },
     error: null,
     changed: result.changed,
   }
+}
+
+/**
+ * 改价格之后让模型重新解析。
+ *
+ * 有应用正在跑就**不拆**：重解析会关掉 harness 会话，正在跑的那一轮直接断。
+ * 这时候把话说明白（"这一轮结束后重启生效"），比悄悄不生效好。
+ */
+async function applyPriceChange(agent: AgentRuntime, core: CoreServices): Promise<ModelState> {
+  const busy = core.apps.list().some((app) => app.status !== 'idle')
+  if (busy) {
+    const plan = agent.plan
+    return {
+      model:
+        plan === undefined
+          ? null
+          : { mode: plan.mode, providerId: plan.choice.provider, modelId: plan.choice.modelId },
+      error: '价格已保存，但有应用正在跑：这一轮结束后重启服务才生效',
+      changed: false,
+    }
+  }
+  return applyAndReport(agent, { force: true })
 }
 
 export function createHandlers(deps: ServerDeps): HandlerMap {
@@ -551,8 +575,34 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       }
     },
 
+    'price.list': async (input) => ({ prices: core.prices.list(input.profileId) }),
+
+    /*
+     * 改价格为什么要把模型重新解析一遍：`model.cost` 是在 `resolveModel` 那一刻
+     * 烤进 provider 的，pi 之后只用这份快照算钱。不重解析的话，用户填了价、
+     * 面板还是 $0.00 —— 而"填了没反应"比没有这个功能更让人怀疑。
+     */
+    'price.set': async (input) => {
+      const price = core.prices.upsert({
+        profileId: input.profileId,
+        modelId: input.modelId,
+        inputPerMTok: input.inputPerMTok,
+        outputPerMTok: input.outputPerMTok,
+        cacheReadPerMTok: input.cacheReadPerMTok,
+        cacheWritePerMTok: input.cacheWritePerMTok,
+      })
+      return { price, applied: await applyPriceChange(agent, core) }
+    },
+
+    'price.remove': async (input) => {
+      const removed = core.prices.remove(input.id)
+      return { removed, applied: await applyPriceChange(agent, core) }
+    },
+
     'provider.delete': async (input) => {
       const wasActive = core.settings.get(SETTING_KEYS.activeProviderId) === input.id
+      // 价格跟着 provider 走：留着孤儿行只会在"同一家再建一个 provider"时张冠李戴
+      core.prices.removeByProfile(input.id)
       core.providers.delete(input.id)
       // 删掉的正好是当前用的那个：把选中项也清掉，否则下次启动会报"提供商已不存在"
       if (wasActive) core.settings.set({ [SETTING_KEYS.activeProviderId]: null })

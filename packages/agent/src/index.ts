@@ -70,7 +70,7 @@ export interface AgentRuntime {
    * 代价说清楚：切换会**关掉现有的 harness 会话**（正在跑的那一轮会中断）。
    * 会话数据在 sqlite 里，下次 acquire 时 `resume()` 会把历史接回来。
    */
-  applyModel(): Promise<ModelApplyResult>
+  applyModel(options?: { force?: boolean }): Promise<ModelApplyResult>
   close(): Promise<void>
 }
 
@@ -161,10 +161,11 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       return usage
     },
 
-    async applyModel(): Promise<ModelApplyResult> {
+    async applyModel(applyOptions: { force?: boolean } = {}): Promise<ModelApplyResult> {
       if (closed) return { ok: false, error: '服务正在关闭' }
       const next = planModel(options.core, { env: options.env })
       const same =
+        applyOptions.force !== true &&
         next !== undefined &&
         plan !== undefined &&
         next.mode === plan.mode &&

@@ -94,6 +94,34 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE releases ADD COLUMN gate_summary TEXT;
     `,
   },
+  {
+    version: 3,
+    name: 'provider-prices',
+    /*
+     * 模型价格表（M5.5）。
+     *
+     * 为什么**单独一张表、而不是塞进 provider_profiles**：一个 provider 可以挂多个模型
+     * （同一家厂商的 flash / pro 差价好几倍），塞进 profile 就只能记一个价，
+     * 换个模型 id 就全错 —— 而错的代价是"额度算错"，用户不会发现，直到账单来。
+     *
+     * 单位固定 **美元 / 百万 token**（pi 的 `model.cost` 就是这个单位，用它省一次换算）。
+     * 四列都给默认值 0：`cacheRead` / `cacheWrite` 大部分提供商不收钱，逼用户填是刁难。
+     */
+    sql: `
+      CREATE TABLE provider_prices (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL REFERENCES provider_profiles(id) ON DELETE CASCADE,
+        model_id TEXT NOT NULL,
+        input_per_mtok REAL NOT NULL DEFAULT 0,
+        output_per_mtok REAL NOT NULL DEFAULT 0,
+        cache_read_per_mtok REAL NOT NULL DEFAULT 0,
+        cache_write_per_mtok REAL NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (profile_id, model_id)
+      );
+      CREATE INDEX idx_prices_profile ON provider_prices(profile_id);
+    `,
+  },
 ]
 
 type Row = Record<string, unknown>

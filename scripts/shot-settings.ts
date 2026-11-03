@@ -107,6 +107,15 @@ async function run() {
 
   await sleep(1800)
   await win.capturePage().then((img) => require('node:fs').writeFileSync(out + '/4-已保存.png', img.toPNG()))
+  // 顺手点开「价格」：这一步的界面也要有人看过
+  await frame.executeJavaScript(\`(() => {
+    const btn = [...document.querySelectorAll('button')].find((node) => (node.textContent || '').trim() === '价格')
+    if (btn) btn.click()
+    return btn !== undefined
+  })()\`)
+  await sleep(600)
+  await win.capturePage().then((img) => require('node:fs').writeFileSync(out + '/5-价格.png', img.toPNG()))
+
   const header = await frame.executeJavaScript(
     \`(() => { const b = [...document.querySelectorAll('button')].find((n) => /shot-model|未配置模型|假模型/.test(n.textContent || '')); return b ? b.textContent : null })()\`,
   )

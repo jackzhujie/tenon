@@ -44,7 +44,7 @@ interface Entry {
 
 export interface UsageServiceOptions {
   pool: HarnessPool
-  core: Pick<CoreServices, 'settings'>
+  core: Pick<CoreServices, 'settings' | 'prices'>
   publish: (event: SseEventInput) => void
 }
 
@@ -165,6 +165,7 @@ export class UsageService {
   private async compose(appId: string, entry: Entry): Promise<UsageSnapshot> {
     await this.read(entry)
     const budget = this.budget(appId)
+    const choice = this.options.pool.modelChoice
     return {
       appId,
       totals: entry.totals,
@@ -174,6 +175,8 @@ export class UsageService {
       budget,
       level: levelOf(entry.totals, budget),
       exceeded: breached(entry.totals, budget),
+      // 价格表里有这一条才算"算得出来"；faux 没有价格表，所以它永远是 false
+      priced: this.options.core.prices.find(choice.provider, choice.modelId) !== undefined,
     }
   }
 

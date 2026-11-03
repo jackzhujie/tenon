@@ -9,6 +9,7 @@ import { resolveHome, type TenonHome } from './paths.js'
 import { SecretBox } from './secrets.js'
 import type { AppScaffoldHook } from './stores/apps.js'
 import { AppStore } from './stores/apps.js'
+import { PriceStore } from './stores/prices.js'
 import { ProviderStore } from './stores/providers.js'
 import { ReleaseStore } from './stores/releases.js'
 import { SettingsStore } from './stores/settings.js'
@@ -31,6 +32,7 @@ export * from './stores/providers.js'
 export * from './stores/releases.js'
 export * from './stores/settings.js'
 export { SETTING_KEYS, budgetKey, readBudget, NO_BUDGET } from './setting-keys.js'
+export { PriceStore, type UpsertPriceInput } from './stores/prices.js'
 export type { SettingKey } from './setting-keys.js'
 
 export interface CoreServices {
@@ -41,6 +43,7 @@ export interface CoreServices {
   readonly releases: ReleaseStore
   readonly settings: SettingsStore
   readonly providers: ProviderStore
+  readonly prices: PriceStore
   close(): void
 }
 
@@ -65,6 +68,7 @@ export function openCore(options: OpenCoreOptions = {}): CoreServices {
     releases: new ReleaseStore(db),
     settings: new SettingsStore(db),
     providers: new ProviderStore(db, box),
+    prices: new PriceStore(db),
     close() {
       db.close()
     },

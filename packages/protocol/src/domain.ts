@@ -92,6 +92,28 @@ export type ProviderKind = z.infer<typeof ProviderKind>
 export const ModelTier = z.enum(['auto', 'fast', 'comprehensive', 'thinking'])
 export type ModelTier = z.infer<typeof ModelTier>
 
+/**
+ * 一个模型的**价格**（M5.5）。
+ *
+ * 单位是「美元 / 百万 token」，与 pi 的 `model.cost` 一致 —— 换算只做一次，
+ * 而且发生在核心库那边（`resolveModel`）。这里存什么单位，算钱的地方就必须是什么单位。
+ *
+ * 为什么挂在 (profileId, modelId) 上而不是 provider 上：同一家的 flash 与 pro
+ * 差价好几倍，按 provider 记价一换模型就全错，而"额度算错"用户不会发现，直到账单来。
+ */
+export const ModelPrice = z.object({
+  id: z.string(),
+  profileId: z.string(),
+  modelId: z.string(),
+  inputPerMTok: z.number().nonnegative(),
+  outputPerMTok: z.number().nonnegative(),
+  /** 大部分提供商不单独收这两项，默认 0 */
+  cacheReadPerMTok: z.number().nonnegative(),
+  cacheWritePerMTok: z.number().nonnegative(),
+  updatedAt: z.number(),
+})
+export type ModelPrice = z.infer<typeof ModelPrice>
+
 /** 对外**永不**包含明文密钥，只有 `hasApiKey` */
 export const ProviderProfile = z.object({
   id: z.string(),
@@ -273,6 +295,13 @@ export const UsageSnapshot = z.object({
   level: UsageLevel,
   /** 顶到的是哪条线（`over` 时才有值），拦截文案用它 */
   exceeded: BudgetDimension.nullable(),
+  /**
+   * 当前模型配了价格吗。
+   *
+   * 为什么必须单独一格：没配价格时 `costUsd` 恒为 0 —— 界面上那个 $0.00 不是"便宜"，
+   * 是"没算"。不区分这两者的话，用户会以为自己离额度还很远。
+   */
+  priced: z.boolean(),
 })
 export type UsageSnapshot = z.infer<typeof UsageSnapshot>
 

@@ -13,6 +13,7 @@ import {
   ComponentProblem,
   DiffFile,
   FileNode,
+  ModelPrice,
   GateOutcome,
   GitCommit,
   GitFileChange,
@@ -497,6 +498,30 @@ export const rpcMethods = {
       message: z.string(),
     }),
   },
+  /**
+   * 价格（M5.5）。**没有价格就永远算不出钱** —— pi 的 cost 来自 `model.cost`，
+   * 它只在解析模型时读一次。所以改价格要重新解析（服务端会做）。
+   */
+  'price.list': {
+    input: z.object({ profileId: Id.optional() }),
+    output: z.object({ prices: z.array(ModelPrice) }),
+  },
+  'price.set': {
+    input: z.object({
+      profileId: Id,
+      modelId: z.string().min(1),
+      inputPerMTok: z.number().nonnegative(),
+      outputPerMTok: z.number().nonnegative(),
+      cacheReadPerMTok: z.number().nonnegative().default(0),
+      cacheWritePerMTok: z.number().nonnegative().default(0),
+    }),
+    output: z.object({ price: ModelPrice, applied: ModelState }),
+  },
+  'price.remove': {
+    input: z.object({ id: Id }),
+    output: z.object({ removed: z.boolean(), applied: ModelState }),
+  },
+
   'provider.delete': {
     input: z.object({ id: Id }),
     output: z.object({ deleted: z.literal(true), applied: ModelState }),

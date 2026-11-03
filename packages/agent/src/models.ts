@@ -162,6 +162,27 @@ function toFauxStep(step: ScriptStep): FauxResponseStep {
   })
 }
 
+/**
+ * 某个 (provider, 模型) 的价格，**原样**交给 pi。
+ *
+ * 单独拎出来是因为它是唯一可能差 1000 倍的地方：pi 的 `model.cost` 单位是
+ * "美元 / 百万 token"，而价格表也是这个单位 —— 所以这里**不做任何换算**。
+ * 谁要是"顺手"乘一次 1e6 或者除一次，账单就会差三个数量级，且表面上一切正常。
+ */
+export function modelCost(
+  core: Pick<CoreServices, 'prices'>,
+  profileId: string,
+  modelId: string,
+): { input: number; output: number; cacheRead: number; cacheWrite: number } {
+  const price = core.prices.find(profileId, modelId)
+  return {
+    input: price?.inputPerMTok ?? 0,
+    output: price?.outputPerMTok ?? 0,
+    cacheRead: price?.cacheReadPerMTok ?? 0,
+    cacheWrite: price?.cacheWritePerMTok ?? 0,
+  }
+}
+
 function buildOpenAICompatible(
   core: CoreServices,
   profileId: string,
@@ -177,6 +198,12 @@ function buildOpenAICompatible(
   const baseUrl = profile.baseUrl ?? 'https://api.openai.com/v1'
   const params = readParams(profile.paramsJson)
   const modelId = profile.modelId
+  /*
+   * 价格（M5.5）：没有这条记录 → 全 0 → pi 算出来的 cost 恒为 0 → 「按美元设额度」
+   * 对 BYOK 用户完全失效。所以这里**不是可选优化**，是额度能不能用的前提。
+   * 单位是"美元 / 百万 token"，pi 内部除以 1e6，与这张表一致。
+   */
+  const cost = modelCost(core, profile.id, modelId)
 
   const provider: Provider = createProvider({
     id: profile.id,
@@ -195,7 +222,7 @@ function buildOpenAICompatible(
         provider: profile.id as never,
         baseUrl,
         input: ['text'],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        cost,
         reasoning: false,
         contextWindow: params.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
         maxTokens: params.maxTokens ?? DEFAULT_MAX_TOKENS,
