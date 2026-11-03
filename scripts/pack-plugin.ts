@@ -9,6 +9,13 @@
  *   1. 读 `plugins/bundled/<id>/manifest.json` 与清单里声明的 facet 文件
  *   2. 组装成 `{ format, manifest, files }`，用**私钥**签名
  *   3. 写 `<out>/<id>-<version>.json`
+ *   4. **合并更新 `<out>/index.json` 并重新签名**（M6 第 2 步）
+ *
+ * 第 4 步和打包放在一起，是因为索引与包必须**同一次发布**产生：手工维护索引迟早出现
+ * "包传上去了、索引里没有"（用户永远看不到新版）或"索引里有、包没传"（点了更新 404）。
+ *
+ * 索引要绝对地址，所以第 4 步需要 `TENON_HUB_URL`；没给就跳过并说明原因，
+ * 而不是写一堆相对路径 —— 客户端会拒（`url-outside-hub`），而那时已经发布出去了。
  *
  * 私钥从哪来：`TENON_HUB_PRIVATE_KEY`（PEM）。**私钥不进仓库、不进安装包** ——
  * 它只在发布流水线上。没有私钥就拒绝生成（不能出"没有签名的包"，客户端一定验不过）。
@@ -18,11 +25,19 @@
  *   # 可选：--out <dir>   默认 dist/hub
  *   # 生成密钥（只在需要时）：openssl genpkey -algorithm ed25519 -out hub-key.pem
  */
+import { createPublicKey } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // 脚本走源码相对路径（与其它 scripts 一致）：这里不需要构建产物
-import { parseManifest, signBundle } from '../packages/component-host/src/index.js'
+import {
+  HUB_INDEX_FORMAT,
+  parseManifest,
+  signBundle,
+  signHubIndex,
+  type HubIndex,
+  type HubIndexComponent,
+} from '../packages/component-host/src/index.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(join(here, '..'))
@@ -101,4 +116,69 @@ await writeFile(outFile, `${JSON.stringify(bundle, null, 2)}\n`, 'utf8')
 const bytes = Buffer.byteLength(JSON.stringify(bundle), 'utf8')
 console.log(`已打包并签名：${outFile}`)
 console.log(`  ${manifest.id} v${manifest.version} · ${Object.keys(files).length} 个文件 · ${(bytes / 1024).toFixed(1)} KB`)
-console.log('  上传到 Hub 之后，客户端用 TENON_HUB_PUBLIC_KEY 验签安装。')
+
+/*
+ * 索引。理由见文件头：包与索引必须同一次发布。
+ */
+const hubUrl = (process.env['TENON_HUB_URL'] ?? arg('hub-url', '') ?? '').trim().replace(/\/$/, '')
+if (hubUrl === '') {
+  console.log('')
+  console.log('跳过索引：没给 TENON_HUB_URL。')
+  console.log('  索引里必须写绝对地址（客户端只认 Hub 源之下的 URL），所以这里不猜。')
+} else {
+  const indexFile = join(outDir, 'index.json')
+  let existing: HubIndex | null = null
+  try {
+    existing = JSON.parse(await readFile(indexFile, 'utf8')) as HubIndex
+    // 换过密钥的索引不该被悄悄覆盖：那是"发布流水线换了把钥匙"，得有人看见
+    const previous = existing.sig !== undefined && existing.sig !== ''
+    if (previous) {
+      const derived = createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }).toString()
+      const { verifyHubIndex } = await import('../packages/component-host/src/index.js')
+      const check = verifyHubIndex(existing, derived)
+      if (!check.ok) {
+        console.error(`${indexFile} 不是用这把私钥签的（${check.problem.message}）。`)
+        console.error('换过密钥就先删掉它，或者用旧密钥重新生成 —— 直接覆盖会丢掉旧版本的地址。')
+        process.exit(1)
+      }
+    }
+  } catch {
+    existing = null
+  }
+
+  const versionEntry = {
+    version: manifest.version,
+    url: `${hubUrl}/${basename(outFile)}`,
+    notes: manifest.description,
+    publishedAt: Date.now(),
+  }
+
+  const components: HubIndexComponent[] = [...(existing?.components ?? [])]
+  const at = components.findIndex((item) => item.id === manifest.id)
+  if (at === -1) {
+    components.push({
+      id: manifest.id,
+      name: manifest.name,
+      description: manifest.description,
+      versions: [versionEntry],
+    })
+  } else {
+    const current = components[at]!
+    const versions = current.versions.filter((entry) => entry.version !== manifest.version)
+    components[at] = {
+      ...current,
+      name: manifest.name,
+      description: manifest.description,
+      // 同版本重新发布：替换那条（热修必须能用同一个版本号覆盖）
+      versions: [...versions, versionEntry],
+    }
+  }
+
+  const index = signHubIndex(
+    { format: HUB_INDEX_FORMAT, generatedAt: Date.now(), components },
+    privateKey,
+  )
+  await writeFile(indexFile, `${JSON.stringify(index, null, 2)}\n`, 'utf8')
+  console.log(`已更新索引：${indexFile}（${components.length} 个组件）`)
+}
+console.log('  上传 dist/hub/ 下的全部文件到 Hub，客户端用 TENON_HUB_PUBLIC_KEY 验签。')

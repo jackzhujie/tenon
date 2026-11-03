@@ -21,12 +21,19 @@ import {
 import {
   ASSEMBLY_FILE,
   buildPlan,
+  fetchHubIndex,
+  findIndexComponent,
   hubKeyFingerprint,
   installFromHub,
+  latestVersion,
   listAvailable,
+  listInstalledHubComponents,
+  planHubUpdates,
   readAssembly,
+  satisfiesRange,
   setComponentEnabled,
   type HubConfig,
+  type HubDeclaration,
   type PluginRoot,
 } from '@tenon/component-host'
 import type { ComponentRuntime } from './components.js'
@@ -124,6 +131,24 @@ function pushTenonLog(
       repeat: 1,
     },
   })
+}
+
+/**
+ * 所有应用装配声明里的组件条目。
+ *
+ * "哪些应用受影响"这个问题只能从这里答：组件装在本机是全局的，但**用不用它**由每个
+ * 应用自己的 `app.components.json` 与版本区间决定。
+ */
+async function collectDeclarations(core: CoreServices): Promise<HubDeclaration[]> {
+  const out: HubDeclaration[] = []
+  for (const app of core.apps.list()) {
+    const read = await readAssembly(appPaths(core.home, app.id).repoDir)
+    if (read.kind !== 'ok') continue
+    for (const entry of read.assembly.components) {
+      out.push({ appId: app.id, id: entry.id, range: entry.version })
+    }
+  }
+  return out
 }
 
 /**
@@ -593,6 +618,45 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       }
     },
 
+    'hub.check': async () => {
+      const config = deps.hub.config
+      const checkedAt = Date.now()
+      if (config === null) {
+        // 未配置是**正常状态**：官方 Hub 上线前就是它。返回空清单而不是抛错。
+        return { reachable: false, error: null, checkedAt, keyFingerprint: null, components: [] }
+      }
+
+      const fetched = await fetchHubIndex({ config })
+      if (!fetched.ok) {
+        /*
+         * 连不上**不是错误**：内置组件不需要 Hub，插件页要照常能用。
+         * 把原因原文带回去，界面显示一行灰字就够 —— 抛错会让离线用户看到红屏，
+         * 而"现在没网"完全不是故障。
+         */
+        return {
+          reachable: false,
+          error: fetched.problem.message,
+          checkedAt,
+          keyFingerprint: hubKeyFingerprint(config.publicKey),
+          components: [],
+        }
+      }
+
+      const installed = await listInstalledHubComponents(deps.hub.dir)
+      return {
+        reachable: true,
+        error: null,
+        checkedAt,
+        keyFingerprint: fetched.value.keyFingerprint,
+        // readonly → 可变（协议里的数组是可变的，出参会被 JSON 序列化，不该带 readonly）
+        components: planHubUpdates({
+          index: fetched.value.index,
+          installed,
+          declarations: await collectDeclarations(core),
+        }).map((item) => ({ ...item, blockedBy: [...item.blockedBy] })),
+      }
+    },
+
     'hub.install': async (input) => {
       const config = deps.hub.config
       if (config === null) {
@@ -601,19 +665,48 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
           '官方 Hub 还没配置。设 TENON_HUB_URL 与 TENON_HUB_PUBLIC_KEY 之后才能从 Hub 安装组件。',
         )
       }
+
+      /*
+       * 下载地址来自**签名索引**，不由调用方给。否则校验只剩"是不是同一个源"，
+       * 而"装的是不是用户以为的那个组件"没人管得着。
+       */
+      const fetched = await fetchHubIndex({ config })
+      if (!fetched.ok) {
+        throw new TenonError('HUB_BAD_BUNDLE', fetched.problem.message, {
+          hint: fetched.problem.hint,
+          reason: fetched.problem.code,
+        })
+      }
+      const component = findIndexComponent(fetched.value.index, input.id)
+      if (component === undefined) {
+        throw new TenonError('HUB_BAD_BUNDLE', `Hub 上没有 ${input.id} 这个组件`, {
+          hint: '检查 id 拼写；也可以让 Agent 用 list_components 看本机有什么',
+        })
+      }
+      const wanted =
+        input.version === undefined
+          ? latestVersion(component)
+          : component.versions.find((entry) => entry.version === input.version)
+      if (wanted === undefined) {
+        const known = component.versions.map((entry) => entry.version).join('、')
+        throw new TenonError(
+          'HUB_BAD_BUNDLE',
+          `Hub 上没有 ${input.id}@${input.version ?? '(最新)'}`,
+          { hint: `现有版本：${known === '' ? '（无）' : known}` },
+        )
+      }
+
       const result = await installFromHub({
         hubDir: deps.hub.dir,
         config,
-        bundleUrl: input.bundleUrl,
+        bundleUrl: wanted.url,
+        // 索引说 A@1.1.0、包里是别的 → 拒。索引签名只证明"这份索引没被改"，
+        // 不证明"这个地址上的包就是它"
+        expect: { id: component.id, version: wanted.version },
       })
       if (!result.ok) {
-        // 签名不对与"包坏了"用不同的 code：前者是安全问题，后者是内容问题
-        const code =
-          result.problem.code === 'bad-signature'
-            ? 'HUB_BAD_SIGNATURE'
-            : result.problem.code === 'fetch-failed'
-              ? 'HUB_BAD_BUNDLE'
-              : 'HUB_BAD_BUNDLE'
+        // 签名不对与"包坏了"分开：前者是安全问题，后者是内容问题
+        const code = result.problem.code === 'bad-signature' ? 'HUB_BAD_SIGNATURE' : 'HUB_BAD_BUNDLE'
         throw new TenonError(code, result.problem.message, {
           hint: result.problem.hint,
           reason: result.problem.code,
@@ -621,17 +714,22 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       }
 
       /*
-       * 装完立刻让**装了它的应用**重新激活。
-       * 不做这一步的话，用户点了更新、界面上还是旧版本 —— 因为组件是在预览启动时
-       * 一次性装配的。"下次重启生效"对这个功能来说等于没做。
+       * 装完只重新激活**真正会用上这一版**的应用：声明了这个组件，且区间接受新版本。
+       * 不判区间的话，声明 ^1.0.0 的应用在装 2.0.0 之后被重载一次、结果版本没变 ——
+       * 用户看到"更新了但没更新"，而日志里什么也没有。
        */
       let reloadedApps = 0
-      for (const app of core.apps.list()) {
-        const read = await readAssembly(appPaths(core.home, app.id).repoDir)
-        if (read.kind !== 'ok') continue
-        if (!read.assembly.components.some((item) => item.id === result.value.id)) continue
+      for (const declaration of await collectDeclarations(core)) {
+        if (declaration.id !== result.value.id) continue
+        let accepts = false
         try {
-          await deps.components.reload(app.id)
+          accepts = satisfiesRange(result.value.version, declaration.range)
+        } catch {
+          accepts = false
+        }
+        if (!accepts) continue
+        try {
+          await deps.components.reload(declaration.appId)
           reloadedApps += 1
         } catch {
           // 单个应用重载失败不该让"装好了"这个事实变成错误

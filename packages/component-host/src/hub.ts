@@ -21,6 +21,8 @@ import { createHash, createPublicKey, randomUUID, sign, verify } from 'node:cryp
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { parseManifest, type ComponentManifest } from './manifest.js'
+import { discoverRoot } from './resolve.js'
+import { compareVersionText, satisfiesRange } from './version.js'
 
 /** 包格式版本。改结构就 +1，旧客户端必须明确拒绝而不是猜着读 */
 export const BUNDLE_FORMAT = 1
@@ -338,5 +340,275 @@ export async function installFromHub(options: InstallFromHubOptions): Promise<Hu
     raw,
     publicKeyPem: options.config.publicKey,
     ...(options.expect === undefined ? {} : { expect: options.expect }),
+  })
+}
+
+/* ------------------------------------------------------------------ *
+ * 索引（M6 第 2 步）：Hub 上有哪些组件、各自有哪些版本
+ * ------------------------------------------------------------------ */
+
+/**
+ * 索引格式版本。与 `BUNDLE_FORMAT` 分开：索引是"目录"，包是"货"，
+ * 两者的演进节奏不一样（加一个字段 vs 改文件编码），共用一个号会互相绊住。
+ */
+export const HUB_INDEX_FORMAT = 1
+
+export interface HubIndexVersion {
+  readonly version: string
+  /** **绝对地址**，必须落在 `TENON_HUB_URL` 之下（安装时还会再判一次） */
+  readonly url: string
+  /** 这一版改了什么（一句话）。界面上直接显示，所以别写 changelog */
+  readonly notes: string | null
+  readonly publishedAt: number | null
+}
+
+export interface HubIndexComponent {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  /**
+   * 版本列表。**不假设有序** —— 合约里没写"按版本升序"，所以取最新一律走比较，
+   * 不取 `versions.at(-1)`。索引是别人生成的，靠顺序假设是最容易崩的一种信任。
+   */
+  readonly versions: readonly HubIndexVersion[]
+}
+
+export interface HubIndex {
+  readonly format: number
+  readonly generatedAt: number
+  readonly components: readonly HubIndexComponent[]
+  /** base64 的 Ed25519 签名，覆盖 `canonicalJson({ format, generatedAt, components })` */
+  readonly sig: string
+}
+
+/**
+ * 索引也要签名 —— 这一条不是洁癖。
+ *
+ * 索引决定"客户端被告知有什么可用、最新是哪个、从哪里下"。包本身有签名，所以篡改索引
+ * 装不进恶意代码；但可以**降级**：把"最新"指向一个旧的、确实签过名的版本，用户点"更新"
+ * 就退回有漏洞的那一版。没有索引签名，这类攻击在客户端完全看不出来。
+ *
+ * 同一个密钥签索引与包：多一把密钥就多一处要保护、要轮换、要对齐的地方，
+ * 而这里没有任何"索引与包应该分权"的理由。
+ */
+export function hubIndexSigningBytes(index: Omit<HubIndex, 'sig'>): Buffer {
+  return Buffer.from(
+    canonicalJson({
+      format: index.format,
+      generatedAt: index.generatedAt,
+      components: index.components,
+    }),
+    'utf8',
+  )
+}
+
+export function signHubIndex(index: Omit<HubIndex, 'sig'>, privateKeyPem: string): HubIndex {
+  return {
+    ...index,
+    sig: sign(null, hubIndexSigningBytes(index), privateKeyPem).toString('base64'),
+  }
+}
+
+function isIndexComponent(value: unknown): value is HubIndexComponent {
+  if (typeof value !== 'object' || value === null) return false
+  const item = value as Record<string, unknown>
+  if (typeof item['id'] !== 'string' || item['id'] === '') return false
+  if (!Array.isArray(item['versions'])) return false
+  return item['versions'].every((entry: unknown) => {
+    if (typeof entry !== 'object' || entry === null) return false
+    const version = entry as Record<string, unknown>
+    return typeof version['version'] === 'string' && typeof version['url'] === 'string'
+  })
+}
+
+/** 验签 + 形状检查。顺序与包一致：先看形状（不然验签函数要对着任意 JSON 干活），再验签 */
+export function verifyHubIndex(
+  raw: unknown,
+  publicKeyPem: string,
+): HubResult<{ index: HubIndex; keyFingerprint: string }> {
+  if (typeof raw !== 'object' || raw === null) return fail('bad-bundle', '索引不是一个 JSON 对象')
+  const data = raw as Record<string, unknown>
+  if (data['format'] !== HUB_INDEX_FORMAT) {
+    return fail(
+      'bad-bundle',
+      `索引格式是 ${String(data['format'])}，这个客户端只认 ${String(HUB_INDEX_FORMAT)}`,
+      '升级 Tenon 之后再看，或者让 Hub 提供旧格式',
+    )
+  }
+  if (typeof data['sig'] !== 'string' || data['sig'] === '') {
+    return fail('bad-signature', '索引没有签名', '不验签的索引可以被降级到任意旧版本')
+  }
+  if (!Array.isArray(data['components']) || !data['components'].every(isIndexComponent)) {
+    return fail('bad-bundle', '索引里的 components 形状不对')
+  }
+
+  const index = data as unknown as HubIndex
+  let ok = false
+  try {
+    ok = verify(
+      null,
+      hubIndexSigningBytes({
+        format: index.format,
+        generatedAt: typeof data['generatedAt'] === 'number' ? data['generatedAt'] : 0,
+        components: index.components,
+      }),
+      publicKeyPem,
+      Buffer.from(index.sig, 'base64'),
+    )
+  } catch (error) {
+    return fail('bad-signature', '索引验签失败（签名不是合法的 base64 或密钥不对）', error instanceof Error ? error.message : String(error))
+  }
+  if (!ok) return fail('bad-signature', '索引验签失败：内容与签名不一致')
+  return { ok: true, value: { index, keyFingerprint: hubKeyFingerprint(publicKeyPem) } }
+}
+
+export interface FetchHubIndexOptions {
+  readonly config: HubConfig
+  readonly fetch?: typeof globalThis.fetch
+  readonly timeoutMs?: number
+}
+
+/** 索引地址固定是 `<hubUrl>/index.json` —— 不让调用方指定，少一个可被利用的参数 */
+export function hubIndexUrl(config: HubConfig): string {
+  return `${config.hubUrl}/index.json`
+}
+
+export async function fetchHubIndex(
+  options: FetchHubIndexOptions,
+): Promise<HubResult<{ index: HubIndex; keyFingerprint: string }>> {
+  const url = hubIndexUrl(options.config)
+  const doFetch = options.fetch ?? globalThis.fetch
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000)
+  let raw: unknown
+  try {
+    const response = await doFetch(url, { signal: controller.signal, headers: { accept: 'application/json' } })
+    if (!response.ok) {
+      return fail('fetch-failed', `读不到 Hub 索引：HTTP ${response.status}`, url)
+    }
+    raw = (await response.json()) as unknown
+  } catch (error) {
+    return fail('fetch-failed', '读不到 Hub 索引（网络或超时）', error instanceof Error ? error.message : String(error))
+  } finally {
+    clearTimeout(timer)
+  }
+  return verifyHubIndex(raw, options.config.publicKey)
+}
+
+/** 该组件的最新版本。用比较而不是拿最后一个 —— 索引不保证有序 */
+export function latestVersion(component: HubIndexComponent): HubIndexVersion | undefined {
+  let best: HubIndexVersion | undefined
+  for (const entry of component.versions) {
+    if (typeof entry.version !== 'string' || entry.version === '') continue
+    if (best === undefined || compareVersionText(entry.version, best.version) > 0) best = entry
+  }
+  return best
+}
+
+export function findIndexComponent(index: HubIndex, id: string): HubIndexComponent | undefined {
+  return index.components.find((component) => component.id === id)
+}
+
+export interface HubInstalled {
+  readonly id: string
+  readonly version: string
+}
+
+/**
+ * 本机 hub 根上装了哪些（每个 id 取最高版本）。
+ *
+ * 为什么取最高而不是"全部列出来"：装配时解析器也是按最高版本选，所以"能升级到哪"
+ * 这个问题只关心最高那份。旧版本留着不删（见 `installBundle` 的注释）。
+ */
+export async function listInstalledHubComponents(hubDir: string): Promise<HubInstalled[]> {
+  if (hubDir === '') return []
+  const best = new Map<string, string>()
+  for (const plugin of await discoverRoot({ kind: 'hub', dir: hubDir })) {
+    const version = plugin.manifest?.version
+    if (version === undefined) continue
+    const current = best.get(plugin.id)
+    if (current === undefined || compareVersionText(version, current) > 0) best.set(plugin.id, version)
+  }
+  return [...best.entries()].map(([id, version]) => ({ id, version }))
+}
+
+/** 应用装配声明里的一条（只取判断"能不能用上新版"需要的字段） */
+export interface HubDeclaration {
+  readonly appId: string
+  readonly id: string
+  /** 声明里的版本区间（`^1.0.0` 这种） */
+  readonly range: string
+}
+
+export interface HubUpdate {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  /** 本机最高版本；没装过是 null */
+  readonly installedVersion: string | null
+  readonly latest: string
+  readonly notes: string | null
+  /** 有更新 = 装过、且 latest 比本机高。**降级不算更新**（见函数注释） */
+  readonly update: boolean
+  /**
+   * 声明了这个组件、但版本区间**不接受** latest 的应用。
+   *
+   * 这些应用就算把新版装到磁盘上也不会用它 —— 解析器只挑满足区间的最高版本。
+   * 界面上必须说出来，否则用户点了"更新"，看到版本没变，会以为更新功能坏了。
+   */
+  readonly blockedBy: readonly string[]
+}
+
+/**
+ * 对比索引与本机，得出"哪些可以更新"。
+ *
+ * 三条判断都有具体的错法：
+ * 1. **降级不是更新**。索引里的"最新"比本机低时（官方回滚 / 镜像过期），
+ *    直接拿 `!==` 判会把人往旧版本推，而那正好是索引签名要防的事。
+ * 2. **没装过 ≠ 有更新**。`update` 只在装过时成立；没装过的归"可安装"。
+ * 3. **区间不接受就不算能更新**。见 `blockedBy`。
+ */
+export function planHubUpdates(input: {
+  readonly index: HubIndex
+  readonly installed: readonly HubInstalled[]
+  readonly declarations?: readonly HubDeclaration[]
+}): HubUpdate[] {
+  const installedOf = new Map(input.installed.map((item) => [item.id, item.version]))
+  const updates: HubUpdate[] = []
+
+  for (const component of input.index.components) {
+    const latest = latestVersion(component)
+    if (latest === undefined) continue
+    const installedVersion = installedOf.get(component.id) ?? null
+    const update = installedVersion !== null && compareVersionText(latest.version, installedVersion) > 0
+    const blockedBy = (input.declarations ?? [])
+      .filter((item) => item.id === component.id)
+      .filter((item) => {
+        try {
+          return !satisfiesRange(latest.version, item.range)
+        } catch {
+          // 区间写法不认识 → 当作"不接受"：宁可少提示，也不要把装不上的版本推给用户
+          return true
+        }
+      })
+      .map((item) => item.appId)
+    updates.push({
+      id: component.id,
+      name: component.name,
+      description: component.description,
+      installedVersion,
+      latest: latest.version,
+      notes: latest.notes,
+      update,
+      blockedBy: [...new Set(blockedBy)],
+    })
+  }
+
+  // 装过的排在前面（用户更关心自己有的东西），再按 id 稳定排序
+  return updates.sort((a, b) => {
+    if ((a.installedVersion === null) !== (b.installedVersion === null)) {
+      return a.installedVersion === null ? 1 : -1
+    }
+    return a.id.localeCompare(b.id)
   })
 }

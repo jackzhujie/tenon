@@ -521,15 +521,52 @@ export const rpcMethods = {
    *
    * 装好之后会让装了它的应用重新激活（否则用户点了更新，界面上还是旧版本）。
    */
+  /**
+   * 检查更新（M6 第 2 步）。
+   *
+   * **连不上不是错误**：`reachable: false` + 原因。插件页照常可用（内置组件不需要 Hub），
+   * 只是"有没有新版"这件事答不了。把它做成抛错的话，用户在飞机上打开插件页会看到一个红屏。
+   */
+  'hub.check': {
+    input: Empty,
+    output: z.object({
+      reachable: z.boolean(),
+      /** 连不上/验签失败的原因；`reachable` 为 true 时是 null */
+      error: z.string().nullable(),
+      checkedAt: z.number(),
+      keyFingerprint: z.string().nullable(),
+      components: z.array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          description: z.string(),
+          installedVersion: z.string().nullable(),
+          latest: z.string(),
+          notes: z.string().nullable(),
+          update: z.boolean(),
+          blockedBy: z.array(z.string()),
+        }),
+      ),
+    }),
+  },
+  /**
+   * 从 Hub 装一个组件包。
+   *
+   * **只收 id 与版本，不收 URL**：下载地址来自签名索引。让调用方给 URL 的话，
+   * 校验就只剩"是不是同一个源"，而"装的是不是用户以为的那个组件"没人管得着。
+   *
+   * 注意这只做"把包装到本机"，**不等于"装进某个应用"** —— 后者是 `install_component`
+   * （写装配声明）。两件事分开，是因为同一个包可能被十个应用用。
+   */
   'hub.install': {
-    input: z.object({ bundleUrl: z.string().min(1) }),
+    input: z.object({ id: z.string().min(1), version: z.string().min(1).optional() }),
     output: z.object({
       id: z.string(),
       version: z.string(),
       /** 装到了哪（本机路径，仅在服务端有意义） */
       dir: z.string(),
       keyFingerprint: z.string(),
-      /** 被重新激活的应用数 */
+      /** 被重新激活的应用数（声明了这个组件、且区间接受新版本） */
       reloadedApps: z.number().int().nonnegative(),
     }),
   },
