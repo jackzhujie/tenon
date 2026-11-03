@@ -8,7 +8,7 @@
 > + **M5 第 1 步**（chord 宿主接入 spike，10 项，`pnpm spike:chord`）
 > + **M5 第 2 步**（组件加载器：清单 / 装配声明 / 覆盖层解析 / 加载计划 / `component.list`）
 > + **M5 第 3 步（a）**（第一个真组件：契约 + server facet + 插件构建 + 宿主装载）
-> + **M5 第 3 步（b）**（界面半边：web facet + 网关注入 + WS 链路）**：521 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + **M5 第 3 步（b）**（界面半边：web facet + 网关注入 + WS 链路）**：529 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -292,7 +292,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 2 | **bundled 插件加载器**：`resources/plugins/<id>/` 只读源 + 清单（依赖/权限/宿主兼容）+ 装配声明 `app.components.json` + `component.list` | ✅ 见 §4.18 | `packages/component-host/`、`plugins/bundled/`、`apps/desktop/src/{paths,main}.ts`、`apps/desktop/{build.mjs,electron-builder.yml}` |
 | 3a | **第一个真组件（服务端半边）**：契约 + server facet + 插件构建 + 宿主装载 + 注入的模型能力 | ✅ 见 §4.19 | `plugins/bundled/tenon.official.ai-assistant/`、`scripts/build-plugins.ts`、`packages/agent/src/assistant.ts`、`packages/server/src/components.ts` |
 | 3b | **第一个真组件（界面半边）**：web facet + 传输（WS 链路）+ `app.shell.overlay` 插槽渲染 | ✅ 见 §4.21（浏览器里的整页验收放到第 8 步） | `packages/gateway/src/components.ts`、`packages/server/src/components-link.ts`、`plugins/bundled/tenon.official.ai-assistant/web.ts` |
-| 4 | **`install_component` 工具**：写装配声明 + 生成 `src/components.generated.ts` + 改 `AGENTS.md` 索引 | ⬜ | — |
+| 4 | **`install_component` 工具**：写装配声明 + 同步 `docs/AGENTS.md` + 装完立刻生效（不生成 `components.generated.ts`，见 §4.22） | ✅ 见 §4.22 | `packages/component-host/src/{install,agents-doc}.ts`、`packages/agent/src/tools/components.ts`、`packages/server/src/index.ts` |
 | 5 | **卸载即清理**（代码 + 装配声明 + `AGENTS.md`，幂等；DoD ②） | ⬜ | — |
 | 6 | **插件页**：列表 / 独立开关 / 来源标识 / "官方 Hub 筹备中"占位（DoD ④） | ⬜ | — |
 | 7 | 另两个官方插件（Excel 导出 / 审批流）+ L1 内置积木清单 | ⬜ | — |
@@ -943,6 +943,26 @@ plugins/bundled/         # 官方内置组件（只读内容，随安装包发�
 **还没验的**：真浏览器里看见球并聊一句（需要真实应用 + 预览 + Electron），留给第 8 步的
 端到端验收 —— 协议层这一层已经通了，剩下的风险在"注入时机"（页面已经在跑时注入）。
 
+### 4.22 M5 第 4 步验收（`install_component`）—— ✅ 已完成
+
+业务核心在 `packages/component-host/src/install.ts`（纯逻辑、可直接单测），
+agent 那一层只负责把参数搬进来、把结论翻译成人话。
+
+| 事 | 做法 | 为什么 |
+|---|---|---|
+| 先试算后落盘 | 用 `buildPlan({assemblyOverride})` 试算，通过了才写文件 | 先写再验、错了回滚，在并发下会留下半装状态 |
+| 一次改三处 | 装配声明 + `docs/AGENTS.md` 的「已装组件」+ 通知宿主重新激活 | 手改声明只更新第一处，另两处漂移后表现是"装了没反应/Agent 又写一个球" |
+| 幂等 | 同 id 整条替换；AGENTS.md 字节不变时不写 | 否则每装一次多一个无意义 commit |
+| 卸载 | 删声明 + 重写 AGENTS.md（同一段变成「（无）」），不改组件本体 | 组件是随包的只读内容，动它没有意义 |
+
+**一个被推翻的设计**：DESIGN §21.3 原写"生成 `src/components.generated.ts` 让应用 import 组件"。
+实际实现是**网关注入 + 宿主激活**，应用代码零参与 —— 生成那份文件在今天的架构里没有任何消费者，
+只会让人以为"应用引用了组件"。所以不生成；等将来做 React 内嵌插槽（`app.page.header` 之类）时再加，
+那时它才有真实的 import 方。
+
+测试（`packages/component-host/test/install.test.ts`，8 项）：默认挂载点、幂等（字节不变）、
+插槽参数、**装不上时磁盘不变**、missing/version 报错可读、已有 AGENTS.md 只改标记区、卸载幂等。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1117,7 +1137,7 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：55 个测试文件（521 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
+pnpm test                  # vitest：56 个测试文件（529 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
@@ -1195,8 +1215,8 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 加载计划 / `component.list`），撞出「覆盖层要按根选版本」与「装不上要 problem 不要 500」。
 第 3 步 a/b 让**第一个真组件（AI 小助手）**活了起来：契约 + server facet + 宿主装载 +
 注入的模型能力 + web facet（悬浮球）+ 网关 WS 链路（协议层三条用例走真 HTTP 与真 WS）。
-下一步是 **M5 第 4 步：`install_component` 工具**（写装配声明 + 生成 `src/components.generated.ts`
-+ 改 `AGENTS.md`），先看 §4.2 的 M5 表与 §4.20 的代码地图。
+第 4 步让 Agent 能**一个工具装组件**（写声明 + 同步 `AGENTS.md` + 装完立刻生效，见 §4.22）。
+下一步是 **M5 第 5 步：卸载即清理**（DoD ②），先看 §4.2 的 M5 表与 §4.20 的代码地图。
 521 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；

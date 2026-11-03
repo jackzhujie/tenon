@@ -13,7 +13,13 @@
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AvailableComponent, ComponentMount, ComponentProblem, InstalledComponent } from '@tenon/protocol'
-import { ASSEMBLY_FILE, readAssembly, type ComponentAssembly, type ComponentEntry } from './assembly.js'
+import {
+  ASSEMBLY_FILE,
+  assemblyFile,
+  readAssembly,
+  type ComponentAssembly,
+  type ComponentEntry,
+} from './assembly.js'
 import type { ComponentManifest } from './manifest.js'
 import { COMPONENT_ID_RE } from './manifest.js'
 import { discoverAll, pickPlugin, type UsablePlugin } from './resolve.js'
@@ -67,6 +73,11 @@ export type ComponentProblemCode = (typeof COMPONENT_PROBLEM_CODES)[number]
 
 export interface PlanInput {
   readonly repoDir: string
+  /**
+   * 用这份装配声明代替磁盘上的（**试算**用：装组件之前先问"装上会怎样"）。
+   * 有了它，安装工具就不必先写文件再回滚 —— 那种"先弄脏再擦"的写法在并发下一塌糊涂。
+   */
+  readonly assemblyOverride?: ComponentAssembly
   /** 解析顺序即优先级：hub 在前 */
   readonly roots: readonly PluginRoot[]
   /** 宿主版本（`health` 里的那个）。`0.0.0` 视为开发构建，见 `meetsMinTenonVersion` */
@@ -179,7 +190,15 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     problems.push({ code, componentId, message, hint })
   }
 
-  const read = await readAssembly(input.repoDir)
+  const read =
+    input.assemblyOverride === undefined
+      ? await readAssembly(input.repoDir)
+      : ({
+          kind: 'ok',
+          assembly: input.assemblyOverride,
+          file: assemblyFile(input.repoDir),
+          exists: true,
+        } as const)
   if (read.kind === 'invalid') {
     push(
       'assembly-invalid',

@@ -11,7 +11,9 @@
  *
  * 真正的 `host.load()` 在壳生成器里（M5 第 3 步），因为那需要 chord 与应用的 Vite。
  */
+export * from './agents-doc.js'
 export * from './assembly.js'
+export * from './install.js'
 export * from './manifest.js'
 export * from './plan.js'
 export * from './resolve.js'

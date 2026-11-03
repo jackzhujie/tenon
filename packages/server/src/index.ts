@@ -119,6 +119,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     },
     ...(options.preview ?? {}),
   })
+  /*
+   * 组件宿主要在 agent **之前**能拿到句柄：装组件这个工具需要"装完立刻生效"，
+   * 而那时 ComponentRuntime 还没建（它依赖 agent）。用一个后填的引用即可 ——
+   * 回调真正被调用时（用户装组件那一刻）它早已就位。
+   */
+  let componentsRef: ComponentRuntime | undefined
+  const resolvedRoots = options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root })
   const agent = createAgentRuntime({
     core,
     env,
@@ -138,15 +145,24 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
      * 传的是**函数**不是快照：预览会在应用生命周期里反复起停，每次起都是新的一条通道。
      */
     getPageDriver: options.pageDriver ?? ((appId) => preview.pages(appId)),
+    // 装/卸组件后重新激活：不这么做，用户装完看到的是"什么都没发生"
+    components: {
+      roots: resolvedRoots,
+      tenonVersion: options.version ?? '0.0.0',
+      onChanged: async (appId) => {
+        await componentsRef?.reload(appId)
+      },
+    },
   })
   /** 每个应用的组件链路：进程退出/预览重起时要能收干净（wss 不会自己关） */
   const bridges = new Map<string, AppComponentBridge>()
   const components = new ComponentRuntime({
     home: core.home,
     agent,
-    roots: options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root }),
+    roots: resolvedRoots,
     tenonVersion: options.version ?? '0.0.0',
   })
+  componentsRef = components
   const server = buildServer({
     core,
     agent,

@@ -7,7 +7,7 @@
 import type { CoreServices } from '@tenon/core'
 import type { ChatServiceOptions } from './chat.js'
 import { ChatService } from './chat.js'
-import { HarnessPool } from './harness-pool.js'
+import { HarnessPool, type HarnessPoolOptions } from './harness-pool.js'
 import { planModel, resolveModel, type ModelPlan, type ResolvedModel } from './models.js'
 import { TaskGraphService } from './taskgraph.js'
 import type { PageDriverProvider } from './tools/preview.js'
@@ -46,6 +46,8 @@ export interface AgentRuntimeOptions {
    * 不给的话 e2e 角色会明确回"预览没起"，其它角色不受影响。
    */
   getPageDriver?: PageDriverProvider
+  /** 组件工具（M5 第 4 步）：不给就没有 install_component */
+  components?: HarnessPoolOptions['components']
 }
 
 export interface AgentRuntime {

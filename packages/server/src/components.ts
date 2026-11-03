@@ -220,6 +220,26 @@ export class ComponentRuntime {
     }
   }
 
+  /**
+   * 装配声明变了（装/卸组件）之后重新激活。
+   *
+   * 必须把旧 host 关掉：它的对象还在内存里，继续用会让"装完了但界面还是老样子"。
+   * 关掉之后重新 ensure —— 新声明、新 facet，用户下一次请求就是新的了。
+   */
+  async reload(appId: string): Promise<ActivatedComponents> {
+    const existing = this.apps.get(appId)
+    this.apps.delete(appId)
+    if (existing !== undefined) {
+      try {
+        const activated = await existing
+        await activated.host.close()
+      } catch {
+        // 旧的那份本来就坏了：关不掉不该阻止新的装上去
+      }
+    }
+    return this.ensure(appId)
+  }
+
   /** 已经激活过就返回；没有就 undefined（传输层接链路时用） */
   find(appId: string): Promise<ActivatedComponents> | undefined {
     return this.apps.get(appId)

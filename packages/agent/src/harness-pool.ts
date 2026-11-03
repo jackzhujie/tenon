@@ -15,11 +15,13 @@ import type { Extension, ToolRegistration } from '@earendil-works/pi-durable'
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node'
 import type { TenonHome } from '@tenon/core'
 import { appPaths } from '@tenon/core'
+import type { PluginRoot } from '@tenon/component-host'
 import type { ModelChoice, ResolvedModel } from './models.js'
 import { codingExtension } from './tools/coding.js'
 import { codeactExtension } from './tools/codeact.js'
 import { previewExtension, type PageDriverProvider } from './tools/preview.js'
 import { reviewExtension } from './tools/review.js'
+import { componentsExtension } from './tools/components.js'
 import { subagentExtension } from './tools/subagent.js'
 
 const ctx = BACKGROUND_CONTEXT
@@ -47,6 +49,15 @@ export interface HarnessSession {
 export interface HarnessPoolOptions {
   home: TenonHome
   model: ResolvedModel
+  /**
+   * 组件工具（M5 第 4 步）：roots 决定"能装什么"，onChanged 让装完立刻生效。
+   * 不给就没有装组件的工具 —— 一些测试（只验文件读写）不需要它。
+   */
+  components?: {
+    readonly roots: readonly PluginRoot[]
+    readonly tenonVersion: string
+    readonly onChanged?: (appId: string) => void | Promise<void>
+  }
   /**
    * 页面通道的提供者（M4 第 4 步）：由 server 接到 `PreviewManager.pages`。
    *
@@ -121,6 +132,21 @@ export class HarnessPool {
      * 沙箱建在这里（每应用一个），`close()` 时真关：worker 线程不关会拽住进程退出。
      */
     const codeact = codeactExtension()
+    /*
+     * 组件工具（M5 第 4 步）：只给主角色。子角色是只读调查的，让 reviewer 或 explore
+     * 去"装一个组件"会把分工彻底搞乱 —— 装组件是设计决策，属于 Builder。
+     */
+    const components = this.options.components === undefined
+      ? undefined
+      : componentsExtension({
+          appId,
+          repoDir: paths.repoDir,
+          roots: this.options.components.roots,
+          tenonVersion: this.options.components.tenonVersion,
+          ...(this.options.components.onChanged === undefined
+            ? {}
+            : { onChanged: this.options.components.onChanged }),
+        })
     // `subagent` 需要 Harness（子会话的模型/工具只能在创建那一刻定），而扩展必须在
     // `Harness.open` 之前建好 —— 所以给一个懒读取器，调用发生时它一定已经有值。
     let harnessRef: Harness | undefined
@@ -137,13 +163,18 @@ export class HarnessPool {
       // 子会话默认继承父会话的扩展；CodeAct 还要额外一个（它的工具在那个扩展里）
       getExtensions: () => [codeact.extension],
     })
+    if (components !== undefined) tools.push(...(components.tools ?? []))
     tools.push(...(subagent.tools ?? []))
     /*
      * 主角色拿到的工具：显式列举，**不用过滤**。
      * 过滤的写法（"凡是名字不以 preview_ 开头"）会让下一个新工具默认落到主角色手里，
      * 而这里的默认应该是"不给"。与 `roles.ts` 的白名单是同一个思路。
      */
-    const rootTools: ToolRegistration[] = [...(coding.tools ?? []), ...(subagent.tools ?? [])]
+    const rootTools: ToolRegistration[] = [
+      ...(coding.tools ?? []),
+      ...(subagent.tools ?? []),
+      ...(components?.tools ?? []),
+    ]
     /*
      * 扩展列表 = "这个应用的工具与提示词世界"。`preview` / `review` / `codeact` 必须在这里 ——
      * 只 `registry.install` 是不够的：**工具要靠扩展才能被会话解析到**，
@@ -152,7 +183,13 @@ export class HarnessPool {
      * 这三个扩展都没有 section 会漏到主角色身上 —— `codeact` 那个**有** section（工具声明），
      * 所以它只进子会话（`role.extensions`），**不进 rootTools / root extensions**。
      */
-    const extensions: Extension[] = [coding, subagent, preview, review]
+    const extensions: Extension[] = [
+      coding,
+      subagent,
+      preview,
+      review,
+      ...(components === undefined ? [] : [components]),
+    ]
 
     const registry = createRegistry()
     registry.install(coding)
@@ -160,6 +197,7 @@ export class HarnessPool {
     registry.install(review)
     registry.install(codeact.extension)
     registry.install(subagent)
+    if (components !== undefined) registry.install(components)
 
     const harness = await Harness.open(
       storage,
