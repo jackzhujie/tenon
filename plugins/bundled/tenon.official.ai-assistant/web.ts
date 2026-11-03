@@ -163,6 +163,7 @@ function mount(appId: string): void {
     list.textContent = ''
     for (const message of messages) {
       const mine = message.role === 'user'
+      // data-tenon-message：让端到端能"看见"气泡（没有它只能靠猜文案）
       const bubble = el(
         'div',
         `max-width:86%;padding:8px 10px;border-radius:10px;white-space:pre-wrap;word-break:break-word;${
@@ -170,6 +171,7 @@ function mount(appId: string): void {
         }`,
         message.text,
       )
+      bubble.setAttribute('data-tenon-message', message.role)
       list.append(bubble)
     }
     list.scrollTop = list.scrollHeight

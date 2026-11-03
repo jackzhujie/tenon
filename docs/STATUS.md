@@ -235,7 +235,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 6.5 | **工具层**：read/write/edit/bash 接进 pi-durable（cwd 钉在 `repo/`、越界拒写、环境洗净） | ✅ | `packages/agent/src/tools/coding.ts` |
 | 6.6 | **生成器**：`templates/react-vite` 铺进 `repo/`，与首次 commit 同一个动作 | ✅ | `packages/generator/` |
 | 7 | **预览**：App Gateway + dev server 编排（`preview.start/stop/status` + `preview.status` 事件） | ✅ | `packages/gateway/` |
-| 8 | **Web 模式**：`pnpm dev:web` 全流程可用（前端 React 19 + Vite 7） | ✅ | `apps/web` + `scripts/dev-web.ts` |
+| 8 | **热重载不丢状态（DoD ③）+ 端到端验收（DoD ①）** | 🚧 脚本就位、卡在真页面里球没出现，见 §4.26 | `scripts/e2e-component.ts`（`pnpm e2e:component`） |
 | 9 | **Electron 壳** + 同源托管 + 打包冒烟 | ✅ mac 实测（win 待 M6 有机器时补） | `apps/desktop`（main/supervisor/paths + build.mjs）、`packages/server/src/static.ts` |
 
 **M1 完成**：界面上点「新建应用」→ 铺模板 → 自动起预览 → 在对话里说需求 → Agent 改代码 → iframe 热更新 →
@@ -1022,6 +1022,26 @@ DoD ② 的"清理"在这里被拆成**三条可验证的事实**，一条都不
    M6 应该改成共享一份运行时（或者由网关提供 chord 的共享 chunk）。
 
 测 7 项（都用 `memoryLinkPair`，只验组件自己）：CSV 转义/行对齐/文件名清洗、审批状态机/非法转移/跨 root 存活。
+
+### 4.26 M5 第 8 步：端到端脚本就位，真页面里球没出现 —— 🚧
+
+`pnpm e2e:component` 会把整条链路真跑一遍：建应用 → 写装配声明 → 起预览（真装 React）→
+Electron + 真 Chromium → 找球 → 点开 → 发一句 → 等两条气泡 → 改代码触 HMR → 再刷新。
+断言五条：应用首屏 / 球存在且只有一个 / 问答两条气泡 / HMR 后球没重复挂 / 刷新后对话还在。
+
+**已经确认正常的两环**（脚本里有诊断行，跑一次就能看到）：
+- 网关往 HTML 里插了 `<script type="module" src="/__tenon/component.js?appId=…">`
+- 该端点返回 `200 application/javascript`，内容是 esbuild 产物（`var __defProp = …`）
+
+**卡住的地方**：模块加载之后**没有生成悬浮球**（`[data-tenon-component]` 数为 0），
+而 Electron 侧一条 console 都没捕到 —— 说明它既没抛到能被监听的地方，也没走完 `mount()`。
+下一步的怀疑顺序（写在这里免得下次重头猜）：
+1. esbuild 的 browser 产物里 `import.meta.url` 的形态（webpack 风格替换 / 被 shim 掉 → `appIdOf()` 抛错）。
+   我们的 `mount` 外面只有 `try/catch + console.warn`，**如果 console 没被接住，这条错就静默消失了**；
+2. chord 的浏览器侧在 `type="module"` 脚本里是否有顶层副作用失败；
+3. Electron `console-message` 的事件签名（我这一版可能压根没接对，所以"没日志"不等于"没报错"）。
+
+**这条一旦通过，第 3b/6 步里"没在浏览器里看过"的部分也就一并验掉了。**
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
