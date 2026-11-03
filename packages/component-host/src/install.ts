@@ -205,10 +205,17 @@ export async function uninstallComponent(request: UninstallRequest): Promise<Uni
   }
   const next = removeComponent(read.assembly, request.id)
   const removed = next.components.length !== read.assembly.components.length
-  if (removed) await writeAssembly(request.repoDir, next)
-
   const plan: PlanInput = { repoDir: request.repoDir, roots: request.roots, tenonVersion: request.tenonVersion }
+  if (!removed) {
+    /*
+     * 什么都没删就别动磁盘：卸一个从来没装过的组件，不该凭空造出一份 AGENTS.md
+     * （那会让"这个项目装过组件"变成一句假话）。
+     */
+    const planned = await buildPlan(plan)
+    return { removed: false, agentsDoc: { file: '', changed: false }, remaining: planned.components }
+  }
+  await writeAssembly(request.repoDir, next)
   const planned = await buildPlan(plan)
   const agentsDoc = await syncAgentsDoc(request.repoDir, planned.components)
-  return { removed, agentsDoc, remaining: planned.components }
+  return { removed: true, agentsDoc, remaining: planned.components }
 }

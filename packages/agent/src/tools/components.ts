@@ -19,12 +19,14 @@ import {
   installComponent,
   listAvailable,
   readAssembly,
+  uninstallComponent,
   type PluginRoot,
 } from '@tenon/component-host'
 
 export const COMPONENTS_EXTENSION = 'tenon.components'
 export const INSTALL_COMPONENT_TOOL = 'install_component'
 export const LIST_COMPONENTS_TOOL = 'list_components'
+export const REMOVE_COMPONENT_TOOL = 'remove_component'
 
 export interface ComponentsToolsOptions {
   readonly appId: string
@@ -141,7 +143,40 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
     },
   }
 
-  return [list, install]
+  const remove: ToolRegistration = {
+    name: REMOVE_COMPONENT_TOOL,
+    description:
+      'Remove a component from this app. It deletes the entry from app.components.json, clears the ' +
+      '"已装组件" section of docs/AGENTS.md, and deactivates the component immediately. ' +
+      'Idempotent: removing something that is not installed is fine. The component itself ' +
+      '(files shipped with Tenon) is never touched.',
+    parameters: Type.Object({
+      id: Type.String({ description: 'Component id, e.g. tenon.official.ai-assistant' }),
+    }),
+    replay: 'safe',
+    async execute(rawArgs) {
+      const id = (rawArgs as { id?: string }).id?.trim()
+      if (id === undefined || id === '') return fail('id 不能为空（用 list_components 看装了哪些）')
+      const result = await uninstallComponent({
+        repoDir: options.repoDir,
+        roots: options.roots,
+        tenonVersion: options.tenonVersion,
+        id,
+      })
+      try {
+        await options.onChanged?.(options.appId)
+      } catch {
+        // 重新激活失败不该让"卸"这个动作报错：声明已经删了
+      }
+      if (!result.removed) {
+        return ok(`${id} 本来就没装。${result.agentsDoc.changed ? 'AGENTS.md 的「已装组件」已同步。' : ''}`)
+      }
+      const left = result.remaining.length === 0 ? '现在这个应用没有装任何组件' : `还剩：${result.remaining.map((item) => item.id).join('、')}`
+      return ok(`已卸 ${id}：装配声明删了，docs/AGENTS.md 的「已装组件」已同步，组件已停用。${left}。`)
+    },
+  }
+
+  return [list, install, remove]
 }
 
 export function componentsExtension(options: ComponentsToolsOptions): Extension {
