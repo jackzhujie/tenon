@@ -125,7 +125,7 @@ typescript」「测试红了」「超时了」必拦 —— 混成一个"不通�
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 518 项单测 / 集成测试（约 295s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 548 项单测 / 集成测试（约 295s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
@@ -140,7 +140,7 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**下一步**：M5 第 3 步（b）—— 第一个真组件的界面半边（web facet + 网关 WS 链路 + `app.shell.overlay` 渲染）。
+**下一步**：真模型验收（`pnpm e2e:real`，脚本已就绪、排练模式 12/12）—— 见 STATUS §4.27。旧文：M5 第 3 步（b）—— 第一个真组件的界面半边（web facet + 网关 WS 链路 + `app.shell.overlay` 渲染）。
 服务端半边已经落地：契约 + server facet + 插件构建（`pnpm build:plugins`，410KB 单文件）+ 宿主装载。
 M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，
 M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17、第 2 步（组件加载器）见 §4.18、第 3 步 a（真组件）见 §4.19。

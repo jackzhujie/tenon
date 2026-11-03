@@ -1046,6 +1046,65 @@ DoD ② 的"清理"在这里被拆成**三条可验证的事实**，一条都不
 组件是模块脚本，加载失败时浏览器只在控制台留一行、页面照常可用 —— "组件没出现"这个现象
 没有任何别的线索。这一行就是这次能定位下去的原因，以后端到端与用户反馈都读它。
 
+### 4.27 真模型验收（M5.5）—— 脚手架已就位，等一把真 key
+
+**为什么先做这一步**：到此为止 540 个测试与 8 套端到端**全部跑在 faux 上**（按剧本回台词的假模型）。
+faux 证明的是管线通，不是"模型按提示词把事做完"。而只在真模型下才被检验的，恰好是产品主张的全部：
+系统提示词、工具描述、`docs/AGENTS.md`、组件 `agentHints`、以及"先说需求 → 页面真能用"这条闭环。
+
+两个脚本，各自的职责分得很清：
+
+| 脚本 | 验什么 | 要不要 key |
+|---|---|---|
+| `pnpm e2e:provider` | **BYOK 通路**：profile（加密存库）→ 启动时 resolveModel → `createProvider(openai-completions)` → 流式 SSE → 工具调用 → 落盘 → commit → 用量入库。配一个本地假 OpenAI 服务（`scripts/mock-openai.ts`）真跑一遍 | 否 |
+| `pnpm e2e:real` | **真模型验收**：①一句话做待办清单 ②一句话让它自己装 AI 助手 ③真 Chromium 里输入→添加→删除→点球问一句 | 是 |
+| `TENON_REAL_MOCK=1 pnpm e2e:real` | **排练模式**：同一脚本换成假 provider，先证明脚本自己是好的（真跑一次要花钱、要几分钟，不该拿它调断言） | 否 |
+
+`e2e:real` 的判据刻意与实现解耦（不找特定 class，只找"能输入的地方 + 能点的按钮"）——
+它要覆盖的是**模型自由发挥出来的界面**，我们并不知道它会写成什么样。
+
+**排练模式已 12/12 通过**（含真 Chromium 的增删与组件链路）。真 key 那一跑还没做。
+
+#### 这一步已经抓到的三个真问题（都已修）
+
+1. **`install_component` 在真实运行时里从来没挂上过**（最严重）。
+   `AgentRuntimeOptions.components` 声明了、server 也传了、`HarnessPool` 也用得上，
+   **中间那一跳没人接**（`createAgentRuntime` 建 pool 时没往下传）。症状：模型一调就回
+   `Tool install_component is not available`，而界面上那条还显示 ✓。
+   类型检查抓不到（两侧类型都对，只是没连起来），原有测试也抓不到（它们直接构造 pool，绕过了这段）。
+   → 已修 + 新增 `packages/server/test/component-wiring.test.ts`（**从 server 起步**只问
+   "主会话的工具清单里有没有它"，并顺带钉住"组件工具不会把 preview_*/git_diff 漏给主角色"）。
+
+2. **工具失败在消息流里显示成成功**。`normalize.ts` 给 tool part 的 `status` 写死了 `'ok'`，
+   工具结果那条 entry 被整条丢弃（注释写着"挂在工具调用上渲染"，实际上从没挂）。
+   于是路径越界、命令非零退出、组件装不上 —— 全都和成功长得一模一样。
+   → 已改成两遍归一化：先收 `pi.tool-result`（按 `toolCallId`），再回填 `status` 与 `output`；
+   前端本来就在读 `part.status`（`bg-bad`），所以修复直接生效。新增 `packages/agent/test/normalize.test.ts`（5 项）。
+
+3. **工具不能抛异常**。`installComponent` 一抛，运行时把它压成一条 `<harness>` 诊断，
+   消息甚至是空的 —— 模型看到四个字母，既不知道发生了什么也没法自救。
+   → 工具层兜住并翻译成人话（"装 X 时出错了：…"）。
+
+#### 还没解决、留给真 key 那一跑之后决定的产品缺口
+
+- **没有设置页**：`provider.upsert` 有 RPC、没有界面。今天只能靠脚本直接写库。
+- **模型只在启动时解析**：`settings.set` / `provider.upsert` 都不会让已运行的 server 换模型，
+  用户填完 key 得重启才生效（"填完就能用"与"重启才生效"是两种产品）。
+- **成本恒为 0**：provider profile 没有价格表，`costUsd` 永远是 0 →
+  **「按美元设额度」对 BYOK 用户完全失效**，只有 token 维度是真的。
+
+#### 真 key 的跑法（环境变量，key 不落日志）
+
+```bash
+TENON_REAL_KEY=sk-... TENON_REAL_MODEL=deepseek-chat \\
+  TENON_REAL_BASE_URL=https://api.deepseek.com/v1 TENON_REAL_LABEL=DeepSeek \\
+  pnpm e2e:real
+```
+
+可选：`TENON_REAL_HOME=/tmp/xxx` 复用已有 home（省掉每次装 React 的几十秒）、
+`TENON_REAL_BUDGET_TOKENS=400000` 设额度（默认 40 万，超了当场熔断）。
+脚本只会打印 key 的前 3 位与后 2 位。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1199,6 +1258,8 @@ DoD ② 的"清理"在这里被拆成**三条可验证的事实**，一条都不
 | **host 的 `name` 必须等于契约里的 `hostNamed(…)`** | 否则 `serve` 抛「declared for server, but <别的名字> serves it」。名字是路由名，不是实例 id：一个进程里多个应用的 host 都叫 `server`，靠链路区分 |
 | **组件的 facet 是构建产物，不进 git** | `plugins/bundled/<id>/server.js` 由 `pnpm build:plugins` 生成（esbuild 连 chord 一起打，410KB）。忘了构建的表现是"组件加载失败：Cannot find module"，而源码看着完全正常 |
 | **`executeJavaScript` 里拼选择器必须过 `JSON.stringify`** | `'document.querySelector("' + ball + '")` 这种写法在 ball 自带双引号时是语法错误；而外层 `.catch(() => false)` 会把它吞掉 —— 现象是"元素一直没出现"，排查方向全错（M5 第 8 步在这上面卡了两轮） |
+| **声明了选项 ≠ 传下去了** | `AgentRuntimeOptions.components` 声明、server 传、`HarnessPool` 用，中间的 `createAgentRuntime` 漏了一行 —— 结果 `install_component` 在真实运行时里**从来没挂上过**，模型一调回 "Tool ... is not available"。类型检查抓不到（两侧都对），单元测试也抓不到（直接构造 pool 绕过了那一跳）→ 这类"装配链断点"只能从**最外层**起步的用例才发现（`component-wiring.test.ts`） |
+| **工具 part 的 `status` 不能写死** | 必须按 `toolCallId` 从 `pi.tool-result` 回填。写死 `'ok'` 的话，路径越界/命令非零退出/组件装不上在界面上与成功一模一样 —— 这是最坏的一种绿：用户不会查，模型也以为自己做成了 |
 | **组件脚本加载失败是静默的** | 它是 `type="module"`：语法错/导入失败只在控制台留一行，页面照常可用。所以网关注入时**同时注入一行错误捕手**（`window.__tenonComponentErrors`），端到端与用户反馈都读它 |
 | **链路要在 socket 建出来那一刻挂上，不能等 `open`** | `webSocketLink(socket)` 才挂 `message` 监听。等 `open` 再挂，那几十毫秒里服务端已经在发帧 —— 帧丢了、序号错位，报 `ack 2 outside 0..2`，之后调用**永不返回**（Spike 6 就是这么被咬的） |
 | **链路两端的 `principal` 形状必须一致** | 组件契约的 principal 是 `{appId}`，宿主的 `accept({principal})` 与客户端的 `upstream.principal` 都必须是这个形状；给错不会报类型错，而是组件 factory 里抛 `invalid/principal`（消息里两个 appId 还长得一样，很容易看漏）|
@@ -1225,6 +1286,9 @@ pnpm dev:server            # 同上但用真实模型（需要先配 provider，
 pnpm test                  # vitest：58 个测试文件（540 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
+pnpm e2e:provider          # ★ BYOK 通路：本地假 OpenAI 服务，真跑流式 + 工具调用 + 落盘（不要 key）
+TENON_REAL_MOCK=1 pnpm e2e:real  # ★ 真模型验收的排练：假 provider 走完三个阶段（不要 key）
+TENON_REAL_KEY=… pnpm e2e:real   # ★ 真模型验收：生成 → 装组件 → 真 Chromium 里加/删/问（要 key）
 pnpm e2e:component         # ★ 组件端到端：真 Chromium 里点球/聊天/HMR/整页刷新（5 项，要联网装 React）
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
 pnpm e2e:diff              # ★ 改动/回滚：git.log / show / revert 全走真 HTTP

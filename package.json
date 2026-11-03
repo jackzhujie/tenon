@@ -37,7 +37,9 @@
     "clean": "rm -rf node_modules **/node_modules",
     "build:plugins": "tsx scripts/build-plugins.ts",
     "pretest": "tsx scripts/build-plugins.ts",
-    "e2e:component": "tsx scripts/e2e-component.ts"
+    "e2e:component": "tsx scripts/e2e-component.ts",
+    "e2e:provider": "tsx scripts/e2e-provider.ts",
+    "e2e:real": "tsx scripts/e2e-real.ts"
   },
   "devDependencies": {
     "@tenon/protocol": "workspace:*",
