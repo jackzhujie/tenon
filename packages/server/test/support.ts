@@ -15,7 +15,7 @@ export const TEST_TOKEN = 'test-token'
 
 export interface BootOptions {
   env?: NodeJS.ProcessEnv
-  preview?: Pick<PreviewManagerOptions, 'launch' | 'installDeps' | 'readyTimeoutMs'>
+  preview?: Pick<PreviewManagerOptions, 'launch' | 'installDeps' | 'depsInstaller' | 'readyTimeoutMs'>
   /** 给了就由 server 同源托管这份产物（`static.test.ts` 用） */
   webDir?: string
   /** 假页面通道（e2e 子 Agent 的集成测试用，不起浏览器） */
@@ -25,11 +25,20 @@ export interface BootOptions {
 }
 
 export function boot(dir: string, options: BootOptions = {}): Promise<RunningServer> {
+  /*
+   * 依赖安装**默认关掉**：它会联网、还会在仓库里生成 `pnpm-lock.yaml` ——
+   * 后者会让"一轮一 commit""工作区是干净的"这类断言随安装时机飘。
+   * 要验安装时序的用例显式给 `depsInstaller`（给了就自动打开）。
+   */
+  const preview = {
+    installDeps: options.preview?.depsInstaller !== undefined,
+    ...(options.preview ?? {}),
+  }
   return startServer({
     port: 0,
     token: TEST_TOKEN,
     env: { TENON_HOME: dir, TENON_FAUX: '1', ...(options.env ?? {}) },
-    ...(options.preview === undefined ? {} : { preview: options.preview }),
+    preview,
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
     ...(options.pageDriver === undefined ? {} : { pageDriver: options.pageDriver }),
     ...(options.pluginRoots === undefined ? {} : { pluginRoots: options.pluginRoots }),

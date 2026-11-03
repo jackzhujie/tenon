@@ -33,7 +33,7 @@ import type {
 import { isTenonError, TenonError } from '@tenon/protocol'
 import { launchApi, resolveApiEntry, type ApiLauncher } from './api.js'
 import type { Launched } from './child.js'
-import { ensureDeps } from './deps.js'
+import { ensureDeps, type DepsResult, type EnsureDepsOptions } from './deps.js'
 import { classifyLine, inputFromError, LogStore, parseClientLog, type LogInput } from './logs.js'
 import { findFreePorts } from './ports.js'
 import { PageBridge } from './page.js'
@@ -68,6 +68,12 @@ export interface PreviewManagerOptions {
   database?: PreviewDatabase
   /** false = 不装依赖（测试用；缺依赖时会以 deps failed 结束） */
   installDeps?: boolean
+  /**
+   * 测试注入：默认是真跑 `pnpm install`。
+   *
+   * 有它才能验"建应用时就装"这条时序 —— 否则每个用例都要真联网装一次 React。
+   */
+  depsInstaller?: (options: EnsureDepsOptions) => Promise<DepsResult>
   /** dev server 首屏可访问的等待上限。冷启动 + 首次预构建会慢，默认 90s */
   readyTimeoutMs?: number
   /** 后端就绪上限。首次 ts-node 编译整棵 Nest 依赖树比较慢，默认 120s */
@@ -198,6 +204,14 @@ export class PreviewManager {
   private readonly launchApi: ApiLauncher
   private readonly databases: PreviewDatabase
   private readonly store = new LogStore()
+  /**
+   * 正在进行的依赖安装（按 appId）。
+   *
+   * ★ 只缓存**在飞**的那一个，装完就删：`package.json` 改了之后要能重新判一次。
+   * 缓存结果的话，用户在对话里让 Agent 装了个包，预览重启时就不会再 install 了
+   * —— 表现为"依赖明明加了却 import 不到"。
+   */
+  private readonly installing = new Map<string, Promise<DepsResult>>()
   private closed = false
 
   constructor(private readonly options: PreviewManagerOptions) {
@@ -366,6 +380,47 @@ export class PreviewManager {
    *
    * 合并之后再过一遍 `scrubEnv`：密钥不该进生成应用的进程。
    */
+  /**
+   * 把依赖装好（幂等，可并发调用）。
+   *
+   * 为什么要有这个入口：依赖原先只在 `preview.start` 时装，而 Agent 在第一轮对话里
+   * 就可能跑 `tsc` / `pnpm test` —— 那时 `node_modules` 还不存在，模型看到的是一堆
+   * `TS2688 Cannot find type definition file`，于是它开始"修"一个根本不存在的类型错误。
+   * 真模型验收时实测过：它会为此烧掉好几轮。所以建应用时就开始装，第一次对话前等它。
+   */
+  async ensureDeps(appId: string): Promise<DepsResult> {
+    if (this.options.installDeps === false) {
+      return { installed: false, command: 'install (已禁用)', durationMs: 0 }
+    }
+    const running = this.installing.get(appId)
+    if (running !== undefined) return running
+
+    const paths = appPaths(this.options.home, appId)
+    const installer = this.options.depsInstaller ?? ensureDeps
+    const task = (async (): Promise<DepsResult> => {
+      const result = await installer({
+        repoDir: paths.repoDir,
+        env: this.spawnEnv(),
+        ...(this.options.log === undefined ? {} : { onLog: this.options.log }),
+      })
+      if (result.installed) {
+        this.options.log?.(`[tenon] 依赖装好了（${result.durationMs}ms）`)
+        this.pushLog(appId, {
+          source: 'tenon',
+          level: 'info',
+          message: `依赖已安装（${result.durationMs}ms）`,
+        })
+      }
+      return result
+    })()
+    this.installing.set(appId, task)
+    try {
+      return await task
+    } finally {
+      this.installing.delete(appId)
+    }
+  }
+
   private spawnEnv(): NodeJS.ProcessEnv {
     return scrubEnv({ ...process.env, ...(this.options.env ?? {}) })
   }
@@ -374,23 +429,9 @@ export class PreviewManager {
     const paths = appPaths(this.options.home, run.appId)
     const env = this.spawnEnv()
     try {
-      // 1. 依赖
-      if (this.options.installDeps !== false) {
-        const result = await ensureDeps({
-          repoDir: paths.repoDir,
-          env,
-          ...(this.options.log === undefined ? {} : { onLog: this.options.log }),
-        })
-        if (run.cancelled) return
-        if (result.installed) {
-          this.options.log?.(`[tenon] 依赖装好了（${result.durationMs}ms）`)
-          this.pushLog(run.appId, {
-            source: 'tenon',
-            level: 'info',
-            message: `依赖已安装（${result.durationMs}ms）`,
-          })
-        }
-      }
+      // 1. 依赖（建应用时可能已经在装了 —— 同一个入口，不会装两遍）
+      await this.ensureDeps(run.appId)
+      if (run.cancelled) return
       run.readiness.deps = 'ready'
       this.emit(run)
 

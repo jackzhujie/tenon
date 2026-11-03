@@ -90,6 +90,31 @@ async function zeroUsage(appId: string, core: CoreServices): Promise<UsageSnapsh
   }
 }
 
+/** 往应用的日志面板推一条（依赖准备这类"不在对话里"的事，只有这里能说清） */
+function pushTenonLog(
+  bus: ServerDeps['bus'],
+  appId: string,
+  level: 'info' | 'warn' | 'error',
+  message: string,
+  detail: string | null = null,
+): void {
+  const now = Date.now()
+  bus.publish({
+    type: 'app.log',
+    appId,
+    entry: {
+      id: `tenon-${appId}-${now}`,
+      appId,
+      at: now,
+      source: 'tenon',
+      level,
+      message,
+      detail,
+      repeat: 1,
+    },
+  })
+}
+
 /**
  * 把「设置改了」这件事翻译成界面能直接显示的一句话。
  *
@@ -146,6 +171,41 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         ...(input.description === undefined ? {} : { description: input.description }),
       })
       bus.publish({ type: 'app.status', appId: app.id, status: app.status })
+      /*
+       * 建完就把依赖装上，**不等它**：装 React 要十几秒，建应用不该卡这么久。
+       * 但也不放任它失败 —— 让 Agent 在第一轮跑 `tsc` 时撞上一堆 TS2688 更糟
+       * （它会开始"修"一个不存在的类型错误，实测能烧掉好几轮）。
+       * 失败写进日志面板，typecheck 那边另有一道"依赖没装好就别信类型错误"的守卫。
+       */
+      void deps.preview
+        .ensureDeps(app.id)
+        .then(async (result) => {
+          if (!result.installed) return
+          /*
+           * install 会生成 `pnpm-lock.yaml`。**单独提交一次**，别让它掉进第一轮对话的 diff：
+           * 一千多行的锁文件会把真正的改动挤出评审视图（`git_diff` 有 48KB 上限），
+           * 而"这一轮改了什么"是评审唯一的输入。
+           */
+          const repoDir = appPaths(core.home, app.id).repoDir
+          const committed = await gitops.commitAll(repoDir, 'chore: 锁定依赖版本')
+          if (committed !== undefined) {
+            bus.publish({
+              type: 'git.commit',
+              appId: app.id,
+              sha: committed.sha,
+              message: committed.message,
+            })
+          }
+        })
+        .catch((error: unknown) => {
+          pushTenonLog(
+            bus,
+            app.id,
+            'warn',
+            '依赖没装好（不影响写代码，但类型检查会不准）',
+            error instanceof Error ? error.message : String(error),
+          )
+        })
       return { app }
     },
 
@@ -168,6 +228,21 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'chat.submit': async (input) => {
       const chat = requireChat(agent)
+      /*
+       * 等依赖就绪再开跑。这一等基本是零成本的：建应用时已经在装了，
+       * 用户打字的时间通常够它装完；装不完也只是"第一句慢一点"，而不是
+       * 让模型对着一个没有 node_modules 的工作区瞎猜。
+       * 失败不拦这一轮 —— 写代码不需要 node_modules，只有类型检查需要。
+       */
+      await deps.preview.ensureDeps(input.appId).catch((error: unknown) => {
+        pushTenonLog(
+          bus,
+          input.appId,
+          'warn',
+          '依赖没装好（不影响写代码，但类型检查会不准）',
+          error instanceof Error ? error.message : String(error),
+        )
+      })
       // 先把任务图看起来：这一轮会产生十几帧，晚挂一步就漏掉开头（也会让面板在
       // 用户根本没切过布局的情况下一直空着）
       await agent.taskGraph?.ensure(input.appId)
