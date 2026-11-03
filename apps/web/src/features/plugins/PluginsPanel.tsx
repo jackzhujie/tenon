@@ -38,12 +38,21 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
   const [data, setData] = useState<ComponentList | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /*
+   * Hub 状态。**未配置是正常状态**（官方 Hub 上线前就是它），所以这里不显示错误，
+   * 只把"现在用的是哪一套"说清楚 —— 写死一句"筹备中"会在 Hub 上线那天变成假话。
+   */
+  const [hub, setHub] = useState<{ configured: boolean; hubUrl: string | null; keyFingerprint: string | null } | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     if (appId === null) return
     try {
-      const list = await rpc('component.list', { appId })
+      const [list, hubStatus] = await Promise.all([
+        rpc('component.list', { appId }),
+        rpc('hub.status', {}),
+      ])
       setData(list)
+      setHub(hubStatus)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -170,7 +179,17 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
           )}
 
           <div className="mt-2 border-t border-line pt-2 text-[10px] text-faint">
-            官方 Hub 筹备中：内置组件跟随软件版本更新，Hub 上线后可单独下载与热更新。
+            {hub?.configured === true ? (
+              <>
+                官方 Hub：<span className="font-mono text-muted">{hub.hubUrl}</span>
+                {hub.keyFingerprint !== null && (
+                  <span className="ml-1 font-mono">· 密钥 {hub.keyFingerprint}</span>
+                )}
+                <div className="mt-0.5">已装的组件会优先用 Hub 上的版本（Hub &gt; 内置）。</div>
+              </>
+            ) : (
+              '官方 Hub 筹备中：内置组件跟随软件版本更新，Hub 上线后可单独下载与热更新。'
+            )}
           </div>
         </div>
       )}

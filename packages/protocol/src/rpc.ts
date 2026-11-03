@@ -502,6 +502,38 @@ export const rpcMethods = {
    * 价格（M5.5）。**没有价格就永远算不出钱** —— pi 的 cost 来自 `model.cost`，
    * 它只在解析模型时读一次。所以改价格要重新解析（服务端会做）。
    */
+  /**
+   * Hub 状态（M6）。**未配置是正常状态** —— 官方 Hub 上线前就是它，
+   * 界面据此显示「筹备中」而不是一个红叉。
+   */
+  'hub.status': {
+    input: Empty,
+    output: z.object({
+      configured: z.boolean(),
+      hubUrl: z.string().nullable(),
+      /** 公钥指纹（sha256 前 16 位）：换过 key 时能看出来 */
+      keyFingerprint: z.string().nullable(),
+    }),
+  },
+  /**
+   * 从 Hub 装一个组件包。地址必须落在 Hub 源之下 —— 否则这个方法就是
+   * "装任意 URL 上的代码"的入口。
+   *
+   * 装好之后会让装了它的应用重新激活（否则用户点了更新，界面上还是旧版本）。
+   */
+  'hub.install': {
+    input: z.object({ bundleUrl: z.string().min(1) }),
+    output: z.object({
+      id: z.string(),
+      version: z.string(),
+      /** 装到了哪（本机路径，仅在服务端有意义） */
+      dir: z.string(),
+      keyFingerprint: z.string(),
+      /** 被重新激活的应用数 */
+      reloadedApps: z.number().int().nonnegative(),
+    }),
+  },
+
   'price.list': {
     input: z.object({ profileId: Id.optional() }),
     output: z.object({ prices: z.array(ModelPrice) }),

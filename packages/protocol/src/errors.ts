@@ -58,6 +58,12 @@ export const ErrorCode = z.enum([
   'RELEASE_NO_COMMITS',
   'RELEASE_FAILED',
   'RELEASE_CHECKS_FAILED',
+
+  /** Hub（M6）：未配置是**正常状态**（官方 Hub 上线前就是它），不是故障 */
+  'HUB_NOT_CONFIGURED',
+  'HUB_BAD_BUNDLE',
+  'HUB_BAD_SIGNATURE',
+  'HUB_INSTALL_FAILED',
 ])
 export type ErrorCode = z.infer<typeof ErrorCode>
 
@@ -105,6 +111,11 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['DB_UNSUPPORTED', 501],
   ['DB_MIGRATE_FAILED', 500],
   ['EXPORT_FAILED', 500],
+  ['HUB_NOT_CONFIGURED', 409],
+  // 包坏了/签名不对是**客户端拒绝**，不是服务器错误 —— 用 422 让调用方知道"内容不可信"
+  ['HUB_BAD_BUNDLE', 422],
+  ['HUB_BAD_SIGNATURE', 422],
+  ['HUB_INSTALL_FAILED', 500],
   ['RELEASE_NO_COMMITS', 409],
   ['RELEASE_FAILED', 500],
   // 409 而不是 500：检查没过不是系统故障，是「当前状态不允许」，用户改代码就能过

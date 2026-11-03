@@ -12,6 +12,7 @@ import { createAgentRuntime, type AgentRuntime, type PageDriverProvider } from '
 import { PreviewManager, type PreviewManagerOptions } from '@tenon/gateway'
 import { scaffoldApp } from '@tenon/generator'
 import { buildServer, type TenonServer } from './app.js'
+import { hubConfigFromEnv, hubPluginsDir } from '@tenon/component-host'
 import { ComponentRuntime } from './components.js'
 import { createComponentBridge, type AppComponentBridge } from './components-link.js'
 import { SseBus } from './sse.js'
@@ -156,6 +157,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   })
   /** 每个应用的组件链路：进程退出/预览重起时要能收干净（wss 不会自己关） */
   const bridges = new Map<string, AppComponentBridge>()
+  /*
+   * Hub 配置（M6）：两个环境变量都给才算配置好。
+   * 装到哪里与加载器的 hub 根**必须同一个** —— 否则"装成功了却加载不到"，
+   * 而这种错查起来最费劲（装的时候一切正常）。
+   */
+  const hubConfig = hubConfigFromEnv(env)
+  const hubDir = hubPluginsDir(env, core.home.root)
   const components = new ComponentRuntime({
     home: core.home,
     agent,
@@ -172,6 +180,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     ...(options.version === undefined ? {} : { version: options.version }),
     pluginRoots: options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root }),
     components,
+    hub: { config: hubConfig, dir: hubDir },
     ...(options.logger === undefined ? {} : { logger: options.logger }),
     ...(options.webDir === undefined ? {} : { web: { dir: options.webDir } }),
   })

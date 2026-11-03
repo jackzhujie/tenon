@@ -14,6 +14,7 @@
 export * from './agents-doc.js'
 export * from './assembly.js'
 export * from './install.js'
+export * from './hub.js'
 export * from './manifest.js'
 export * from './plan.js'
 export * from './resolve.js'

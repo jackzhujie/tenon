@@ -21,8 +21,12 @@ import {
 import {
   ASSEMBLY_FILE,
   buildPlan,
+  hubKeyFingerprint,
+  installFromHub,
   listAvailable,
+  readAssembly,
   setComponentEnabled,
+  type HubConfig,
   type PluginRoot,
 } from '@tenon/component-host'
 import type { ComponentRuntime } from './components.js'
@@ -48,6 +52,11 @@ export interface ServerDeps {
   preview: PreviewManager
   /** 组件宿主（M5 第 3 步）：应用一运行就把它的 server facet 挂起来 */
   components: ComponentRuntime
+  /**
+   * 官方 Hub（M6）。`config` 为 null 是**正常状态** —— 官方 Hub 上线前就是它，
+   * 界面显示「筹备中」而不是报错。
+   */
+  hub: { readonly config: HubConfig | null; readonly dir: string }
   bus: SseBus
   version: string
   /**
@@ -572,6 +581,69 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
           latencyMs: Date.now() - started,
           message: error instanceof Error ? error.message : String(error),
         }
+      }
+    },
+
+    'hub.status': async () => {
+      const config = deps.hub.config
+      return {
+        configured: config !== null,
+        hubUrl: config?.hubUrl ?? null,
+        keyFingerprint: config === null ? null : hubKeyFingerprint(config.publicKey),
+      }
+    },
+
+    'hub.install': async (input) => {
+      const config = deps.hub.config
+      if (config === null) {
+        throw new TenonError(
+          'HUB_NOT_CONFIGURED',
+          '官方 Hub 还没配置。设 TENON_HUB_URL 与 TENON_HUB_PUBLIC_KEY 之后才能从 Hub 安装组件。',
+        )
+      }
+      const result = await installFromHub({
+        hubDir: deps.hub.dir,
+        config,
+        bundleUrl: input.bundleUrl,
+      })
+      if (!result.ok) {
+        // 签名不对与"包坏了"用不同的 code：前者是安全问题，后者是内容问题
+        const code =
+          result.problem.code === 'bad-signature'
+            ? 'HUB_BAD_SIGNATURE'
+            : result.problem.code === 'fetch-failed'
+              ? 'HUB_BAD_BUNDLE'
+              : 'HUB_BAD_BUNDLE'
+        throw new TenonError(code, result.problem.message, {
+          hint: result.problem.hint,
+          reason: result.problem.code,
+        })
+      }
+
+      /*
+       * 装完立刻让**装了它的应用**重新激活。
+       * 不做这一步的话，用户点了更新、界面上还是旧版本 —— 因为组件是在预览启动时
+       * 一次性装配的。"下次重启生效"对这个功能来说等于没做。
+       */
+      let reloadedApps = 0
+      for (const app of core.apps.list()) {
+        const read = await readAssembly(appPaths(core.home, app.id).repoDir)
+        if (read.kind !== 'ok') continue
+        if (!read.assembly.components.some((item) => item.id === result.value.id)) continue
+        try {
+          await deps.components.reload(app.id)
+          reloadedApps += 1
+        } catch {
+          // 单个应用重载失败不该让"装好了"这个事实变成错误
+        }
+      }
+
+      return {
+        id: result.value.id,
+        version: result.value.version,
+        dir: result.value.dir,
+        keyFingerprint: result.value.keyFingerprint,
+        reloadedApps,
       }
     },
 

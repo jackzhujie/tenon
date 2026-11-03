@@ -42,6 +42,8 @@ export interface BuildServerOptions {
   pluginRoots?: readonly PluginRoot[]
   /** 组件宿主。不给就建一个"没有模型、没有插件"的空实现，纯 RPC 测试不必装整套 */
   components?: ComponentRuntime
+  /** 官方 Hub（M6）。不给 = 未配置（正常状态，不是错误） */
+  hub?: ServerDeps['hub']
   logger?: boolean
   /**
    * 渲染器产物目录（`apps/web/dist`）。给了就由 server 同源发页面，
@@ -67,6 +69,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
     bus,
     version: options.version ?? '0.0.0',
     plugins: { roots: options.pluginRoots ?? [] },
+    hub: options.hub ?? { config: null, dir: '' },
     components:
       options.components ??
       // 直接调 buildServer 的调用方（测试、未来的 IPC 传输）：现建一个也够用

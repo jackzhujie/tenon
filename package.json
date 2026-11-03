@@ -40,7 +40,8 @@
     "e2e:component": "tsx scripts/e2e-component.ts",
     "e2e:provider": "tsx scripts/e2e-provider.ts",
     "e2e:real": "tsx scripts/e2e-real.ts",
-    "shot:settings": "tsx scripts/shot-settings.ts"
+    "shot:settings": "tsx scripts/shot-settings.ts",
+    "pack:plugin": "tsx scripts/pack-plugin.ts"
   },
   "devDependencies": {
     "@tenon/protocol": "workspace:*",
