@@ -91,6 +91,27 @@ export const ChatSubmitInput = z.object({
 })
 export type ChatSubmitInput = z.infer<typeof ChatSubmitInput>
 
+/**
+ * "保存之后模型到底换没换" —— 每个会动模型的设置项都回这个。
+ *
+ * 为什么把它放进返回值：用户最常问的是"我填完了，现在能用了吗"。
+ * 只返回 `{ profile }` 的话，界面只能猜；而猜错的方向是"显示已生效、实际还是旧的"。
+ */
+export const ModelState = z.object({
+  model: z
+    .object({
+      mode: z.enum(['faux', 'openai-compatible']),
+      providerId: z.string(),
+      modelId: z.string(),
+    })
+    .nullable(),
+  /** 换不过去的原因（比如 key 缺失）。`model` 为 null 时它一定有值 */
+  error: z.string().nullable(),
+  /** 这一次调用真的换了模型（false = 设置没变，或者没换成功） */
+  changed: z.boolean(),
+})
+export type ModelState = z.infer<typeof ModelState>
+
 const Empty = z.object({})
 
 export const rpcMethods = {
@@ -440,7 +461,7 @@ export const rpcMethods = {
   },
   'settings.set': {
     input: z.object({ values: z.record(z.string(), z.unknown()) }),
-    output: z.object({ values: z.record(z.string(), z.unknown()) }),
+    output: z.object({ values: z.record(z.string(), z.unknown()), applied: ModelState }),
   },
 
   'provider.list': {
@@ -459,11 +480,26 @@ export const rpcMethods = {
       /** 明文只在写入方向出现；读出方向永远没有这个字段 */
       apiKey: z.string().nullable().default(null),
     }),
-    output: z.object({ profile: ProviderProfile }),
+    output: z.object({ profile: ProviderProfile, applied: ModelState }),
+  },
+  /**
+   * 测一下这个 provider 到底通不通（端点 / key / 模型 id 三者有一个错都会失败）。
+   *
+   * 为什么值得单独一个 RPC：填错 key 的表现与"模型有点笨"几乎一样 ——
+   * 用户会以为是产品不好用。发一次最小的请求，把 HTTP 状态与错误原文交回去。
+   */
+  'provider.test': {
+    input: z.object({ id: Id }),
+    output: z.object({
+      ok: z.boolean(),
+      latencyMs: z.number().int().nonnegative(),
+      /** 失败时是提供商的原话（不要改写成"连接失败"，那句话没有诊断价值） */
+      message: z.string(),
+    }),
   },
   'provider.delete': {
     input: z.object({ id: Id }),
-    output: z.object({ deleted: z.literal(true) }),
+    output: z.object({ deleted: z.literal(true), applied: ModelState }),
   },
 } as const
 

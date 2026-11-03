@@ -140,7 +140,7 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**真模型验收已通过**（DeepSeek V4.1 Flash，`pnpm e2e:real` 12/12：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问，46s / 13.3k token）。见 STATUS §4.27。**下一步**：设置页 + 模型热切换。旧文：M5 第 3 步（b）—— 第一个真组件的界面半边（web facet + 网关 WS 链路 + `app.shell.overlay` 渲染）。
+**真模型验收已通过**（DeepSeek V4.1 Flash，`pnpm e2e:real` 12/12：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问，46s / 13.3k token）。见 STATUS §4.27。**设置页与模型热切换已落地**（顶栏「未配置模型」点开就能填 key，保存即生效、不用重启）。**下一步**：依赖预装时机 + provider 价格表。旧文：M5 第 3 步（b）—— 第一个真组件的界面半边（web facet + 网关 WS 链路 + `app.shell.overlay` 渲染）。
 服务端半边已经落地：契约 + server facet + 插件构建（`pnpm build:plugins`，410KB 单文件）+ 宿主装载。
 M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，
 M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17、第 2 步（组件加载器）见 §4.18、第 3 步 a（真组件）见 §4.19。

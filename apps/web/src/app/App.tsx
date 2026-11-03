@@ -77,6 +77,7 @@ export function App() {
         apps={state.apps}
         activeApp={workspace.activeApp}
         model={state.model}
+        onModelChanged={workspace.refreshModel}
         stream={state.stream}
         usage={state.usage}
         budgetStopped={state.budgetStopped}

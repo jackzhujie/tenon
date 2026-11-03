@@ -1,6 +1,7 @@
 import type { App, BudgetDimension, UsageSnapshot } from '@tenon/protocol'
 import { AppMenu } from '../features/apps/AppMenu.js'
 import { PluginsPanel } from '../features/plugins/PluginsPanel.js'
+import { ModelPanel } from '../features/settings/ModelPanel.js'
 import { UsagePanel } from '../features/usage/UsagePanel.js'
 import { PlusIcon } from '../components/icons.js'
 import { Button } from '../components/ui/Button.js'
@@ -32,30 +33,12 @@ function StreamDot({ state }: { state: StreamState }) {
   )
 }
 
-function ModelTag({ model }: { model: ActiveModel | null }) {
-  if (model === null) {
-    return <span className="text-[10.5px] text-warn">未配置模型</span>
-  }
-  const faux = model.mode === 'faux'
-  return (
-    <span
-      className={cn(
-        'rounded border px-1.5 py-0.5 font-mono text-[10px]',
-        faux
-          ? 'border-warn/30 bg-warn/10 text-warn'
-          : 'border-line bg-panel-2 text-muted',
-      )}
-      title={faux ? '当前是本地假模型，回复内容是固定文案，仅用于验证链路' : model.providerId}
-    >
-      {faux ? '假模型 · 仅验证链路' : model.modelId}
-    </span>
-  )
-}
-
 export interface HeaderProps {
   apps: App[]
   activeApp: App | null
   model: ActiveModel | null
+  /** 模型设置保存之后重新问一次（顶栏标签立刻跟上） */
+  onModelChanged(): Promise<void> | void
   stream: StreamState
   usage: UsageSnapshot | null
   /** 这一轮被额度掐了是哪个维度（null = 没被掐） */
@@ -71,6 +54,7 @@ export function Header({
   apps,
   activeApp,
   model,
+  onModelChanged,
   stream,
   usage,
   budgetStopped,
@@ -97,7 +81,7 @@ export function Header({
       </Button>
 
       <div className="ml-auto flex items-center gap-3">
-        <ModelTag model={model} />
+        <ModelPanel model={model} onChanged={onModelChanged} />
         <UsagePanel
           usage={usage}
           stopped={budgetStopped}

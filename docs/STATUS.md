@@ -1102,13 +1102,14 @@ faux 证明的是管线通，不是"模型按提示词把事做完"。而只在�
    消息甚至是空的 —— 模型看到四个字母，既不知道发生了什么也没法自救。
    → 工具层兜住并翻译成人话（"装 X 时出错了：…"）。
 
-#### 还没解决、留给真 key 那一跑之后决定的产品缺口
+#### 这一跑之后补掉的两条
 
-- **没有设置页**：`provider.upsert` 有 RPC、没有界面。今天只能靠脚本直接写库。
-- **模型只在启动时解析**：`settings.set` / `provider.upsert` 都不会让已运行的 server 换模型，
-  用户填完 key 得重启才生效（"填完就能用"与"重启才生效"是两种产品）。
-- **成本恒为 0**：provider profile 没有价格表，`costUsd` 永远是 0 →
-  **「按美元设额度」对 BYOK 用户完全失效**，只有 token 维度是真的。
+- ~~没有设置页~~ → §4.28 做了（顶栏「未配置模型」点开就能填）。
+- ~~模型只在启动时解析~~ → §4.28 做了热切换（保存即生效，不用重启）。
+
+**还欠着的一条**：**成本恒为 0** —— provider profile 没有价格表，`costUsd` 永远是 0 →
+「按美元设额度」对 BYOK 用户完全失效，只有 token 维度是真的。要修得给 profile 加价格表
+（每百万 token 输入/输出），否则额度只有一半是真的。
 
 #### 真 key 的跑法（环境变量，key 不落日志）
 
@@ -1121,6 +1122,34 @@ TENON_REAL_KEY=sk-... TENON_REAL_MODEL=deepseek-chat \\
 可选：`TENON_REAL_HOME=/tmp/xxx` 复用已有 home（省掉每次装 React 的几十秒）、
 `TENON_REAL_BUDGET_TOKENS=400000` 设额度（默认 40 万，超了当场熔断）。
 脚本只会打印 key 的前 3 位与后 2 位。
+
+### 4.28 模型设置页 + 热切换（M5.5 第二件）—— ✅ 已完成
+
+做之前的状况：`provider.upsert` 有 RPC、**没有界面**，而且模型只在启动时解析一次。
+也就是说这个产品的 BYOK 只对写脚本的人可用 —— 真用户拿到 API Key 也没处填。
+
+| 交付 | 落在哪 | 关键决定 |
+|---|---|---|
+| 设置面板 | `apps/web/src/features/settings/ModelPanel.tsx` | 顶栏那个模型标签**本身就是按钮**（未配置时是黄字「未配置模型」，成功即是 `modelId`）；预设 DeepSeek / OpenAI / 本地 LM Studio 一键填端点 |
+| 连接测试 | `provider.test`（protocol + server） | 发一次 16 token 的最小请求，**把提供商的原话交回来**（401 就是 401）。填错 key 的表现与"模型有点笨"几乎一样，用户会以为是产品不好用 |
+| 热切换 | `AgentRuntime.applyModel()` | `createAgentRuntime` 改成**可变外壳**（getter 委托），`createHandlers` 解构的是这个对象，所以换模型对调用方完全透明 |
+| 自动选中 | `provider.upsert` | 第一个提供商自动设为当前。填完 key 什么都没发生，是这类设置页最常见的挫败感 |
+| 删除即回到无 | `provider.delete` | 删的正好是当前那个时，把 `activeProviderId` 也清掉，否则下次启动报"提供商已不存在" |
+
+**"保存后不重启"是怎么做到的**：`applyModel()` 先算新 plan，与旧的一致就**什么都不做**
+（每次保存都重建会把正在跑的一轮掐掉）；不一致才 teardown + 重新 build。
+代价写在接口注释里：切换会关掉现有 harness 会话（会话数据在 sqlite，下次 `resume()` 接回来）。
+
+**人眼验收**（`pnpm shot:settings`）：真 Chromium 里点开面板（未配置态）、打开表单、
+填一个假端点、点「保存并启用」→ 顶栏标签变成 `shot-model`、面板出现
+「已生效：shot-model（不用重启）」、列表里那一行带上「当前」标记。四张截图在 `/tmp/tenon-settings/`。
+
+测试 4 项（`provider-hotswap.test.ts`，真 HTTP + 假 provider）：配完立刻生效 / `provider.test`
+的 401 原文 / 删掉当前 provider 立刻回到 null / 设置没变时 `changed=false`（不重建）。
+
+**踩到的一条**：`settings.get` 对**不存在的键返回 `undefined`**，不是 `null`。我按 `=== null`
+判"还没选中"，于是自动选中从来没生效 —— 而 `planModel` 有"只有一家就用它"的兜底，
+所以**模型能用、界面上的「当前」标记却是空的**。这种"能用但看着没配好"最容易让人反复保存。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
@@ -1277,6 +1306,7 @@ TENON_REAL_KEY=sk-... TENON_REAL_MODEL=deepseek-chat \\
 | **`executeJavaScript` 里拼选择器必须过 `JSON.stringify`** | `'document.querySelector("' + ball + '")` 这种写法在 ball 自带双引号时是语法错误；而外层 `.catch(() => false)` 会把它吞掉 —— 现象是"元素一直没出现"，排查方向全错（M5 第 8 步在这上面卡了两轮） |
 | **一轮结束不能只看"最后一条是助手"** | 真模型会"先说一句、接着继续调工具"（"我先看看结构"），只看消息形状会在它干活中途判成结束 → 后面所有断言都在它还没写完时执行。判据必须是 **应用回到 idle + 末尾是 `settled` 助手消息** 两个条件同时成立 |
 | **判"文件改了吗"要前后对比，别猜关键词** | 我用 `!content.includes('Tenon')` 当"没改"的标志，而模型正好把标题写成「Tenon · 待办」→ 把成功报成失败。猜关键词的断言迟早误判，两个方向都有害 |
+| **`settings.get` 对不存在的键返回 `undefined`，不是 `null`** | 用 `=== null` 判"还没设置"永远不成立。而 `planModel` 又有"只有一家就用它"的兜底 → 模型能用、界面上「当前」却是空的（能用但看着没配好，比不能用更让人困惑）。判空用 `== null` |
 | **声明了选项 ≠ 传下去了** | `AgentRuntimeOptions.components` 声明、server 传、`HarnessPool` 用，中间的 `createAgentRuntime` 漏了一行 —— 结果 `install_component` 在真实运行时里**从来没挂上过**，模型一调回 "Tool ... is not available"。类型检查抓不到（两侧都对），单元测试也抓不到（直接构造 pool 绕过了那一跳）→ 这类"装配链断点"只能从**最外层**起步的用例才发现（`component-wiring.test.ts`） |
 | **工具 part 的 `status` 不能写死** | 必须按 `toolCallId` 从 `pi.tool-result` 回填。写死 `'ok'` 的话，路径越界/命令非零退出/组件装不上在界面上与成功一模一样 —— 这是最坏的一种绿：用户不会查，模型也以为自己做成了 |
 | **组件脚本加载失败是静默的** | 它是 `type="module"`：语法错/导入失败只在控制台留一行，页面照常可用。所以网关注入时**同时注入一行错误捕手**（`window.__tenonComponentErrors`），端到端与用户反馈都读它 |
@@ -1305,6 +1335,7 @@ pnpm dev:server            # 同上但用真实模型（需要先配 provider，
 pnpm test                  # vitest：58 个测试文件（540 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
+pnpm shot:settings         # ★ 设置页的人眼验收：真 Chromium 里填表→保存→截图（4 张）
 pnpm e2e:provider          # ★ BYOK 通路：本地假 OpenAI 服务，真跑流式 + 工具调用 + 落盘（不要 key）
 TENON_REAL_MOCK=1 pnpm e2e:real  # ★ 真模型验收的排练：假 provider 走完三个阶段（不要 key）
 TENON_REAL_KEY=… pnpm e2e:real   # ★ 真模型验收：生成 → 装组件 → 真 Chromium 里加/删/问（要 key）

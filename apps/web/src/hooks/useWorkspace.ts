@@ -161,6 +161,8 @@ type Action =
       model: ActiveModel | null
     }
   | { kind: 'apps'; apps: App[] }
+  /** 模型换了（设置页里保存之后）：让顶栏那个标签立刻跟上，不用刷新整页 */
+  | { kind: 'model'; model: ActiveModel | null }
   | { kind: 'select'; appId: string | null }
   | { kind: 'history'; messages: NormalizedMessage[] }
   | { kind: 'commits'; commits: GitCommit[] }
@@ -351,6 +353,8 @@ function reducer(state: State, action: Action): State {
       }
     case 'apps':
       return { ...state, apps: action.apps }
+    case 'model':
+      return { ...state, model: action.model }
     case 'select':
       // 换应用 → 旧会话的一切立刻清空，别让上一个应用的消息闪现
       //
@@ -447,6 +451,8 @@ export interface Workspace {
   startPreview(restart?: boolean): Promise<void>
   clearLogs(): Promise<void>
   setSelection(selection: SelectionContext | null): void
+  /** 重新问一次"现在用的是什么模型"（设置页保存后调，顶栏标签立刻跟上） */
+  refreshModel(): Promise<void>
   /** 打开某一版看它改了什么（`git.show`） */
   showCommit(sha: string): Promise<void>
   /**
@@ -911,6 +917,15 @@ export function useWorkspace(): Workspace {
     [state.apps, state.activeAppId],
   )
 
+  const refreshModel = useCallback(async (): Promise<void> => {
+    try {
+      const health = await rpc('health', {})
+      dispatch({ kind: 'model', model: health.model })
+    } catch {
+      // 刷新失败不改状态：下一次启动还会再问一次，没必要为它弹一个错误
+    }
+  }, [])
+
   return {
     state,
     activeApp,
@@ -928,5 +943,6 @@ export function useWorkspace(): Workspace {
     publish,
     checkRelease,
     setBudget,
+    refreshModel,
   }
 }

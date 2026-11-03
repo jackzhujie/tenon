@@ -7,6 +7,7 @@
  */
 import type { CoreServices } from '@tenon/core'
 import {
+  SETTING_KEYS,
   ZERO_USAGE,
   appPaths,
   breached,
@@ -28,7 +29,14 @@ import type { ComponentRuntime } from './components.js'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { listTemplates } from '@tenon/generator'
-import type { RpcArgs, RpcMethod, RpcMethods, RpcOutput, UsageSnapshot } from '@tenon/protocol'
+import type {
+  ModelState,
+  RpcArgs,
+  RpcMethod,
+  RpcMethods,
+  RpcOutput,
+  UsageSnapshot,
+} from '@tenon/protocol'
 import { TenonError } from '@tenon/protocol'
 import { pickSnapshot, type PickedSnapshot } from './revert-data.js'
 import { inspectRelease, publishRelease } from './release.js'
@@ -79,6 +87,22 @@ async function zeroUsage(appId: string, core: CoreServices): Promise<UsageSnapsh
     budget,
     level: levelOf(ZERO_USAGE, budget),
     exceeded: breached(ZERO_USAGE, budget),
+  }
+}
+
+/**
+ * 把「设置改了」这件事翻译成界面能直接显示的一句话。
+ *
+ * 之所以两个分支都回 `ModelState` 而不是抛错：**设置本身已经写进去了**（磁盘上是新值），
+ * 换不过去只说明"这回还用不了"。抛错会让用户以为保存失败，从而反复保存。
+ */
+async function applyAndReport(agent: AgentRuntime): Promise<ModelState> {
+  const result = await agent.applyModel()
+  if (!result.ok) return { model: null, error: result.error, changed: false }
+  return {
+    model: { mode: result.mode, providerId: result.providerId, modelId: result.modelId },
+    error: null,
+    changed: result.changed,
   }
 }
 
@@ -385,12 +409,15 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'settings.get': async () => ({ values: core.settings.all() }),
 
-    'settings.set': async (input) => ({ values: core.settings.set(input.values) }),
+    'settings.set': async (input) => ({
+      values: core.settings.set(input.values),
+      applied: await applyAndReport(agent),
+    }),
 
     'provider.list': async () => ({ profiles: core.providers.list() }),
 
-    'provider.upsert': async (input) => ({
-      profile: core.providers.upsert({
+    'provider.upsert': async (input) => {
+      const profile = core.providers.upsert({
         id: input.id,
         label: input.label,
         kind: input.kind,
@@ -399,12 +426,62 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         modelId: input.modelId,
         paramsJson: input.paramsJson,
         apiKey: input.apiKey,
-      }),
-    }),
+      })
+      /*
+       * 第一个提供商自动选中。用户刚填完 key 却什么都没发生，是这类设置页最常见的
+       * 挫败感来源 —— 他没有理由知道"还要再去点一下启用"。
+       */
+      // 注意是 `== null`：`settings.get` 没这个键时返回 **undefined**（不是 null）
+      if (core.settings.get(SETTING_KEYS.activeProviderId) == null) {
+        core.settings.set({ [SETTING_KEYS.activeProviderId]: profile.id })
+      }
+      return { profile, applied: await applyAndReport(agent) }
+    },
+
+    'provider.test': async (input) => {
+      const profile = core.providers.find(input.id)
+      if (profile === undefined) return { ok: false, latencyMs: 0, message: '这个提供商不存在（可能刚被删掉）' }
+      const apiKey = core.providers.revealApiKey(input.id)
+      const base = (profile.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '')
+      const started = Date.now()
+      try {
+        const response = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(apiKey === undefined ? {} : { authorization: `Bearer ${apiKey}` }),
+          },
+          // 只发"一句话、回几个字"：测的是端点与凭据，不是模型水平
+          body: JSON.stringify({
+            model: profile.modelId,
+            messages: [{ role: 'user', content: 'ping' }],
+            max_tokens: 16,
+            stream: false,
+          }),
+          signal: AbortSignal.timeout(20_000),
+        })
+        const latencyMs = Date.now() - started
+        if (!response.ok) {
+          const body = await response.text()
+          // 提供商的原文比"连接失败"有用得多：401 是 key，404 多半是模型 id
+          return { ok: false, latencyMs, message: `${response.status} ${body.slice(0, 400)}` }
+        }
+        return { ok: true, latencyMs, message: `端点与凭据都通（${profile.modelId}）` }
+      } catch (error) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - started,
+          message: error instanceof Error ? error.message : String(error),
+        }
+      }
+    },
 
     'provider.delete': async (input) => {
+      const wasActive = core.settings.get(SETTING_KEYS.activeProviderId) === input.id
       core.providers.delete(input.id)
-      return { deleted: true }
+      // 删掉的正好是当前用的那个：把选中项也清掉，否则下次启动会报"提供商已不存在"
+      if (wasActive) core.settings.set({ [SETTING_KEYS.activeProviderId]: null })
+      return { deleted: true, applied: await applyAndReport(agent) }
     },
   } satisfies HandlerMap
 }
