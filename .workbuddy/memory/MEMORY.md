@@ -3,7 +3,7 @@
 本地优先、可自托管的**对话式 AI 全栈应用搭建平台**（桌面 + Web 同构）。产品名 Tenon，作用域 `@tenon/*`。
 隐喻：应用靠标准组件咬合，Agent 只做设计。⚠️ `LM Studio` 是第三方名，全局改名须保护。
 
-**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 151 条**）；方案 `docs/DESIGN.md`（v1.2.25）。
+**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 153 条**）；方案 `docs/DESIGN.md`（v1.2.25）。
 这里只留「不知道就会走错方向」的，细节查 STATUS §5，别重复。
 
 ## 三条铁律
@@ -56,7 +56,9 @@ server facet + manifest；`scripts/build-plugins.ts` esbuild 打单文件 410KB�
 开关走新 RPC `component.setEnabled`——只改 `enabled` + 同步 AGENTS.md「已关闭」+ reload；
 **界面只过了类型检查与 build:web，没在浏览器里看过**）。**第 7 步另两个官方插件（导出 CSV / 审批流）也落地**：三份契约形状一致（照抄即可复制），
 暴露并记录三个问题（组件无持久化 → 审批数据重启即失；web facet 只能 fixed 定位，真插槽需应用配合；
-三个 web bundle 各 735KB 需共享运行时）。**下一步：第 8 步热重载 + 端到端验收（DoD ①③）**。
+三个 web bundle 各 735KB 需共享运行时）。**第 8 步端到端也通了**：`pnpm e2e:component` 5/5（真 Chromium：球注入 / 点开聊天 / HMR 后还在且不重复挂 /
+整页刷新对话还在）→ **DoD ①③ 满足，M5 八步全部收口**。卡了两轮的真因是 e2e 自己拼选择器没转义
+（`catch(()=>false)` 吞了语法错误）；顺带给网关注入了错误捕手 `window.__tenonComponentErrors`。
 欠账：Docker compose 产物、真远端 push、真模型下的"改样式自验"、额度无跨应用总闸、
 用量答不了"哪个角色花了多少"、`lint` 未接（模板没 eslint 配置）、
 脚本能用 `// @options: timeout_ms` 放大沙箱默认超时、主界面没有"当前能不能发"的指示。

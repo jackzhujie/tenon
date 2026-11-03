@@ -235,7 +235,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 6.5 | **工具层**：read/write/edit/bash 接进 pi-durable（cwd 钉在 `repo/`、越界拒写、环境洗净） | ✅ | `packages/agent/src/tools/coding.ts` |
 | 6.6 | **生成器**：`templates/react-vite` 铺进 `repo/`，与首次 commit 同一个动作 | ✅ | `packages/generator/` |
 | 7 | **预览**：App Gateway + dev server 编排（`preview.start/stop/status` + `preview.status` 事件） | ✅ | `packages/gateway/` |
-| 8 | **热重载不丢状态（DoD ③）+ 端到端验收（DoD ①）** | 🚧 脚本就位、卡在真页面里球没出现，见 §4.26 | `scripts/e2e-component.ts`（`pnpm e2e:component`） |
+| 8 | **组件热重载不丢状态（DoD ③）+ 端到端验收（DoD ①）** | ✅ 见 §4.26（`pnpm e2e:component` 5/5） | `scripts/e2e-component.ts` |
 | 9 | **Electron 壳** + 同源托管 + 打包冒烟 | ✅ mac 实测（win 待 M6 有机器时补） | `apps/desktop`（main/supervisor/paths + build.mjs）、`packages/server/src/static.ts` |
 
 **M1 完成**：界面上点「新建应用」→ 铺模板 → 自动起预览 → 在对话里说需求 → Agent 改代码 → iframe 热更新 →
@@ -1023,25 +1023,28 @@ DoD ② 的"清理"在这里被拆成**三条可验证的事实**，一条都不
 
 测 7 项（都用 `memoryLinkPair`，只验组件自己）：CSV 转义/行对齐/文件名清洗、审批状态机/非法转移/跨 root 存活。
 
-### 4.26 M5 第 8 步：端到端脚本就位，真页面里球没出现 —— 🚧
+### 4.26 M5 第 8 步验收（端到端 / DoD ①③）—— ✅ 已完成
 
-`pnpm e2e:component` 会把整条链路真跑一遍：建应用 → 写装配声明 → 起预览（真装 React）→
-Electron + 真 Chromium → 找球 → 点开 → 发一句 → 等两条气泡 → 改代码触 HMR → 再刷新。
-断言五条：应用首屏 / 球存在且只有一个 / 问答两条气泡 / HMR 后球没重复挂 / 刷新后对话还在。
+`pnpm e2e:component`：建应用 → 写装配声明 → 起预览（真装 React）→ **Electron + 真 Chromium** →
+找球 → 点开 → 发一句 → 等两条气泡 → 改代码触 HMR → 整页刷新。每一项都是真跑，**5/5 通过**：
 
-**已经确认正常的两环**（脚本里有诊断行，跑一次就能看到）：
-- 网关往 HTML 里插了 `<script type="module" src="/__tenon/component.js?appId=…">`
-- 该端点返回 `200 application/javascript`，内容是 esbuild 产物（`var __defProp = …`）
+| 断言 | 说明 |
+|---|---|
+| 应用首屏 | 应用自己先渲染出来（否则"球在"没有意义） |
+| 球存在且只有一个 | **注入时机对了**：页面已经在跑的时候插的脚本；HMR 重跑模块也不会重复挂 |
+| 问答两条气泡 | DOM → chord(WS) → server facet → 注入的模型能力 → 回到 DOM，整条真的通了 |
+| HMR 之后球还在 | DoD ③ 的一半：热更新不把组件弄丢 |
+| **刷新整页对话还在** | DoD ③ 的另一半：状态在服务端对象上，不在 DOM 里 |
 
-**卡住的地方**：模块加载之后**没有生成悬浮球**（`[data-tenon-component]` 数为 0），
-而 Electron 侧一条 console 都没捕到 —— 说明它既没抛到能被监听的地方，也没走完 `mount()`。
-下一步的怀疑顺序（写在这里免得下次重头猜）：
-1. esbuild 的 browser 产物里 `import.meta.url` 的形态（webpack 风格替换 / 被 shim 掉 → `appIdOf()` 抛错）。
-   我们的 `mount` 外面只有 `try/catch + console.warn`，**如果 console 没被接住，这条错就静默消失了**；
-2. chord 的浏览器侧在 `type="module"` 脚本里是否有顶层副作用失败；
-3. Electron `console-message` 的事件签名（我这一版可能压根没接对，所以"没日志"不等于"没报错"）。
+**卡住两轮的真因（都写在 §5 了）**：
+1. Electron 必须 `--no-sandbox` 且**删掉** `ELECTRON_RUN_AS_NODE`（写成空串也算存在）；
+2. **测试自己拼的选择器没转义**：`'document.querySelector("' + ball + '")'` 里 ball 自带双引号 →
+   每次轮询都是一次语法错误，而 `.catch(() => false)` 把它吞了。80 多条"等不到"，真实原因在
+   `executeJavaScript` 的字符串里。
 
-**这条一旦通过，第 3b/6 步里"没在浏览器里看过"的部分也就一并验掉了。**
+顺带留下一个**产品级改进**：网关注入组件脚本时多插一行**错误捕手**（`window.__tenonComponentErrors`）。
+组件是模块脚本，加载失败时浏览器只在控制台留一行、页面照常可用 —— "组件没出现"这个现象
+没有任何别的线索。这一行就是这次能定位下去的原因，以后端到端与用户反馈都读它。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
@@ -1195,6 +1198,8 @@ Electron + 真 Chromium → 找球 → 点开 → 发一句 → 等两条气泡 
 | **状态字段不能叫 `status` / `error` / `variant` / `ready` / `shape` / `release` / `then` / `contract`** | 那是 chord Ref 自己的成员，撞名在**定义契约那一刻**抛 `member name is reserved`。AI 小助手的状态因此叫 `phase` 而不是 `status` |
 | **host 的 `name` 必须等于契约里的 `hostNamed(…)`** | 否则 `serve` 抛「declared for server, but <别的名字> serves it」。名字是路由名，不是实例 id：一个进程里多个应用的 host 都叫 `server`，靠链路区分 |
 | **组件的 facet 是构建产物，不进 git** | `plugins/bundled/<id>/server.js` 由 `pnpm build:plugins` 生成（esbuild 连 chord 一起打，410KB）。忘了构建的表现是"组件加载失败：Cannot find module"，而源码看着完全正常 |
+| **`executeJavaScript` 里拼选择器必须过 `JSON.stringify`** | `'document.querySelector("' + ball + '")` 这种写法在 ball 自带双引号时是语法错误；而外层 `.catch(() => false)` 会把它吞掉 —— 现象是"元素一直没出现"，排查方向全错（M5 第 8 步在这上面卡了两轮） |
+| **组件脚本加载失败是静默的** | 它是 `type="module"`：语法错/导入失败只在控制台留一行，页面照常可用。所以网关注入时**同时注入一行错误捕手**（`window.__tenonComponentErrors`），端到端与用户反馈都读它 |
 | **链路要在 socket 建出来那一刻挂上，不能等 `open`** | `webSocketLink(socket)` 才挂 `message` 监听。等 `open` 再挂，那几十毫秒里服务端已经在发帧 —— 帧丢了、序号错位，报 `ack 2 outside 0..2`，之后调用**永不返回**（Spike 6 就是这么被咬的） |
 | **链路两端的 `principal` 形状必须一致** | 组件契约的 principal 是 `{appId}`，宿主的 `accept({principal})` 与客户端的 `upstream.principal` 都必须是这个形状；给错不会报类型错，而是组件 factory 里抛 `invalid/principal`（消息里两个 appId 还长得一样，很容易看漏）|
 | **`TENON_PLUGINS_DIR` 和 `TENON_TEMPLATES_DIR` 是同一个坑** | 加载器打进 `server.mjs` 后按 `import.meta.url` 找 `plugins/bundled` 必然找错，而表现是"插件页空空如也"、**没有任何报错**。壳必须显式指到 `<Resources>/plugins` |
@@ -1220,6 +1225,7 @@ pnpm dev:server            # 同上但用真实模型（需要先配 provider，
 pnpm test                  # vitest：58 个测试文件（540 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
+pnpm e2e:component         # ★ 组件端到端：真 Chromium 里点球/聊天/HMR/整页刷新（5 项，要联网装 React）
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
 pnpm e2e:diff              # ★ 改动/回滚：git.log / show / revert 全走真 HTTP
 pnpm e2e:release           # ★ 发布：预检只读 → 门禁拦截 → force 留痕 → 打 tag + 推本地裸库，系统 git 验 fsck / clone
@@ -1298,10 +1304,10 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 第 4 步让 Agent 能**一个工具装组件**（写声明 + 同步 `AGENTS.md` + 装完立刻生效，见 §4.22）。
 第 6 步把**插件页**做出来了（列表 / 开关 / 来源标识 / Hub 占位，见 §4.24）。
 第 7 步补齐了**另外两个官方插件**（导出 CSV / 审批流）与 L1 积木清单，验证了"规范可复制"（见 §4.25）。
-下一步是 **M5 第 8 步：热重载不丢状态（DoD ③）+ 端到端验收（DoD ①）** —— 也是把前面几步
-"没在浏览器里看过"的部分一并验掉的收口。
-521 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:fullstack + spike:chord 10 + 桌面包全绿。
+第 8 步把**端到端**跑通了：`pnpm e2e:component` 在真 Chromium 里点球、聊天、改代码触 HMR、
+整页刷新 —— **DoD ①③ 已满足，M5 八步全部收口**。
+540 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
++ e2e:component 5 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；

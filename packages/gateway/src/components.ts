@@ -46,9 +46,21 @@ export interface ComponentBridge {
  *
  * 与页面通道那行脚本同一个插法（`</body>` 之前），但**独立一行**：两者可以都在，
  * 也可以只有一个（组件没装时这一行根本不出现）。
+ *
+ * ★ 前面那行小脚本是**错误捕手**，不是装饰：组件是模块脚本，它加载失败时浏览器只在控制台
+ * 留一行，页面照常可用 —— 而"组件没出现"这个现象没有任何别的线索。M5 第 8 步就在这上面
+ * 卡了半天：注入成功、端点 200、球却不在。所以从第一天起就把失败记到
+ * `window.__tenonComponentErrors` 里，排查和端到端都读它。
  */
 export function injectComponentScript(html: string, scriptUrl: string): string {
-  const tag = `<script type="module" src="${scriptUrl}"></script>`
+  const catcher = [
+    '<script>',
+    'window.__tenonComponentErrors=[];',
+    "addEventListener('error',function(e){(window.__tenonComponentErrors||[]).push('error: '+(e&&e.message?e.message:String(e)));});",
+    "addEventListener('unhandledrejection',function(e){(window.__tenonComponentErrors||[]).push('reject: '+(e&&e.reason&&e.reason.message?e.reason.message:String(e&&e.reason)));});",
+    '</script>',
+  ].join('')
+  const tag = `${catcher}<script type="module" src="${scriptUrl}"></script>`
   const at = html.lastIndexOf('</body>')
   if (at === -1) return `${html}\n${tag}\n`
   return `${html.slice(0, at)}${tag}\n${html.slice(at)}`

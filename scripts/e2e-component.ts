@@ -72,12 +72,20 @@ const url = process.env.TENON_E2E_URL
 const ball = ${JSON.stringify(BALL)}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+async function componentErrors(frame) {
+  return await frame
+    .executeJavaScript('JSON.stringify([...new Set(window.__tenonComponentErrors || [])].slice(0, 5))')
+    .catch(() => '"<读不到>"')
+}
+
 async function waitFor(frame, script, label, timeout = 30000) {
   const deadline = Date.now() + timeout
   for (;;) {
     const ok = await frame.executeJavaScript(script).catch(() => false)
     if (ok === true) return true
-    if (Date.now() > deadline) throw new Error('等不到：' + label)
+    if (Date.now() > deadline) {
+      throw new Error('等不到：' + label + ' | 页面里的组件错误：' + (await componentErrors(frame)))
+    }
     await sleep(120)
   }
 }
@@ -100,11 +108,11 @@ async function run() {
   out.hasApp = true
 
   // ② 球出现了 —— 注入时机对（页面已经在跑的时候插的脚本）
-  await waitFor(frame, 'document.querySelector("' + ball + '") !== null', '组件脚本注入')
-  out.ballCount = await frame.executeJavaScript('document.querySelectorAll("' + ball + '").length')
+  await waitFor(frame, 'document.querySelector(' + JSON.stringify(ball) + ') !== null', '组件脚本注入')
+  out.ballCount = await frame.executeJavaScript('document.querySelectorAll(' + JSON.stringify(ball) + ').length')
 
   // ③ 点开面板 → 输入 → 发送
-  await frame.executeJavaScript('document.querySelector("' + ball + '").click()')
+  await frame.executeJavaScript('document.querySelector(' + JSON.stringify(ball) + ').click()')
   await waitFor(frame, 'document.querySelectorAll("textarea").length > 0', '面板打开')
   await frame.executeJavaScript(
     '(() => { const t = document.querySelector("textarea"); t.value = "介绍一下你自己"; t.dispatchEvent(new Event("input", { bubbles: true })); return true })()',
@@ -135,12 +143,12 @@ async function run() {
   out.hmrApplied = true
 
   // ⑤ 球还在、而且只有一个（HMR 会重跑模块，重复挂就会有两个球）
-  out.ballAfterHmr = await frame.executeJavaScript('document.querySelectorAll("' + ball + '").length')
+  out.ballAfterHmr = await frame.executeJavaScript('document.querySelectorAll(' + JSON.stringify(ball) + ').length')
 
   // ⑥ 刷新整页之后对话还在（状态在服务端对象上，不在 DOM 里）
   await win.webContents.reload()
-  await waitFor(frame, 'document.querySelector("' + ball + '") !== null', '刷新后组件重新注入')
-  await frame.executeJavaScript('document.querySelector("' + ball + '").click()')
+  await waitFor(frame, 'document.querySelector(' + JSON.stringify(ball) + ') !== null', '刷新后组件重新注入')
+  await frame.executeJavaScript('document.querySelector(' + JSON.stringify(ball) + ').click()')
   await waitFor(frame, 'document.querySelectorAll("[data-tenon-message]").length >= 2', '刷新后对话还在', 30000)
   out.afterReload = await frame.executeJavaScript('document.querySelectorAll("[data-tenon-message]").length')
   out.logs = logs.slice(-5)
