@@ -1,5 +1,6 @@
 import type { App, BudgetDimension, UsageSnapshot } from '@tenon/protocol'
 import { AppMenu } from '../features/apps/AppMenu.js'
+import { PluginsPanel } from '../features/plugins/PluginsPanel.js'
 import { UsagePanel } from '../features/usage/UsagePanel.js'
 import { PlusIcon } from '../components/icons.js'
 import { Button } from '../components/ui/Button.js'
@@ -103,6 +104,7 @@ export function Header({
           disabled={activeApp === null}
           onSetBudget={onSetBudget}
         />
+        <PluginsPanel appId={activeApp?.id ?? null} />
         <StreamDot state={stream} />
         <Button
           variant="outline"

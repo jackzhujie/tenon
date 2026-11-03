@@ -179,6 +179,46 @@ export async function installComponent(request: InstallRequest): Promise<Install
   }
 }
 
+export interface SetEnabledRequest {
+  readonly repoDir: string
+  readonly roots: readonly PluginRoot[]
+  readonly tenonVersion: string
+  readonly id: string
+  readonly enabled: boolean
+}
+
+export interface SetEnabledResult {
+  readonly components: readonly InstalledComponent[]
+  /** 声明里没有这个 id（没装过）时为 false */
+  readonly found: boolean
+}
+
+/** 插件页的开关：只改 `enabled`，声明与挂载点都保留 */
+export async function setComponentEnabled(request: SetEnabledRequest): Promise<SetEnabledResult> {
+  const read = await readAssembly(request.repoDir)
+  if (read.kind === 'invalid') {
+    throw new Error(`${assemblyFile(request.repoDir)} 读不出来：${read.issues.join('；')}`)
+  }
+  const entry = read.assembly.components.find((item) => item.id === request.id)
+  if (entry === undefined) {
+    const planned = await buildPlan({
+      repoDir: request.repoDir,
+      roots: request.roots,
+      tenonVersion: request.tenonVersion,
+    })
+    return { components: planned.components, found: false }
+  }
+  const next = upsertComponent(read.assembly, { ...entry, enabled: request.enabled })
+  await writeAssembly(request.repoDir, next)
+  const planned = await buildPlan({
+    repoDir: request.repoDir,
+    roots: request.roots,
+    tenonVersion: request.tenonVersion,
+  })
+  await syncAgentsDoc(request.repoDir, planned.components)
+  return { components: planned.components, found: true }
+}
+
 export interface UninstallRequest {
   readonly repoDir: string
   readonly roots: readonly PluginRoot[]

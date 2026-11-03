@@ -8,7 +8,7 @@
 > + **M5 第 1 步**（chord 宿主接入 spike，10 项，`pnpm spike:chord`）
 > + **M5 第 2 步**（组件加载器：清单 / 装配声明 / 覆盖层解析 / 加载计划 / `component.list`）
 > + **M5 第 3 步（a）**（第一个真组件：契约 + server facet + 插件构建 + 宿主装载）
-> + **M5 第 3 步（b）**（界面半边：web facet + 网关注入 + WS 链路）**：532 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + **M5 第 3 步（b）**（界面半边：web facet + 网关注入 + WS 链路）**：533 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -294,7 +294,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 3b | **第一个真组件（界面半边）**：web facet + 传输（WS 链路）+ `app.shell.overlay` 插槽渲染 | ✅ 见 §4.21（浏览器里的整页验收放到第 8 步） | `packages/gateway/src/components.ts`、`packages/server/src/components-link.ts`、`plugins/bundled/tenon.official.ai-assistant/web.ts` |
 | 4 | **`install_component` 工具**：写装配声明 + 同步 `docs/AGENTS.md` + 装完立刻生效（不生成 `components.generated.ts`，见 §4.22） | ✅ 见 §4.22 | `packages/component-host/src/{install,agents-doc}.ts`、`packages/agent/src/tools/components.ts`、`packages/server/src/index.ts` |
 | 5 | **卸载即清理**（声明 + `AGENTS.md` + 仓库零残留引用，幂等；DoD ②） | ✅ 见 §4.23 | `packages/component-host/src/install.ts`（`uninstallComponent`）、`packages/agent/src/tools/components.ts`（`remove_component`）、`packages/server/test/component-uninstall.test.ts` |
-| 6 | **插件页**：列表 / 独立开关 / 来源标识 / "官方 Hub 筹备中"占位（DoD ④） | ⬜ | — |
+| 6 | **插件页**：列表 / 独立开关 / 来源标识 / "官方 Hub 筹备中"占位（DoD ④） | ✅ 见 §4.24 | `apps/web/src/features/plugins/PluginsPanel.tsx`、`component.setEnabled`（protocol + server + `setComponentEnabled`） |
 | 7 | 另两个官方插件（Excel 导出 / 审批流）+ L1 内置积木清单 | ⬜ | — |
 | 8 | 组件热重载不丢状态（DoD ③）+ 端到端验收（DoD ①） | ⬜ | — |
 
@@ -984,6 +984,25 @@ DoD ② 的"清理"在这里被拆成**三条可验证的事实**，一条都不
 网关按装配声明注入，页面已经加载过的脚本不会自己卸载。要做到"当场消失"，得让 web facet
 订阅自己的装配状态，属于第 8 步（热重载/端到端）的范围。
 
+### 4.24 M5 第 6 步验收（插件页 / DoD ④）—— ✅ 已完成
+
+顶栏「插件」按钮 → 面板：**已装列表**（名称 / id / 版本 / **来源标识**：内置·Hub·本地 / 挂载点 /
+启用开关）、**装不上的每一条原因**（code + message + hint，不折叠）、**还能装什么**、以及
+「官方 Hub 筹备中」占位。
+
+| 事 | 做法 | 为什么 |
+|---|---|---|
+| 开关 | 新 RPC `component.setEnabled` → 只改声明的 `enabled` + 同步 AGENTS.md + `runtime.reload` | **关掉 ≠ 卸载**：声明留着才能一键开回来；卸载走 `remove_component`（代价更大） |
+| 关掉要写进 AGENTS.md | 那一条后面加「**已关闭**（界面不加载，但装配声明还在）」 | 否则 Agent 以为它还在界面上，可能去"修"一个根本没生效的东西 |
+| 问题摊在列表上 | 直接渲 `problems`，不折叠 | 装不上的原因（版本、槽位）是用户唯一能据以行动的信息 |
+| 来源可见 | 每个组件一个标签 | 用户有权知道这段代码从哪来（内置 / Hub / 本地） |
+
+测试（`component-uninstall.test.ts` 第 4 项，真 server + 真 RPC）：关掉后 `loaded=false`、
+**声明仍在**、AGENTS.md 出现「已关闭」；再打开 `loaded=true`。
+
+**没在浏览器里看过**：这一步的界面只做了类型检查与 `pnpm build:web`（303KB）。
+真正的"点开面板、拨开关、球消失"要在第 8 步的端到端里验。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1158,7 +1177,7 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：57 个测试文件（532 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
+pnpm test                  # vitest：57 个测试文件（533 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
@@ -1237,8 +1256,8 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 第 3 步 a/b 让**第一个真组件（AI 小助手）**活了起来：契约 + server facet + 宿主装载 +
 注入的模型能力 + web facet（悬浮球）+ 网关 WS 链路（协议层三条用例走真 HTTP 与真 WS）。
 第 4 步让 Agent 能**一个工具装组件**（写声明 + 同步 `AGENTS.md` + 装完立刻生效，见 §4.22）。
-下一步是 **M5 第 6 步：插件页**（DoD ④：列表 / 独立开关 / 来源标识 / "官方 Hub 筹备中"占位），
-先看 §4.2 的 M5 表与 §4.20 的代码地图。
+第 6 步把**插件页**做出来了（列表 / 开关 / 来源标识 / Hub 占位，见 §4.24）。
+下一步是 **M5 第 7 步：另两个官方插件（Excel 导出 / 审批流）+ L1 内置积木清单**。
 521 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；

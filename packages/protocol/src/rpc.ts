@@ -419,6 +419,21 @@ export const rpcMethods = {
     }),
   },
 
+  /**
+   * 插件页的开关（M5 第 6 步）：**关掉不等于卸载**。
+   *
+   * 声明留在 `app.components.json` 里、`enabled` 变 false —— 这样"关掉试试"之后
+   * 能一键开回来，而卸载（删声明 + 清 AGENTS.md）是另一条路，代价更大。
+   */
+  'component.setEnabled': {
+    input: z.object({ appId: Id, id: Id, enabled: z.boolean() }),
+    output: z.object({
+      components: z.array(InstalledComponent),
+      /** 关掉之后界面上没有它了，但下次提问前的重连仍然要等页面刷新 */
+      reloaded: z.literal(true),
+    }),
+  },
+
   'settings.get': {
     input: Empty,
     output: z.object({ values: z.record(z.string(), z.unknown()) }),

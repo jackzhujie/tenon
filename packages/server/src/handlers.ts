@@ -17,7 +17,13 @@ import {
   levelOf,
   readBudget,
 } from '@tenon/core'
-import { ASSEMBLY_FILE, buildPlan, listAvailable, type PluginRoot } from '@tenon/component-host'
+import {
+  ASSEMBLY_FILE,
+  buildPlan,
+  listAvailable,
+  setComponentEnabled,
+  type PluginRoot,
+} from '@tenon/component-host'
 import type { ComponentRuntime } from './components.js'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
@@ -361,6 +367,20 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         assemblyFile: ASSEMBLY_FILE,
         tenonVersion: deps.version,
       }
+    },
+
+    'component.setEnabled': async (input) => {
+      const app = core.apps.require(input.appId)
+      const result = await setComponentEnabled({
+        repoDir: appPaths(core.home, app.id).repoDir,
+        roots: deps.plugins.roots,
+        tenonVersion: deps.version,
+        id: input.id,
+        enabled: input.enabled,
+      })
+      // 关掉/打开都要让宿主重新激活：否则"关了但球还在"，直到重启
+      await deps.components.reload(app.id)
+      return { components: [...result.components], reloaded: true as const }
     },
 
     'settings.get': async () => ({ values: core.settings.all() }),

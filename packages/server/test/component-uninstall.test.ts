@@ -153,6 +153,33 @@ describe('卸载即清理（DoD ②）', () => {
     await expect(readFile(join(repoDir, AGENTS_DOC), 'utf8')).rejects.toThrow()
   })
 
+  it('开关：关掉之后不加载，但声明还在（关掉 ≠ 卸载）', async () => {
+    const { server, appId, repoDir, tools } = await start()
+    await call(tools, 'install_component', { id: ID })
+
+    const off = await rpc<{ components: { enabled: boolean; loaded: boolean }[] }>(
+      server,
+      'component.setEnabled',
+      { appId, id: ID, enabled: false },
+    )
+    expect(off.components[0]).toMatchObject({ enabled: false, loaded: false })
+
+    // 声明还在：否则"关掉试试"之后就没法一键开回来了
+    const assembly = JSON.parse(await readFile(join(repoDir, 'app.components.json'), 'utf8')) as {
+      components: { id: string; enabled: boolean }[]
+    }
+    expect(assembly.components).toEqual([expect.objectContaining({ id: ID, enabled: false })])
+    // AGENTS.md 要写明"已关闭"，否则 Agent 会以为它还在界面上
+    expect(await readFile(join(repoDir, AGENTS_DOC), 'utf8')).toContain('已关闭')
+
+    const on = await rpc<{ components: { enabled: boolean; loaded: boolean }[] }>(
+      server,
+      'component.setEnabled',
+      { appId, id: ID, enabled: true },
+    )
+    expect(on.components[0]).toMatchObject({ enabled: true, loaded: true })
+  })
+
   it('list_components 会告诉模型哪些已装', async () => {
     const { tools } = await start()
     await call(tools, 'install_component', { id: ID })

@@ -14,7 +14,7 @@
 ## 状态（2026-11-02）
 M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–7 步 + M5 第 1–3a 步** → DESIGN **v1.2.25**。
 九个包 + `apps/web`（渲染器）+ `apps/desktop`（壳）。
-全绿基线：typecheck 18 project / test **532** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
+全绿基线：typecheck 18 project / test **533** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
 e2e:diff **36** / e2e:release **44** / **e2e:e2e 9** / e2e:fullstack / **spike:chord 10** /
 smoke:desktop:packaged 8 / build:web 299KB。
 M3 已通：定位注入 → 反查 → Alt+Click → 跨源回传 → 逐行差异 → 代码回滚 → 数据回滚 → 发布（tag + 本地裸库）。
@@ -52,7 +52,9 @@ server facet + manifest；`scripts/build-plugins.ts` esbuild 打单文件 410KB�
 **M5 第 4 步：`install_component` 已落地**（`component-host/src/install.ts` 纯逻辑 + `tools/components.ts` 工具壳；
 先试算 `buildPlan({assemblyOverride})` 再落盘；一次改三处：声明 / `docs/AGENTS.md` 标记区 / `runtime.reload`；
 **不生成 `components.generated.ts`** —— 注入式架构里没有消费者）。**第 5 步卸载即清理也已落地**（`remove_component` + 三条可验证事实：声明空 / AGENTS.md 无 / **仓库零引用**；
-卸没装过的组件不写任何文件）。**下一步：第 6 步插件页（DoD ④）**。
+卸没装过的组件不写任何文件）。**第 6 步插件页也已落地**（顶栏「插件」→ `PluginsPanel`：列表/开关/来源标识/Hub 占位；
+开关走新 RPC `component.setEnabled`——只改 `enabled` + 同步 AGENTS.md「已关闭」+ reload；
+**界面只过了类型检查与 build:web，没在浏览器里看过**）。**下一步：第 7 步另两个官方插件**。
 欠账：Docker compose 产物、真远端 push、真模型下的"改样式自验"、额度无跨应用总闸、
 用量答不了"哪个角色花了多少"、`lint` 未接（模板没 eslint 配置）、
 脚本能用 `// @options: timeout_ms` 放大沙箱默认超时、主界面没有"当前能不能发"的指示。

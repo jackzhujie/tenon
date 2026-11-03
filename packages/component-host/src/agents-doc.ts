@@ -37,7 +37,8 @@ export function renderComponentsSection(components: readonly InstalledComponent[
   }
   const lines: string[] = ['## 已装组件', '', '> 这些组件由平台注入，**应用代码里不需要 import 它们**，也不要去改它们的实现。']
   for (const component of components) {
-    lines.push('', `### ${component.name}（\`${component.id}\` ${component.version}）`)
+    const off = component.enabled ? '' : ' — **已关闭**（界面不加载，但装配声明还在）'
+    lines.push('', `### ${component.name}（\`${component.id}\` ${component.version}）${off}`)
     lines.push('', component.description)
     if (component.mounts.length > 0) {
       const where = component.mounts
