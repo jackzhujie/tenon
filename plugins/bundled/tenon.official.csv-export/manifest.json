@@ -1,0 +1,14 @@
+{
+  "id": "tenon.official.csv-export",
+  "name": "导出 CSV",
+  "version": "1.0.0",
+  "description": "把页面上的表格导成 Excel 能直接打开的 CSV：抓表、生成、下载，都在本地完成",
+  "source": "bundled",
+  "minTenonVersion": "0.0.0",
+  "signature": null,
+  "permissions": [],
+  "agentHints": "这个应用已经装了「导出 CSV」（tenon.official.csv-export）。它自己抓页面上的 <table> 并调服务端生成 CSV，**不要自己写导出逻辑**。如果想让它导出别的数据（不是页面上的表格），把数据渲染进一个 <table data-tenon-export=\"文件名\"> 即可。",
+  "pricing": { "type": "free" },
+  "facets": { "server": "server.js", "web": "web.js" },
+  "slots": ["app.page.header", "app.api"]
+}

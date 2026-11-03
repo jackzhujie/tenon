@@ -8,7 +8,7 @@
 > + **M5 第 1 步**（chord 宿主接入 spike，10 项，`pnpm spike:chord`）
 > + **M5 第 2 步**（组件加载器：清单 / 装配声明 / 覆盖层解析 / 加载计划 / `component.list`）
 > + **M5 第 3 步（a）**（第一个真组件：契约 + server facet + 插件构建 + 宿主装载）
-> + **M5 第 3 步（b）**（界面半边：web facet + 网关注入 + WS 链路）**：533 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + **M5 第 3 步（b）**（界面半边：web facet + 网关注入 + WS 链路）**：540 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -1003,6 +1003,26 @@ DoD ② 的"清理"在这里被拆成**三条可验证的事实**，一条都不
 **没在浏览器里看过**：这一步的界面只做了类型检查与 `pnpm build:web`（303KB）。
 真正的"点开面板、拨开关、球消失"要在第 8 步的端到端里验。
 
+### 4.25 M5 第 7 步验收（另两个官方插件 / 规范可复制）—— ✅ 已完成
+
+| 组件 | 服务端能力 | 业务规则（写在方法里，不靠提示词） | web facet |
+|---|---|---|---|
+| 导出 CSV | 把表头 + 二维数组变成 CSV（**数据由页面给**，组件零权限） | 列数对不上 → 拒绝；BOM / CRLF / RFC4180 转义 | 抓 `table[data-tenon-export]` 或第一张表 → 下载 |
+| 审批流 | 内存状态机（v1） | 空标题拒；已决的单子不能再审 | 右下角徽标 + 清单 + ✓/✕ |
+
+**这一步真正要验的是"规范能不能复制"**：两个新组件的契约与 `activate` 形状跟 AI 小助手一模一样，
+第二个、第三个基本是照抄。三个 web facet 也共享同一套"连链路 / 每次调用自带超时 / 断线重连"骨架。
+
+暴露出来、记下来的问题：
+1. **组件没有持久化能力** —— 审批数据只活在服务端对象里，重启即失。要真持久化得先有
+   "组件的存储"这个能力（M6 的 `db:*` 权限 + 命名空间隔离）。v1 在清单与 AGENTS.md 里都写明了。
+2. **web facet 只能自己决定位置**（`position:fixed`）。真正的插槽渲染（`app.page.header` 跟着页面标题走）
+   需要应用配合，属于第 8 步/后续 React 内嵌。现在三个组件都"浮在页面上"。
+3. **三个 web bundle 各 ~735KB**（都打包了一份 chord）。三个组件同时装 = 2.2MB。
+   M6 应该改成共享一份运行时（或者由网关提供 chord 的共享 chunk）。
+
+测 7 项（都用 `memoryLinkPair`，只验组件自己）：CSV 转义/行对齐/文件名清洗、审批状态机/非法转移/跨 root 存活。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1177,7 +1197,7 @@ pnpm dev:web               # ★ 日常开工：server + 前端一起起，浏�
 pnpm dev:desktop           # ★ 桌面版：build:web + 打 server 单文件 → 起 Electron（约 6s）
 pnpm dev:faux              # 只起 server（TENON_FAUX=1），打印 TENON_READY {url,port,token,home,model}
 pnpm dev:server            # 同上但用真实模型（需要先配 provider，否则 health 的 model 为 null）
-pnpm test                  # vitest：57 个测试文件（533 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
+pnpm test                  # vitest：58 个测试文件（540 项，含迁移、runtime-sdk、定位、点选校验、diff 折叠、快照触发判据、库快照还原、版本号与发布、发布门禁与预检、组件清单与加载计划）
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm e2e:fullstack         # ★ 真机全栈链路（要联网装 Nest）：PGlite → 迁移 → 双进程 → CRUD → 重启
@@ -1257,7 +1277,9 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 注入的模型能力 + web facet（悬浮球）+ 网关 WS 链路（协议层三条用例走真 HTTP 与真 WS）。
 第 4 步让 Agent 能**一个工具装组件**（写声明 + 同步 `AGENTS.md` + 装完立刻生效，见 §4.22）。
 第 6 步把**插件页**做出来了（列表 / 开关 / 来源标识 / Hub 占位，见 §4.24）。
-下一步是 **M5 第 7 步：另两个官方插件（Excel 导出 / 审批流）+ L1 内置积木清单**。
+第 7 步补齐了**另外两个官方插件**（导出 CSV / 审批流）与 L1 积木清单，验证了"规范可复制"（见 §4.25）。
+下一步是 **M5 第 8 步：热重载不丢状态（DoD ③）+ 端到端验收（DoD ①）** —— 也是把前面几步
+"没在浏览器里看过"的部分一并验掉的收口。
 521 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
