@@ -76,9 +76,7 @@ export function createComponentBridge(options: ComponentBridgeOptions): AppCompo
            * 所以这里不需要更多信息 —— 但也正因为如此，**绝不能**把别的 appId 放进 principal：
            * 组件的 factory 里有一道 `input.appId === principal.appId` 的守卫。
            */
-          activated.host.accept(webSocketLink(ws, { acceptPacked: false }), {
-            principal: { appId: options.appId },
-          })
+          activated.host.accept(webSocketLink(ws), { principal: { appId: options.appId } })
           resolve(true)
         })
       })

@@ -19,6 +19,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import type { AddressInfo } from 'node:net'
 import { createHost, webSocketLink, type Host } from '@earendil-works/chord'
 import { OWNER, Probe, type Principal } from './contract.js'
+import { Assistant as RealAssistant } from '../../../plugins/bundled/tenon.official.ai-assistant/contract.js'
 
 const principalKey = (p: Principal): string => (p.kind === 'owner' ? 'owner' : `guest:${p.id}`)
 
@@ -36,28 +37,69 @@ async function main(): Promise<void> {
   await new Promise<void>((resolve) => wss.once('listening', () => resolve()))
   const port = (wss.address() as AddressInfo).port
 
+  /*
+   * LINK_REAL=1：不再用 spike 自己的契约，而是加载**真的**插件 bundle
+   * （plugins/bundled/tenon.official.ai-assistant/server.js），客户端用仓库里那份 contract。
+   * 这是线上那条路径；直连/gateway 都通、只有它不通，说明问题在 bundle 里那份 chord/contract。
+   */
+  const real = process.env['LINK_REAL'] === '1'
+  /*
+   * 真组件的 principal 是 `{ appId }`，spike 自己的契约用 `{kind:'owner'}`。
+   * 这里只做类型桥接：链路两端的 principal 必须**形状一致**，否则组件的 factory
+   * 会当场抛 `invalid/principal`（我第一次跑就撞了这条）。
+   */
+  const realPrincipal = { appId: 'a1' } as unknown as Principal
   const server: Host<Principal> = createHost<Principal>({
-    name: 'probe',
+    name: real ? 'server' : 'probe',
     self: OWNER,
     principalKey,
     dev: true,
     onError: (error) => console.log('SERVER HOST ERR:', error instanceof Error ? error.message : error),
   })
+  if (real) {
+    // 两个 Principal 形状不同（spike 用 {kind}，组件用 {appId}），这里只做类型桥接
+    const mod = (await import('../../../plugins/bundled/tenon.official.ai-assistant/server.js')) as unknown as {
+      activate: (input: { host: Host<Principal>; appId: string; brain: { complete: (i: { appId: string; text: string }) => Promise<string> }; log: (l: string) => void }) => void
+    }
+    mod.activate({
+      host: server,
+      appId: 'a1',
+      brain: {
+        complete: async () => {
+          if (process.env['LINK_BRAIN_FAIL'] === '1') throw new Error('还没配模型')
+          return '回答：你好'
+        },
+      },
+      log: (line) => console.log('[facet]', line),
+    })
+    console.log('已加载真组件：', mod === null ? 'null' : 'ok')
+  } else {
   server.serve(
     Probe,
     (_input, _principal, self) => {
       const hits = self.state('hits', Type.Number(), 0)
+      const notes = self.state('notes', Type.Array(Type.Object({ role: Type.String(), text: Type.String() })), [])
+      const phase = self.state('phase', Type.String(), 'idle')
       return {
         variant: 'default',
         hits,
+        notes,
+        phase,
         hit: async (ctx) => {
           hits.change(ctx, (n) => n + 1)
         },
         stamp: async () => ({ value: 'v1' }),
+        note: async ({ text }, ctx) => {
+          phase.replace(ctx, 'thinking')
+          notes.change(ctx, (list) => [...list, { role: 'user', text }])
+          notes.change(ctx, (list) => [...list, { role: 'assistant', text: '回答：' + text }])
+          phase.replace(ctx, 'idle')
+        },
       }
     },
     { linger: 60_000 },
   )
+  }
 
   let clientHost: Host<Principal> | null = null
 
@@ -88,7 +130,9 @@ async function main(): Promise<void> {
           headLength = head.length
           return await new Promise<boolean>((resolve) => {
             wss.handleUpgrade(req, socket, head, (ws) => {
-              server.accept(webSocketLink(ws, linkOptions()), { principal: OWNER })
+              server.accept(webSocketLink(ws, linkOptions()), {
+                principal: real ? realPrincipal : OWNER,
+              })
               resolve(true)
             })
           })
@@ -103,7 +147,7 @@ async function main(): Promise<void> {
   } else {
     wss.on('connection', (socket) => {
       const accept = (): void => {
-        server.accept(webSocketLink(socket, linkOptions()), { principal: OWNER })
+        server.accept(webSocketLink(socket, linkOptions()), { principal: real ? realPrincipal : OWNER })
       }
       if (process.env['LINK_ORDER'] === 'client-first') {
         // 让客户端先握手（等它发出第一帧再 accept）
@@ -125,7 +169,7 @@ async function main(): Promise<void> {
     principalKey,
     kind: 'client',
     readyTimeout: 5_000,
-    upstream: { link: webSocketLink(socket, linkOptions()), principal: OWNER },
+    upstream: { link: webSocketLink(socket, linkOptions()), principal: real ? realPrincipal : OWNER },
     onError: (error) => console.log('CLIENT HOST ERR:', error instanceof Error ? error.message : error),
   })
 
@@ -133,15 +177,20 @@ async function main(): Promise<void> {
   try {
     const hits = await Promise.race([
       clientHost.root(async (ctx) => {
+        if (real) {
+          const ref = await ctx.get(RealAssistant, { appId: 'a1' })
+          await ref.ask({ text: '你好' }, ctx)
+          return { notes: ref.messages.value, phase: ref.phase.value }
+        }
         const probe = await ctx.get(Probe, { id: 'x' })
         if (probe.variant !== 'default') return -1
         await probe.hit(ctx)
-        await probe.hit(ctx)
-        return probe.hits.value
+        await probe.note({ text: '你好' }, ctx)
+        return { hits: probe.hits.value, notes: probe.notes.value, phase: probe.phase.value }
       }),
       new Promise<string>((resolve) => setTimeout(() => resolve('HANG'), 5_000)),
     ])
-    console.log(`结果：hits=${String(hits)}（${Date.now() - started}ms） head=${headLength}`)
+    console.log(`结果：${JSON.stringify(hits)}（${Date.now() - started}ms） head=${headLength}`)
   } catch (error) {
     console.log('调用抛错：', error instanceof Error ? error.message : error)
   }

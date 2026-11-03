@@ -3,7 +3,7 @@
 本地优先、可自托管的**对话式 AI 全栈应用搭建平台**（桌面 + Web 同构）。产品名 Tenon，作用域 `@tenon/*`。
 隐喻：应用靠标准组件咬合，Agent 只做设计。⚠️ `LM Studio` 是第三方名，全局改名须保护。
 
-**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 149 条**）；方案 `docs/DESIGN.md`（v1.2.25）。
+**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 151 条**）；方案 `docs/DESIGN.md`（v1.2.25）。
 这里只留「不知道就会走错方向」的，细节查 STATUS §5，别重复。
 
 ## 三条铁律
@@ -14,7 +14,7 @@
 ## 状态（2026-11-02）
 M1 九步 + M2 七步（第 8 步 Docker 产物按用户决定跳过）+ M3 九步 + **M4 第 1–7 步 + M5 第 1–3a 步** → DESIGN **v1.2.25**。
 九个包 + `apps/web`（渲染器）+ `apps/desktop`（壳）。
-全绿基线：typecheck 18 project / test **518** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
+全绿基线：typecheck 18 project / test **521** / smoke 9 / e2e:preview **16** / e2e:inspector **13** /
 e2e:diff **36** / e2e:release **44** / **e2e:e2e 9** / e2e:fullstack / **spike:chord 10** /
 smoke:desktop:packaged 8 / build:web 299KB。
 M3 已通：定位注入 → 反查 → Alt+Click → 跨源回传 → 逐行差异 → 代码回滚 → 数据回滚 → 发布（tag + 本地裸库）。
@@ -46,7 +46,10 @@ M4 第 7 步：**发布前质量门禁**（`checks.ts` 的 `runTypecheck`/`runTe
 server facet + manifest；`scripts/build-plugins.ts` esbuild 打单文件 410KB，产物不进 git、`pretest` 先建；
 `packages/server/src/components.ts` 按 `plan.targets` 动态 import + activate，preview.start 后异步激活；
 `packages/agent/src/assistant.ts` 给组件注入模型能力：ownerless + **空工具集**会话，复用 subagent 的原语）。
-**下一步：3b —— 界面半边**（web facet + 网关拦 `/_tenon/component` 的 upgrade → `webSocketLink` → `host.accept` + 插槽渲染）。
+**M5 第 3 步 b：界面半边已通**（web facet 悬浮球 736KB；网关 `/__tenon/component.js` 注入 + `/__tenon/component`
+的 upgrade 交 `ComponentBridge` → `wss.handleUpgrade` → `webSocketLink` → `host.accept`；3 条用例走真 HTTP + 真 WS）。
+真浏览器里看见球还没验（留给第 8 步）。
+**下一步：M5 第 4 步 —— `install_component` 工具**（写装配声明 + 生成 `src/components.generated.ts` + 改 `AGENTS.md`）。
 欠账：Docker compose 产物、真远端 push、真模型下的"改样式自验"、额度无跨应用总闸、
 用量答不了"哪个角色花了多少"、`lint` 未接（模板没 eslint 配置）、
 脚本能用 `// @options: timeout_ms` 放大沙箱默认超时、主界面没有"当前能不能发"的指示。
@@ -142,6 +145,10 @@ server facet + manifest；`scripts/build-plugins.ts` esbuild 打单文件 410KB�
   那是 chord Ref 自带成员，撞名在**定义契约那一刻**抛 `member name is reserved`（AI 小助手叫 `phase`）
 - **chord host 的 `name` 必须等于契约的 `hostNamed(…)`**：否则 `serve` 抛「declared for A, but B serves it」；
   名字是路由名不是实例 id（一个进程里多个应用的 host 都叫 `server`）
+- **链路要在 socket 建出来那一刻挂上，不能等 `open`**：`webSocketLink(socket)` 才挂 message 监听，
+  等 open 再挂 = 那几十毫秒的帧丢了 → 序号错位报 `ack 2 outside 0..2`，调用永不返回（Spike 6 的坑）
+- **两端 principal 形状必须一致**：组件契约是 `{appId}`，`accept({principal})` 与 `upstream.principal` 都要给它；
+  给错不报类型错，而是 createHost 后组件 factory 里抛 `invalid/principal`（消息里两个 appId 一样，容易看漏）
 - **facet 是构建产物**（`plugins/bundled/<id>/server.js`，esbuild 连 chord 打 410KB）：不进 git，
   `pretest` 与 `build:desktop` 会先建；忘了建的表现是"组件加载失败：Cannot find module"而源码看着没问题
 - **组件目录名就是 id**（对不上 → `id-mismatch`）；**`TENON_PLUGINS_DIR` 与 `TENON_TEMPLATES_DIR` 同坑**：

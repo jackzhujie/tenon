@@ -142,16 +142,17 @@ describe('组件链路（网关 → WS → chord host）', () => {
    * 不是我们的接线。下一步先做一个小 spike 把这条链路跑通（STATUS §4.21 记了这件事），
    * 通了这个用例就取消 skip —— 它是 3b 唯一能证明"浏览器那半边真的能说话"的东西。
    */
-  it.skip('升级被接住：浏览器那半边能 get → ask → 读到服务端状态', async () => {
+  it('升级被接住：浏览器那半边能 get → ask → 读到服务端状态', async () => {
     await assemble()
     await bootGateway()
 
     socket = new WebSocket(`${gateway?.url.replace('http', 'ws')}${COMPONENT_WS_PATH}`)
-    await new Promise<void>((resolve, reject) => {
-      socket?.once('open', () => resolve())
-      socket?.once('error', reject)
-    })
-
+    /*
+     * ★ **不能等 'open' 再建 host**。链路要在 socket 刚建出来时就挂上去：
+     * 等 open 的这几十毫秒里服务端可能已经发了初始帧，没人在听 = 帧丢了，
+     * 之后的序号/窗口全部错位（表现就是 `ack 2 outside 0..2`，然后调用永远不返回）。
+     * 浏览器那半边（web.ts）也是这么写的：new WebSocket 之后立刻 webSocketLink。
+     */
     host = createHost<Principal>({
       name: 'ui',
       self: { appId: APP_ID },

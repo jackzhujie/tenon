@@ -291,13 +291,22 @@ async function checkReload(): Promise<void> {
         Probe,
         (_input, _principal, self) => {
           const hits = self.state('hits', Type.Number(), 0)
+          // Spike 6 给 Probe 加了这两格（数组状态 + 带参方法），这里补上即可
+          const notes = self.state('notes', Type.Array(Type.Object({ role: Type.String(), text: Type.String() })), [])
+          const phase = self.state('phase', Type.String(), 'idle')
           return {
             variant: 'default',
             hits,
+            notes,
+            phase,
             hit: async (ctx) => {
               hits.change(ctx, (n) => n + 1)
             },
             stamp: async () => ({ value: stamp }),
+            note: async ({ text }, ctx) => {
+              notes.change(ctx, (list) => [...list, { role: 'user', text }])
+              phase.replace(ctx, 'idle')
+            },
           }
         },
         { linger: 60_000 },

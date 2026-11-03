@@ -53,10 +53,16 @@ export const Probe = remote('tenon.spike.probe', {
   host: hostNamed('probe'),
   variants: {
     default: {
-      state: { hits: Type.Number() },
+      state: {
+        hits: Type.Number(),
+        // Spike 6 加的两样，长得像 AI 小助手的 state：数组 + 带参数的方法
+        notes: Type.Array(Type.Object({ role: Type.String(), text: Type.String() })),
+        phase: Type.String(),
+      },
       methods: {
         hit: method(),
         stamp: method(undefined, Type.Object({ value: Type.String() })),
+        note: method(Type.Object({ text: Type.String() })),
       },
     },
   },

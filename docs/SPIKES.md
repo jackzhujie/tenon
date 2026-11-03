@@ -238,7 +238,7 @@ net.Socket ──pg-gateway(fromNodeSocket)──> 单条全局串行队列 ─�
 
 ---
 
-## 8. Spike 6：`webSocketLink` 接真实 `ws`（2026-11-02，未收口）
+## 8. Spike 6：`webSocketLink` 接真实 `ws`（2026-11-02，已收口）
 
 M5 第 3 步 b 卡在一条链路上：`memoryLinkPair`（Spike 5）一切正常，换成真 WebSocket 之后
 握手成功、`ctx.get` 能拿到引用，随后报 `invalid/protocol: link to peer: ack 2 outside 0..2`，
@@ -251,11 +251,24 @@ M5 第 3 步 b 卡在一条链路上：`memoryLinkPair`（Spike 5）一切正常
 | 关掉 `acceptPacked` | 直连与经网关都仍然通过 |
 | 真实组件路径（`plugin/server.js` 410KB bundle + 测试里 `import Assistant from contract.ts`） | ❌ ack 越界 |
 
-**结论：`webSocketLink` 本身、以及"网关转手 socket"这两步都是好的。** 剩下的差异只有一处：
-那个 410KB 的 facet bundle 里**自己带了一份 chord 与一份 contract**，而客户端用的是
-`contract.ts` / 根 `node_modules` 里的 chord —— 两端看到的 contract 不是同一个对象。
+**真组件路径（bundle 自带 chord + contract）后来又单独验了一条**：`LINK_REAL=1` 直连与
+`LINK_REAL=1 LINK_VIA_GATEWAY=1` 都 ✅（42ms / 49ms，两轮消息进 state）。
+所以"bundle 里另有一份 chord 与 contract"**不是问题** —— 两端靠名字对齐就够了。
 
-下一个实验（已写进 STATUS §4.21）：
-1. 让 facet bundle **外部化 chord**（`external: ['@earendil-works/chord']`），两端共用一份实现；
-2. 或者让 server facet 把它的 contract 导出（`export { Assistant }`），客户端用**同一个实例**；
-3. 若两者都不行，再查 chord 的窗口/序号在"帧大小不同"时的行为（facet 侧 `send()` 返回值与实际写出字节不一致的可能）。
+### 8.1 真正的原因：**链路挂晚了**
+
+组件测试里那条用例一直失败，最后定位到**测试自己**：
+
+```ts
+socket = new WebSocket(url)
+await new Promise(r => socket.once('open', r))   // ★ 这里等了一下
+host = createHost({ upstream: { link: webSocketLink(socket) } })
+```
+
+`webSocketLink` 是在这一行才把 `message` 监听挂上去的。等 `open` 的这几十毫秒里
+服务端已经开始发帧（握手后的第一条 snapshot），**没人听 = 帧丢了**，之后两端的序号/窗口
+全部错位，报 `ack 2 outside 0..2`，调用永远不返回。
+
+改成"socket 一建出来就 `createHost`、不等 open"之后三条用例全绿（331ms）。
+`plugins/.../web.ts` 里本来就是这么写的（`new WebSocket` 之后立刻 `webSocketLink`），
+所以浏览器那半边不受影响 —— 这个坑只咬了测试。
