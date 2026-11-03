@@ -122,6 +122,20 @@ export async function startMockOpenAI(): Promise<MockHandle> {
       }
       requests.push(body)
 
+      if (req.method === 'GET' && (req.url ?? '').includes('/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            object: 'list',
+            data: [
+              { id: 'mock-v4-pro', object: 'model' },
+              { id: 'mock-flash', object: 'model' },
+            ],
+          }),
+        )
+        return
+      }
+
       if (!(req.url ?? '').includes('/chat/completions')) {
         res.writeHead(404, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ error: { message: `没有这个端点：${String(req.url)}` } }))

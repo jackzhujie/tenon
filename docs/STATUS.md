@@ -1063,7 +1063,24 @@ faux 证明的是管线通，不是"模型按提示词把事做完"。而只在�
 `e2e:real` 的判据刻意与实现解耦（不找特定 class，只找"能输入的地方 + 能点的按钮"）——
 它要覆盖的是**模型自由发挥出来的界面**，我们并不知道它会写成什么样。
 
-**排练模式已 12/12 通过**（含真 Chromium 的增删与组件链路）。真 key 那一跑还没做。
+**结果：真模型（DeepSeek V4.1 Flash）12/12 通过**（2026-11-03）。排练模式同样 12/12。
+
+| 阶段 | 耗时 | token | 它做了什么 |
+|---|---|---|---|
+| 一：一句话做待办清单 | 36.3s | 10 660 | 13 次工具调用（`ls` / `read` / `bash` / `write` / `subagent`），写了 `App.tsx` 与 `styles.css`，用 `useRef` 生成 id、加了失焦处理、注释写了取舍 |
+| 二：一句话装 AI 助手 | 9.7s | 2 431 | `list_components` → `install_component` → `bash` 读回声明确认 → `subagent`（派活去验页面） |
+| 三：真 Chromium | — | — | 输入 → 添加 → 删除 → 点球问一句拿到回答，**六条断言全绿** |
+| 合计 | 46.0s（不含浏览器） | 13 340 | 3 个 commit |
+
+**真模型下第一次被验证、之前全是"应该能行"的三件事**：
+1. **工具描述与 `AGENTS.md` 够用** —— 模型自己去 `list_components` 看有什么、装完用 `bash` 读 `app.components.json` 确认，**没有手写一个悬浮球**（那是它最容易犯的错）。
+2. **它真的会派活** —— 主 Agent 主动把"验页面"交给 e2e 子角色；子角色试了三次（`preview_read` / `preview_open`）后如实回「**无法验证 —— 预览未运行**」，还引用了工具原文。M4 的分工在真模型下成立，不是剧本安排的。
+3. **"说完了"与"做完了"是两件事** —— 模型收尾时说得头头是道，而页面能不能加、能不能删，只有真 Chromium 说了算。这也是为什么判据必须落在页面上。
+
+**新发现的一个摩擦（待修）**：模型在依赖装好之前就跑 `tsc`，撞上
+`TS2688 Cannot find type definition file for 'node'` —— 应用的 `node_modules` 要等
+`preview.start` 才装。表现是"代码看起来有错"，模型于是反复折腾类型错误。
+→ 应该在**建应用时**（或首次 bash 前）就把依赖装上，或让类型检查明确说"依赖还没装"。
 
 #### 这一步已经抓到的三个真问题（都已修）
 
@@ -1258,6 +1275,8 @@ TENON_REAL_KEY=sk-... TENON_REAL_MODEL=deepseek-chat \\
 | **host 的 `name` 必须等于契约里的 `hostNamed(…)`** | 否则 `serve` 抛「declared for server, but <别的名字> serves it」。名字是路由名，不是实例 id：一个进程里多个应用的 host 都叫 `server`，靠链路区分 |
 | **组件的 facet 是构建产物，不进 git** | `plugins/bundled/<id>/server.js` 由 `pnpm build:plugins` 生成（esbuild 连 chord 一起打，410KB）。忘了构建的表现是"组件加载失败：Cannot find module"，而源码看着完全正常 |
 | **`executeJavaScript` 里拼选择器必须过 `JSON.stringify`** | `'document.querySelector("' + ball + '")` 这种写法在 ball 自带双引号时是语法错误；而外层 `.catch(() => false)` 会把它吞掉 —— 现象是"元素一直没出现"，排查方向全错（M5 第 8 步在这上面卡了两轮） |
+| **一轮结束不能只看"最后一条是助手"** | 真模型会"先说一句、接着继续调工具"（"我先看看结构"），只看消息形状会在它干活中途判成结束 → 后面所有断言都在它还没写完时执行。判据必须是 **应用回到 idle + 末尾是 `settled` 助手消息** 两个条件同时成立 |
+| **判"文件改了吗"要前后对比，别猜关键词** | 我用 `!content.includes('Tenon')` 当"没改"的标志，而模型正好把标题写成「Tenon · 待办」→ 把成功报成失败。猜关键词的断言迟早误判，两个方向都有害 |
 | **声明了选项 ≠ 传下去了** | `AgentRuntimeOptions.components` 声明、server 传、`HarnessPool` 用，中间的 `createAgentRuntime` 漏了一行 —— 结果 `install_component` 在真实运行时里**从来没挂上过**，模型一调回 "Tool ... is not available"。类型检查抓不到（两侧都对），单元测试也抓不到（直接构造 pool 绕过了那一跳）→ 这类"装配链断点"只能从**最外层**起步的用例才发现（`component-wiring.test.ts`） |
 | **工具 part 的 `status` 不能写死** | 必须按 `toolCallId` 从 `pi.tool-result` 回填。写死 `'ok'` 的话，路径越界/命令非零退出/组件装不上在界面上与成功一模一样 —— 这是最坏的一种绿：用户不会查，模型也以为自己做成了 |
 | **组件脚本加载失败是静默的** | 它是 `type="module"`：语法错/导入失败只在控制台留一行，页面照常可用。所以网关注入时**同时注入一行错误捕手**（`window.__tenonComponentErrors`），端到端与用户反馈都读它 |

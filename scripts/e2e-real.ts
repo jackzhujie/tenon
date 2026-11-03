@@ -24,6 +24,8 @@
  *   TENON_REAL_LABEL=DeepSeek
  *   TENON_REAL_HOME=/some/dir   复用已有 home（省掉每次装 React 的几十秒）
  *   TENON_REAL_BUDGET_TOKENS=400000   额度（默认 40 万 token，超了当场熔断）
+ *   TENON_REAL_MODEL=auto             让脚本问端点要模型清单自己挑（配 TENON_REAL_MODEL_HINT=flash）
+ *   TENON_REAL_CONTEXT / _MAX_TOKENS  上下文与单次输出上限（默认 200k / 32k）
  */
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -53,10 +55,18 @@ const MARKER = '端到端验收条目'
 const useMock = process.env['TENON_REAL_MOCK'] === '1'
 const mock = useMock ? await startMockOpenAI() : undefined
 const key = useMock ? 'sk-mock-not-a-real-key' : (process.env['TENON_REAL_KEY'] ?? '')
-const modelId = useMock ? 'mock-model-1' : (process.env['TENON_REAL_MODEL'] ?? '')
+// 排练模式也有默认 id，但 `auto` 要能穿过 —— 否则"自动挑模型"这条路从没被跑过
+const modelId = process.env['TENON_REAL_MODEL'] ?? (useMock ? 'mock-model-1' : '')
 const baseUrl = useMock ? (mock?.url ?? '') : (process.env['TENON_REAL_BASE_URL'] ?? 'https://api.openai.com/v1')
 const label = useMock ? '本地排练用假 provider' : (process.env['TENON_REAL_LABEL'] ?? new URL(baseUrl).host)
 const budgetTokens = Number(process.env['TENON_REAL_BUDGET_TOKENS'] ?? 400_000)
+/*
+ * 上下文与单次输出上限。provider profile 的默认值（128k / 8k）是按"通用模型"定的，
+ * 而一次"写一整个页面"很容易超过 8k 输出 —— 被截断的表现是一段写了一半的 JSX，
+ * 然后模型在下一轮里反复修补。这里显式给参数，环境变量可覆盖。
+ */
+const contextWindow = Number(process.env['TENON_REAL_CONTEXT'] ?? 200_000)
+const maxTokens = Number(process.env['TENON_REAL_MAX_TOKENS'] ?? 32_000)
 
 if (key === '' || modelId === '') {
   console.error(
@@ -72,6 +82,41 @@ if (key === '' || modelId === '') {
     ].join('\n'),
   )
   process.exit(2)
+}
+
+/**
+ * 模型 id 各家叫法不一样（"4.1 flash"不是任何厂商的正式 id）。既然端点一定支持
+ * `GET /models`，就别猜 —— 问一次，按"flash > chat > 第一个"挑，并把清单打出来。
+ * 猜错的代价是白跑一次真跑（几分钟 + 真金白银）。
+ */
+async function pickModelId(endpoint: string, apiKey: string, wanted: string): Promise<string> {
+  const base = endpoint.replace(/\/$/, '')
+  const response = await fetch(`${base}/models`, { headers: { authorization: `Bearer ${apiKey}` } })
+  if (!response.ok) {
+    throw new Error(
+      `${base}/models 返回 ${response.status} —— 这个端点不列模型，请显式给 TENON_REAL_MODEL（比如 deepseek-chat）`,
+    )
+  }
+  const body = (await response.json()) as { data?: { id?: string }[] }
+  const ids = (body.data ?? []).map((item) => item.id).filter((id): id is string => typeof id === 'string')
+  if (ids.length === 0) throw new Error('端点没返回任何模型')
+  console.log(`   可选模型：${ids.join('、')}`)
+
+  const lower = wanted.toLowerCase()
+  const exact = ids.find((id) => id.toLowerCase() === lower)
+  if (exact !== undefined) return exact
+  const tokens = lower.split(/[\s._-]+/).filter((token) => token !== '')
+  const scored = ids
+    .map((id) => {
+      const name = id.toLowerCase()
+      const hits = tokens.filter((token) => name.includes(token)).length
+      return { id, hits }
+    })
+    .filter((item) => item.hits > 0)
+    .sort((a, b) => b.hits - a.hits)
+  if (scored.length > 0) return scored[0]!.id
+  // 一个词都对不上：优先 flash（"快而便宜"通常更适合跑验收），再退第一个
+  return ids.find((id) => /flash/i.test(id)) ?? ids[0]!
 }
 
 let failures = 0
@@ -91,6 +136,8 @@ interface Envelope<T> {
 
 interface Normalized {
   role: string
+  /** `streaming` 说明这一条还在写；`settled` 才是定稿 */
+  status?: string
   parts: { type: string; text?: string; name?: string; status?: string; output?: string }[]
 }
 
@@ -282,6 +329,13 @@ app.whenReady().then(async () => {
 }
 
 try {
+  let resolvedModel = modelId
+  if (modelId === '' || modelId.toLowerCase() === 'auto') {
+    console.log('0) 问端点要模型清单（TENON_REAL_MODEL=auto）')
+    resolvedModel = await pickModelId(baseUrl, key, process.env['TENON_REAL_MODEL_HINT'] ?? 'flash')
+    console.log(`   用 ${resolvedModel}\n`)
+  }
+
   console.log('1) 写入 provider（加密存库）+ 选中，然后起 server')
   const core = openCore({ env })
   const profile = core.providers.upsert({
@@ -289,8 +343,8 @@ try {
     kind: 'openai-compatible',
     baseUrl,
     tier: 'auto',
-    modelId,
-    paramsJson: null,
+    modelId: resolvedModel,
+    paramsJson: JSON.stringify({ contextWindow, maxTokens }),
     apiKey: key,
   })
   core.settings.set({ [SETTING_KEYS.activeProviderId]: profile.id })
@@ -338,8 +392,14 @@ try {
     await rpc('chat.submit', { appId, content, requestId: `real-${phase}` })
 
     /*
-     * 判据是「历史变长了 + 最后一条是助手」，不是「status 回到 idle」：
-     * 提交之后 status 有一小段时间还是 idle（上一轮的），只等 idle 会立刻返回。
+     * 一轮结束的判据是**两个条件同时成立**：
+     *   ① 应用状态回到 `idle`
+     *   ② 历史末尾是一条 `settled` 的助手消息，且这一轮真的新增过东西
+     *
+     * 只判 ① 会在提交前就返回（上一轮留下的 idle）；只看 ② 会在模型"说一句、
+     * 接着调工具"时提前返回 —— 真模型恰恰是这么工作的：它先说"我先看看结构"，
+     * 然后继续调工具改文件。第一次跑真模型就是被这个骗了：脚本以为一轮结束了，
+     * 后面所有断言都在"模型还在干活"的时候执行，全落空。
      */
     const deadline = started + 15 * 60_000
     let messages: Normalized[] = []
@@ -347,11 +407,17 @@ try {
       const history = await rpc<{ messages: Normalized[] }>('chat.history', { appId, limit: 400 })
       messages = history.messages
       const last = messages.at(-1)
-      if (last?.role === 'assistant' && last.parts.some((part) => part.type === 'text' && (part.text ?? '') !== '')) {
-        break
+      const settled =
+        last?.role === 'assistant' &&
+        last.status === 'settled' &&
+        messages.length > beforeHistory.messages.length &&
+        last.parts.some((part) => part.type === 'text' && (part.text ?? '') !== '')
+      if (settled) {
+        const page = await rpc<{ apps: { id: string; status: string }[] }>('app.list', {})
+        if (page.apps.find((app) => app.id === appId)?.status === 'idle') break
       }
       if (Date.now() > deadline) break
-      await sleep(500)
+      await sleep(600)
     }
     const after = await rpc<{ snapshot: { totals: { input: number; output: number } } }>('usage.get', { appId })
     const last = messages.at(-1)
@@ -368,6 +434,14 @@ try {
   }
 
   console.log('2) 阶段一：一句话做一个待办清单（模型自由发挥）')
+  /*
+   * 先记下起手时的 App.tsx。判"它真的改了吗"只能靠**前后对比**：
+   * 早先我用 `!appSource.includes('Tenon')` 当判据 —— 而模板自己的注释里就有 Tenon，
+   * 模型也完全可能在标题里写「Tenon · 待办」。猜关键词的断言迟早会误判，
+   * 而误判的方向是"把成功报成失败"，同样有害。
+   */
+  const appFile = join(repoDir, 'src', 'App.tsx')
+  const beforeApp = await readFile(appFile, 'utf8').catch(() => '')
   const gen = await turn(
     '做一个待办清单页面：一个输入框加一个添加按钮，下面是清单，每一项都能删除。数据放内存就行，不要改后端。',
     'gen',
@@ -380,11 +454,11 @@ try {
   console.log('')
   check('阶段一没有超时', !gen.timedOut)
   check('模型真的动了文件（write/edit 至少一次）', gen.tools.some((name) => name === 'write' || name === 'edit' || name === 'bash'), gen.tools.join(','))
-  const appSource = await readFile(join(repoDir, 'src', 'App.tsx'), 'utf8')
+  const appSource = await readFile(appFile, 'utf8')
   check(
-    'App.tsx 真的被改了（不再是模板的默认内容）',
-    appSource.length > 200 && !appSource.includes('Tenon'),
-    appSource.slice(0, 160),
+    'App.tsx 真的被改了（与提交前不是同一份）',
+    appSource !== beforeApp && appSource.length > 200,
+    `改前 ${beforeApp.length} 字符 → 改后 ${appSource.length} 字符`,
   )
 
   console.log('3) 阶段二：一句话让它自己装 AI 助手（验工具描述 + AGENTS.md 够不够）')
@@ -394,16 +468,11 @@ try {
   )
   console.log(`   耗时 ${(install.ms / 1000).toFixed(1)}s，token ${install.tokens}，工具：${install.tools.join(' / ') || '（没调工具）'}`)
   for (const line of install.outputs) console.log(`   工具结果 ${line}`)
-  if (install.outputs.length === 0) {
-    const raw = await rpc<{ messages: Normalized[] }>('chat.history', { appId, limit: 400 })
-    console.log('   [debug] 最后两条消息：' + JSON.stringify(raw.messages.slice(-2)).slice(0, 1200))
-  }
   const listed = await rpc<{
     components: { id: string; loaded: boolean; enabled: boolean }[]
     available: { id: string; installed: boolean; source: string }[]
     problems: { code: string; message: string }[]
   }>('component.list', { appId })
-  console.log('   [debug] available=' + JSON.stringify(listed.available) + ' problems=' + JSON.stringify(listed.problems))
   const installed = listed.components.find((item) => item.id === COMPONENT)
   console.log(`   component.list：${JSON.stringify(listed.components.map((item) => `${item.id}(loaded=${item.loaded})`))}\n`)
   check(
