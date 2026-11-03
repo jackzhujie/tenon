@@ -19,6 +19,11 @@ interface RawBlock {
 interface RawMessage {
   role?: string
   content?: string | RawBlock[]
+  /** 工具结果那条 entry 用它指回是哪次调用 */
+  toolCallId?: string
+  toolName?: string
+  /** 工具自己失败了（参数错、路径越界、装不上…） */
+  isError?: boolean
   timestamp?: number
   usage?: { input?: number; output?: number; cost?: { total?: number } }
   model?: string
@@ -35,7 +40,21 @@ const KIND_USER = 'pi.user'
 const KIND_ASSISTANT = 'pi.assistant'
 const KIND_TOOL_RESULT = 'pi.tool-result'
 
-function blocksToParts(blocks: readonly RawBlock[]): MessagePart[] {
+/** 一条工具结果：状态 + 文本，按 toolCallId 回填到对应的调用上 */
+interface ToolOutcome {
+  readonly status: 'ok' | 'error'
+  readonly output: string
+}
+
+function textOfBlocks(content: string | RawBlock[] | undefined): string {
+  if (typeof content === 'string') return content
+  return (content ?? [])
+    .map((block) => (block.type === 'text' ? (block.text ?? '') : ''))
+    .filter((text) => text !== '')
+    .join('')
+}
+
+function blocksToParts(blocks: readonly RawBlock[], outcomes: Map<string, ToolOutcome>): MessagePart[] {
   const parts: MessagePart[] = []
   for (const block of blocks) {
     if (block.type === 'text' && typeof block.text === 'string' && block.text !== '') {
@@ -44,11 +63,18 @@ function blocksToParts(blocks: readonly RawBlock[]): MessagePart[] {
     }
     // thinking 不进消息流（M2 起有「思考」折叠面板再单独下发）
     if (block.type === 'toolCall' && typeof block.id === 'string') {
+      const outcome = outcomes.get(block.id)
       parts.push({
         type: 'tool',
         toolCallId: block.id,
         name: block.name ?? 'tool',
-        status: 'ok',
+        /*
+         * 状态与输出**来自工具结果那条 entry**，不是"有调用就算成功"。
+         * 早先这里写死 'ok'：工具失败（路径越界、装不上组件、命令非零退出）
+         * 在界面上和成功一模一样 —— 那是最坏的一种绿。
+         */
+        status: outcome?.status ?? 'ok',
+        ...(outcome === undefined ? {} : { output: outcome.output }),
         args: block.arguments,
       })
     }
@@ -56,34 +82,37 @@ function blocksToParts(blocks: readonly RawBlock[]): MessagePart[] {
   return parts
 }
 
-function contentToParts(content: RawMessage['content']): MessagePart[] {
+function contentToParts(content: RawMessage['content'], outcomes: Map<string, ToolOutcome>): MessagePart[] {
   if (typeof content === 'string') {
     return content === '' ? [] : [{ type: 'text', text: content }]
   }
-  return blocksToParts(content ?? [])
+  return blocksToParts(content ?? [], outcomes)
 }
 
-export function normalizeEntry(entry: RawEntry): NormalizedMessage | undefined {
+export function normalizeEntry(
+  entry: RawEntry,
+  outcomes: Map<string, ToolOutcome> = new Map(),
+): NormalizedMessage | undefined {
   const messages = entry.model ?? []
   const first = messages[0]
   const at = first?.timestamp ?? 0
 
   if (entry.kind === KIND_USER) {
-    const parts = messages.flatMap((message) => contentToParts(message.content))
+    const parts = messages.flatMap((message) => contentToParts(message.content, outcomes))
     return parts.length === 0
       ? undefined
       : { id: String(entry.id), role: 'user', parts, at, status: 'settled' }
   }
 
   if (entry.kind === KIND_ASSISTANT) {
-    const parts = messages.flatMap((message) => contentToParts(message.content))
+    const parts = messages.flatMap((message) => contentToParts(message.content, outcomes))
     return parts.length === 0
       ? undefined
       : { id: String(entry.id), role: 'assistant', parts, at, status: 'settled' }
   }
 
   if (entry.kind === KIND_TOOL_RESULT) {
-    // 工具结果挂在工具调用上渲染（M2 的工具面板），历史里不再单独出一条气泡
+    // 工具结果不单独出气泡 —— 它被**回填**到上面那次调用的 part 上（见 normalizeEntries）
     return undefined
   }
 
@@ -91,9 +120,29 @@ export function normalizeEntry(entry: RawEntry): NormalizedMessage | undefined {
 }
 
 export function normalizeEntries(entries: readonly RawEntry[]): NormalizedMessage[] {
+  /*
+   * 两遍：先收工具结果，再拼消息。
+   *
+   * 为什么不能一遍走过去就回填：工具结果 entry 一定排在**发起调用的那条 assistant 之后**，
+   * 单遍处理时前面那条消息已经产出、改不了了。两遍的代价可以忽略（entries 是内存数组），
+   * 收益是工具状态与输出终于不再是猜的。
+   */
+  const outcomes = new Map<string, ToolOutcome>()
+  for (const entry of entries) {
+    if (entry.kind !== KIND_TOOL_RESULT) continue
+    for (const message of entry.model ?? []) {
+      const id = message.toolCallId
+      if (id === undefined || id === '') continue
+      outcomes.set(id, {
+        status: message.isError === true ? 'error' : 'ok',
+        output: textOfBlocks(message.content),
+      })
+    }
+  }
+
   const messages: NormalizedMessage[] = []
   for (const entry of entries) {
-    const message = normalizeEntry(entry)
+    const message = normalizeEntry(entry, outcomes)
     if (message !== undefined) messages.push(message)
   }
   return messages

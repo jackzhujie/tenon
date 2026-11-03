@@ -151,16 +151,25 @@ describe('工具层（write / edit / bash）', () => {
 
     running = await boot()
     const session = await running.agent.pool?.acquire(app.id)
-    // M4 第 1 步把工具补齐了：四个写工具 + 三个只读检索（ls/glob/grep）+ 编排（subagent）
-    // 看 `rootTools` 而不是 `tools`：后者含只给子角色用的 `preview_*`（M4 第 4 步），
-    // 主角色拿到的仍是这八个 —— 这条测的正是"主角色没掉队"
+    /*
+     * 主角色拿到的工具是**显式列举**的：四个写工具 + 三个只读检索（ls/glob/grep）
+     * + 编排（subagent）+ 组件三件（M5 第 4/5 步）。看 rootTools 而不是 tools：
+     * 后者含只给子角色用的 preview_*。
+     *
+     * 这条例用"逐字相等"而不是"包含"：新增工具必须在这里显式登记 —— 否则
+     * "顺手给主角色也来一个"这种事会悄悄发生（M5.5 验收时正是靠它发现
+     * install_component 一直没被挂上，见 component-wiring.test.ts）。
+     */
     expect(session?.rootTools.map((tool) => tool.name).sort()).toEqual([
       'bash',
       'edit',
       'glob',
       'grep',
+      'install_component',
+      'list_components',
       'ls',
       'read',
+      'remove_component',
       'subagent',
       'write',
     ])

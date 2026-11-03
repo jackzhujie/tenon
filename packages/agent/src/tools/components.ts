@@ -105,14 +105,24 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
           ? undefined
           : [{ slot: args.slot, order: 100 }]
 
-      const result = await installComponent({
-        repoDir: options.repoDir,
-        roots: options.roots,
-        tenonVersion: options.tenonVersion,
-        id,
-        ...(mounts === undefined ? {} : { mounts }),
-        ...(args.version === undefined || args.version === '' ? {} : { version: args.version }),
-      })
+      /*
+       * 工具**不能抛**。抛出来的异常会被运行时压成一条 `<harness>` 诊断（错的 message
+       * 甚至可能是空的），模型看到的就是这四个字母 —— 既不知道发生了什么，也没法自救。
+       * 这里兜住，把它变成一句人话回去。
+       */
+      let result: Awaited<ReturnType<typeof installComponent>>
+      try {
+        result = await installComponent({
+          repoDir: options.repoDir,
+          roots: options.roots,
+          tenonVersion: options.tenonVersion,
+          id,
+          ...(mounts === undefined ? {} : { mounts }),
+          ...(args.version === undefined || args.version === '' ? {} : { version: args.version }),
+        })
+      } catch (error) {
+        return fail(`装 ${id} 时出错了：${error instanceof Error ? error.message : String(error)}`)
+      }
 
       if (!result.ok) {
         const detail = result.problems

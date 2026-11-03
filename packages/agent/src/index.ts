@@ -87,6 +87,14 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     home: options.core.home,
     model,
     ...(options.getPageDriver === undefined ? {} : { getPageDriver: options.getPageDriver }),
+    /*
+     * ★ 这一行曾经漏了：`AgentRuntimeOptions.components` 声明了、server 也传了、
+     * HarnessPool 也用了 —— 中间这一跳没人接。结果是 `install_component` 在**真实运行时里
+     * 从来没挂上过**（只有直接 new HarnessPool 的测试能拿到它），模型一调就回
+     * "Tool install_component is not available"，而界面上那一条还显示 ✓。
+     * 类型检查抓不到，因为两侧都没错，只是没连起来。
+     */
+    ...(options.components === undefined ? {} : { components: options.components }),
   })
   const usage = new UsageService({ pool, core: options.core, publish: options.publish })
   const chat = new ChatService({
