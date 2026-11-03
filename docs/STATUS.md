@@ -295,8 +295,8 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 4 | **`install_component` 工具**：写装配声明 + 同步 `docs/AGENTS.md` + 装完立刻生效（不生成 `components.generated.ts`，见 §4.22） | ✅ 见 §4.22 | `packages/component-host/src/{install,agents-doc}.ts`、`packages/agent/src/tools/components.ts`、`packages/server/src/index.ts` |
 | 5 | **卸载即清理**（声明 + `AGENTS.md` + 仓库零残留引用，幂等；DoD ②） | ✅ 见 §4.23 | `packages/component-host/src/install.ts`（`uninstallComponent`）、`packages/agent/src/tools/components.ts`（`remove_component`）、`packages/server/test/component-uninstall.test.ts` |
 | 6 | **插件页**：列表 / 独立开关 / 来源标识 / "官方 Hub 筹备中"占位（DoD ④） | ✅ 见 §4.24 | `apps/web/src/features/plugins/PluginsPanel.tsx`、`component.setEnabled`（protocol + server + `setComponentEnabled`） |
-| 7 | 另两个官方插件（Excel 导出 / 审批流）+ L1 内置积木清单 | ⬜ | — |
-| 8 | 组件热重载不丢状态（DoD ③）+ 端到端验收（DoD ①） | ⬜ | — |
+| 7 | 另两个官方插件（**导出 CSV** / 审批流）+ L1 内置积木清单 | ✅ 见 §4.25 | `plugins/bundled/tenon.official.{csv-export,approval}/`、`plugins/bundled/README.md`（L1 清单） |
+| 8 | 组件热重载不丢状态（DoD ③）+ 端到端验收（DoD ①） | 🚧 脚本就位（`pnpm e2e:component`），卡在真页面里球没出现，见 §4.26 | `scripts/e2e-component.ts` |
 
 ### 4.3 M1 验收（DoD）
 
