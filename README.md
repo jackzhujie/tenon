@@ -126,7 +126,7 @@ typescript」「测试红了」「超时了」必拦 —— 混成一个"不通�
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 649 项单测 / 集成测试（约 210s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 669 项单测 / 集成测试（约 210s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
@@ -136,7 +136,7 @@ pnpm e2e:e2e                # ★ 9 项自验收：真 Electron 里由 e2e 子 A
 pnpm e2e:fullstack          # ★ 全栈真机链路（要联网装 Nest）：起库 → 迁移 → 双进程 → CRUD → 重启后数据还在
 pnpm spike:chord            # 10 项：chord 宿主（契约 / 变体 / 跨 host / 热重载 / 打包），M5 的回归网
 pnpm e2e:hub                # 32 项：从零发布一个组件（现场生成密钥 → 真打包 → 静态 Hub → 真 server 装进应用）
-pnpm e2e:apps               # 14 项：应用菜单与删除（真 Chromium 里点：菜单 → 删除 → 取消 → 确认 → 磁盘同步）
+pnpm e2e:apps               # 18 项：应用菜单（真 Chromium 里点：改名 → 删除 → 取消 → 确认 → 徽标 → 磁盘同步）
 pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后不留孤儿进程
 ```
@@ -154,7 +154,8 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 **`pnpm e2e:hub` 32 项**（现场生成密钥 → 真打包 → 静态 Hub → 真 server 装进应用 → 篡改与付费两种拒绝）。
 下一步：真 Hub 上线（静态托管 / 域名 / 缓存策略），以及 M7 的第三方上架。
 另外补了一个死代码留下的洞：**应用现在能删了**（后端 `app.delete` 从 M1 就在，界面上一直没有入口），
-删除会连同代码、数据库、日志和已发布的备份裸库一起清掉，`pnpm e2e:apps` 14 项在真 Chromium 里验过。
+删除会连同代码、数据库、日志和已发布的备份裸库一起清掉；改名只动显示名不动目录；
+顶栏「发布」按钮带未发布版本数。`pnpm e2e:apps` 18 项在真 Chromium 里验过。
 服务端半边已经落地：契约 + server facet + 插件构建（`pnpm build:plugins`，410KB 单文件）+ 宿主装载。
 M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，
 M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17、第 2 步（组件加载器）见 §4.18、第 3 步 a（真组件）见 §4.19。
