@@ -431,6 +431,42 @@ export const rpcMethods = {
   },
 
   /**
+   * 导出「静态包」：产出 `<home>/apps/<appId>/exports/<时间戳>/`，**拷走就能跑**
+   * （DESIGN §13.1 的第二种产物；Docker 上下文是它的派生物）。
+   *
+   * 为什么是同步 RPC（而不是像 `preview.start` 那样先返回再推事件）：它必须等到构建
+   * 结束才知道成败，中途没有可用的中间产物。进度通过应用日志面板推（`onLog`），
+   * 所以用户不会盯着一个不动的转圈。
+   *
+   * 代价：这一步会跑 `pnpm run build` + `pnpm install --prod`，几十秒到几分钟。
+   */
+  'export.static': {
+    input: z.object({
+      appId: Id,
+      /**
+       * 装生产依赖（默认 true）。
+       *
+       * 关掉之后产物里只有代码与 `pnpm-lock.yaml` —— 体积从几十 MB 降到几 MB，
+       * 但目标机器要自己 `pnpm install --prod`（也就要求它有 pnpm 与网络）。
+       */
+      installDeps: z.boolean().default(true),
+    }),
+    output: z.object({
+      /** 产物目录（绝对路径） */
+      dir: z.string(),
+      /** 文件数（不含 `node_modules` —— 那个数没意义） */
+      files: z.number().int().nonnegative(),
+      /** 产物字节数（含 `node_modules`，用户关心的是"要传多大"） */
+      bytes: z.number().int().nonnegative(),
+      /** 这个应用有后端吗（决定 `start.sh` 起几个进程） */
+      hasApi: z.boolean(),
+      version: z.string().nullable(),
+      /** 导出时对应的提交。产物与哪一版代码对应，这件事必须能查 */
+      headSha: z.string().nullable(),
+    }),
+  },
+
+  /**
    * 这个应用装了哪些组件、为什么有的装不上、磁盘上还有什么可装（M5 第 2 步）。
    *
    * **只读**：不加载任何东西，也不改装配声明。装不上的原因放在 `problems` 里而不是让整个

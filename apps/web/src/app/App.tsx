@@ -166,6 +166,7 @@ export function App() {
       <ReleaseDialog
         open={releaseOpen}
         appName={workspace.activeApp?.name ?? null}
+        appId={state.activeAppId}
         headCommit={state.commits[0] ?? null}
         releases={state.releases}
         publishing={state.publishing}

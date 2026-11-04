@@ -6,6 +6,7 @@
  * 防止「handler 返回了契约外的形状」这种更隐蔽的漂移。
  */
 import type { CoreServices } from '@tenon/core'
+import { join } from 'node:path'
 import {
   SETTING_KEYS,
   ZERO_USAGE,
@@ -41,6 +42,7 @@ import {
 import type { ComponentRuntime } from './components.js'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
+import { exportStamp, exportStatic } from './export.js'
 import { listTemplates } from '@tenon/generator'
 import type {
   ComponentProblem,
@@ -533,6 +535,28 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     'release.publish': async (input) => {
       const app = core.apps.require(input.appId)
       return publishRelease({ core, app, notes: input.notes, force: input.force === true })
+    },
+
+    /*
+     * 导出静态包。构建与装依赖都在这里同步跑完（几十秒到几分钟），进度推到应用日志面板 ——
+     * 否则用户会盯着一个不动的转圈，而"卡住"和"在编译"在界面上分不出来。
+     */
+    'export.static': async (input) => {
+      const app = core.apps.require(input.appId)
+      const paths = appPaths(core.home, app.id)
+      /*
+       * 产物按时间戳分目录，不按版本号：同一版代码可能导两次（改了配置、换机器），
+       * 按版本号会让第二次覆盖第一次，而用户手上那份可能已经在服务器上了。
+       */
+      const outDir = join(paths.exportsDir, exportStamp())
+      return exportStatic({
+        repoDir: paths.repoDir,
+        outDir,
+        appName: app.name,
+        appId: app.id,
+        installDeps: input.installDeps,
+        onLog: (line) => pushTenonLog(bus, app.id, 'info', '导出', line),
+      })
     },
 
     'component.list': async (input) => {

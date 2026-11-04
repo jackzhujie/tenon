@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { CheckOutcome, GitCommit, Release } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
+import { rpc } from '../../lib/rpc.js'
 import type {
   CheckOutcomeResult,
   PublishOutcome,
@@ -112,6 +113,8 @@ function GateList({ checks }: { checks: CheckOutcome[] }) {
 export interface ReleaseDialogProps {
   open: boolean
   appName: string | null
+  /** 导出要用（`export.static`）。与 `appName` 分开：名字可能还没加载出来，id 一定有 */
+  appId: string | null
   /** 当前 HEAD，发布的就是它 */
   headCommit: GitCommit | null
   releases: Release[]
@@ -126,6 +129,7 @@ export interface ReleaseDialogProps {
 export function ReleaseDialog({
   open,
   appName,
+  appId,
   headCommit,
   releases,
   publishing,
@@ -147,6 +151,43 @@ export function ReleaseDialog({
   const [blocked, setBlocked] = useState<CheckOutcome[] | null>(null)
   /** 已经点过一次"仍然发布"，再点才真的发 */
   const [confirming, setConfirming] = useState(false)
+  /*
+   * 导出：发布是**给自己留底**（备份库 + tag），导出是**拿出去用**。两件事在同一刻决定，
+   * 所以放在同一个对话框里 —— 但导出不走 hook 的状态：产物路径只在这次对话里有意义。
+   */
+  const [exporting, setExporting] = useState(false)
+  const [exportElapsed, setExportElapsed] = useState(0)
+  const [exported, setExported] = useState<{
+    dir: string
+    bytes: number
+    files: number
+    hasApi: boolean
+  } | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!exporting) return
+    const started = Date.now()
+    // 构建 + 装生产依赖，几十秒到两分钟；不给秒数用户会以为界面卡死了
+    const timer = setInterval(() => setExportElapsed(Math.round((Date.now() - started) / 1000)), 500)
+    return () => clearInterval(timer)
+  }, [exporting])
+
+  const runExport = useCallback(async (): Promise<void> => {
+    if (appId === null) return
+    setExporting(true)
+    setExportElapsed(0)
+    setExportError(null)
+    setExported(null)
+    try {
+      const done = await rpc('export.static', { appId, installDeps: true })
+      setExported({ dir: done.dir, bytes: done.bytes, files: done.files, hasApi: done.hasApi })
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExporting(false)
+    }
+  }, [appId])
 
   const runCheck = useCallback(async (): Promise<void> => {
     setChecking(true)
@@ -485,6 +526,49 @@ export function ReleaseDialog({
               </div>
             </div>
           )}
+
+          {/*
+            导出区块放在"发布历史"之前：发布完最自然的下一件事就是"那我怎么把它放到服务器上"。
+            产物路径只在这次对话里有意义，所以状态留在本组件，不进 hook。
+          */}
+          <div className="space-y-1.5 rounded-lg border border-line bg-panel-2 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[11.5px] text-muted">拿去部署</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={exporting || appId === null}
+                data-tenon-action="export-static"
+                onClick={() => void runExport()}
+              >
+                {exporting ? `导出中… ${exportElapsed}s` : '导出静态包'}
+              </Button>
+            </div>
+            <p className="text-[10.5px] leading-relaxed text-faint">
+              产出一个能拷走就跑的目录：前端 + 后端 + 生产依赖，只认一个 DATABASE_URL。
+              导出会真跑一次构建（几十秒到两分钟），进度在左下角的日志里。
+            </p>
+            {exportError !== null && (
+              <p className="rounded border border-bad/30 bg-[#241413] px-2 py-1.5 text-[11px] leading-relaxed text-bad">
+                {exportError}
+              </p>
+            )}
+            {exported !== null && (
+              <div className="space-y-1" data-tenon-export-result>
+                <div className="flex items-center gap-1">
+                  <code className="min-w-0 flex-1 truncate rounded bg-panel px-2 py-1 font-mono text-[10.5px] text-muted">
+                    {exported.dir}
+                  </code>
+                  <CopyButton text={exported.dir} label="复制路径" />
+                </div>
+                <p className="text-[10.5px] text-faint">
+                  {Math.round(exported.bytes / 1024 / 1024)}MB · {exported.files} 个文件 ·{' '}
+                  {exported.hasApi ? '含后端（迁移会自动跑）' : '纯前端'}
+                  。产物里的 README 写了怎么起。
+                </p>
+              </div>
+            )}
+          </div>
 
           <div className="space-y-1.5">
             <span className="text-[11.5px] text-muted">发布历史</span>
