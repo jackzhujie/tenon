@@ -19,9 +19,10 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 **收口**：授权模型定稿（DESIGN §21.5，现在不做 license）+ **Hub 配置随包分发** +
 `pnpm e2e:hub` 32 项从零发布）。
 **收口后补的一批**（盘点"还剩什么没完善"）：应用能删（原来是死代码）、能改名、顶栏有
-未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）。
-全绿基线：typecheck 18 project / test **669** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
-e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** /
+未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
+**导出静态包**（`export.static`，产物拷走就能跑；Docker 是它的派生品）。
+全绿基线：typecheck 18 project / test **678** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
