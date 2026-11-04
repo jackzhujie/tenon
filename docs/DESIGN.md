@@ -1764,49 +1764,77 @@ HMR 连接断开、预览归零，看完 diff 切回去等于重启一次。逐�
 
 ### 13.1 产物
 
-| 类型 | 内容 | 用途 |
-|---|---|---|
-| **Docker 镜像/上下文** | `Dockerfile` + `docker-compose.yml` + `.dockerignore` + 构建上下文一键打包 | 自托管上线（主推） |
-| 静态包 | `dist/client` + `dist/server` + `start.sh` | 无 Docker 环境 |
-| Git push | 代码推到用户远端（GitHub/GitLab/Gitea） | 团队接管、CI/CD |
+| 类型 | 内容 | 用途 | 状态 |
+|---|---|---|---|
+| **静态包** | `dist/` + `dist-server/` + `node_modules`（prod）+ `serve.mjs` + `start.sh` + `.env.example` + `README.md` | 无 Docker 环境、拷走就跑 | ✅ 已落地（`export.static`） |
+| **Docker 上下文** | 从静态包派生：`Dockerfile` + `docker-compose.yml` + `.dockerignore` | 自托管上线（主推） | ⏳ 派生品，代码不需要重写 |
+| Git push | 代码推到用户远端（GitHub/GitLab/Gitea） | 团队接管、CI/CD | ⏳ 本地备份库已落地（§13.3） |
 
-### 13.2 Dockerfile（模板，单容器单端口）
+**先做静态包，Docker 从它派生** —— 这是一个顺序决定，不是取舍。原因：
+静态包能在本地完整验证（`pnpm e2e:export` 会真起一个 PG 把产物跑起来），
+而 Docker 需要容器运行时；等静态包稳了，Dockerfile 只是 `COPY 产物 + node:22-alpine`，
+`compose` 再加一个 `db` 服务。反过来先做 Docker 的话，每个 bug 都要在"构建镜像"这一层
+排查，慢一个数量级。
+
+**产物里没有 pglite。** PGlite 是「预览用的零安装数据库」（§6.4），生产产物只认
+`DATABASE_URL`。把 wasm + pg-gateway 塞进去等于让产物自带一个数据库运行时 —— 那是
+另一个产品，也和"应用不感知运行环境"这条铁律的精神相反。
+
+**产物里也没有组件。** AI 小助手 / 导出 CSV / 审批流是 Tenon 运行时注入到预览页的
+（§21.6），不属于应用代码。导出的包自然没有它们 —— 产物 README 里明写了这一条，
+免得用户以为"买椟还珠"。
+
+### 13.2 Dockerfile（从静态包派生，⏳ 待做）
+
+**关键决定：不做多阶段构建。** 静态包已经由 Tenon 那侧构建好（`export.static` 真跑过
+`pnpm run build`），镜像只需要把产物装进去。多阶段构建意味着在镜像里再跑一遍
+pnpm + devDeps + 模板工具链 —— 那会让"两台机器上构建结果不一致"这个风险重新进来，
+而它正是导出这档要消灭的东西。
 
 ```dockerfile
-# ---- deps ----
-FROM node:22-alpine AS deps
-WORKDIR /app
-RUN corepack enable
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
-
-# ---- build ----
-FROM node:22-alpine AS build
-WORKDIR /app
-RUN corepack enable
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-RUN pnpm build          # tsc(server) + vite build(client)
-
-# ---- runtime ----
-FROM node:22-alpine AS runner
+# 假定 build context 就是 export.static 的产物目录（Dockerfile 由导出时生成）
+FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000
-# DATABASE_URL 由 compose 注入（postgres://app:***@db:5432/app），镜像内不写死
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./
-COPY --from=build /app/src/server/database/migrations ./dist/migrations
-VOLUME ["/data"]
+COPY . .
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
-CMD ["node", "dist/server/main.js"]
+CMD ["node", "serve.mjs"]
 ```
 
-- Nest 用 `ServeStaticModule` 托管 `dist/client`，**只有一个端口**（反代友好）
-- 启动时自动跑迁移（`migrationsRun: true`）；**业务数据在 `db` 服务的命名卷里**，`/data` 卷只放上传文件与日志
-- `docker-compose.yml` **默认即含 PostgreSQL**（`db` 服务 + 命名卷 + `service_healthy` 依赖）；`pglite` 档仅在本地开发与预览使用，**不进生产产物** —— 导出时自动把 `DATABASE_URL` 改写成 compose 内的 `postgres://` 连接串，应用代码零改动
-- 镜像大小目标 < 250MB（alpine + prod 依赖裁剪）
+```yaml
+# docker-compose.yml（导出时生成）—— 默认即含 PostgreSQL
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?自己设一个}
+    volumes: [db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app']
+      interval: 5s
+      retries: 10
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgres://app:${DB_PASSWORD}@db:5432/app
+      DATABASE_POOL_MAX: 10          # 真 PG 上就是普通连接池上限
+    ports: ['3000:3000']
+    depends_on:
+      db: { condition: service_healthy }
+volumes:
+  db:
+```
+
+- **端口只有一个**：`serve.mjs` 已经在同一个端口上分流 `/api/*` 与静态文件（与静态包同一份
+  启动器），所以 `EXPOSE 3000` 就够了，反代只转一个口
+- **启动时自动跑迁移**（`migrationsRun: true`，编译后的迁移在
+  `dist-server/api/migrations/*.js`）；业务数据在 `db` 服务的命名卷里
+- **`pglite` 不进生产产物**：导出产物只认 `DATABASE_URL`，compose 里指向 `db` 服务
+- **构建发生在哪**：Tenon **不在用户机器上跑 `docker build`**（可能没装 Docker）。默认只
+  产出上下文 + 一条可复制命令；验证放在 CI（GitHub runner 自带 Docker）
 
 ### 13.3 发布流程（v1.2.14 落地：「冻结版本 + 本地备份库」这一档）
 
@@ -1836,11 +1864,13 @@ v1.2.21 起：应用自己的 `typecheck` 与 `test`，见 §5.10）。推送失
 | 缺口 | 为什么现在不做 |
 |---|---|
 | 推到真正的远端（GitHub / GitLab / Gitea） | 要凭据、要真网络，本机无法验证。接的时候是加一个 transport，不是重写发布流程 |
-| Docker 产物 / 静态包导出 | 前者阻塞在「本机无容器运行时」（M2 第 8 步），后者要跑 `vite build` 并打包产物 |
-| 发布前**预检**（`release.check`） | 现在要点了发布才知道过不过。预检要多一个 RPC 与一轮检查耗时，先让门禁本身站住 |
+| ~~静态包导出~~ | ✅ **已落地**（`export.static` + `pnpm e2e:export` 22 项：产物真的起得来、`/api` 分流、迁移自动跑、缺 `DATABASE_URL` 会被拦） |
+| Docker 产物 | ⏳ 静态包已就位，派生只多两个文本文件；**验证要容器运行时**（本机没有），留给 CI |
 | `lint` 进闸门 | 模板没有 eslint 配置，硬塞会把「缩进不一致」和「空指针」混在一张单子上（与 §5.8 同一个欠账） |
 
-**不在用户机器上直接 `docker build`**（可能没装 Docker）：默认**导出构建上下文 + 一条可复制命令**；检测到 Docker 可用时才提供"本地构建"按钮。
+> `release.check` 那一行已经从缺口里划掉了（v1.2.22 起有了预检，打开对话框就跑）。
+
+**不在用户机器上直接 `docker build`**（可能没装 Docker）：默认**导出构建上下文 + 一条可复制命令**；验证放 CI（GitHub runner 自带 Docker），这也是"Docker 那一档在本地没有容器运行时也能推进"的唯一办法。
 
 ### 13.4 运行时配置
 

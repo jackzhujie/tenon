@@ -12,7 +12,7 @@
 > + **M5 第 4–8 步**（install / remove 工具、插件页开关、另两个官方组件、组件端到端 5/5）
 > + **M5.5**（真模型验收 12/12、模型设置页与热切换、依赖安装时机、模型价格表）
 > + **M6 第 1–5 步（M6 收口）**（Hub 客户端：验签 + 原子落盘；签名索引 + 更新检查；组件商店：装/卸 + 付费门禁；
-> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**669 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**678 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -1544,6 +1544,51 @@ timeoutMs: options.timeoutMs ?? this.timeoutMs     // 脚本给的值优先
 `checkScriptOptions` 是纯函数（不起 VM，单测 11ms 跑完 10 项），`withScriptLimits` 用假工具
 验了"越界时原 execute 一次都没被调用"与"正常脚本原样转发"。
 
+### 4.38 导出静态包：产物真的能拷走就跑
+
+「发布」以前只有一半：冻结版本 + 本地裸库（§13.3），那是给人看的**代码备份**。
+用户真正要拿出去的是**能上线的东西**，而 DESIGN §13.1 的两种产物（Docker 上下文、静态包）
+一行代码都没有。这一步补的是静态包 —— 也是 Docker 那一档的**上游**（Dockerfile 就是
+`COPY 产物 + node:22-alpine`）。
+
+产物（`<home>/apps/<appId>/exports/<时间戳>/`）：
+
+| 文件 | 谁写的 |
+|---|---|
+| `dist/` `dist-server/` `package.json` `pnpm-lock.yaml` | 模板自己构建出来的 |
+| `node_modules/`（只含 prod） | 导出时 `pnpm install --prod --frozen-lockfile` |
+| `serve.mjs` | **导出时生成**：单端口启动器（`/api/*` 反代 + 其余静态文件 + SPA fallback） |
+| `start.sh` | 生成：查 `DATABASE_URL` → `exec node serve.mjs`（可直接执行） |
+| `.env.example` `README.md` | 生成：要配什么、怎么起、**里面没有什么** |
+
+四个关键决定：
+
+1. **产物里没有 pglite。** PGlite 是预览用的零安装数据库，生产产物只认 `DATABASE_URL`。
+   把 wasm + `pg-gateway` 塞进去等于让产物自带一个数据库运行时 —— 那是另一个产品。
+2. **单端口靠一个生成的 `serve.mjs`，不改应用源码。** 模板的后端只监听 `127.0.0.1` 的
+   `/api`，前端是静态文件；"一个端口对外"必须有人在前面分流。放进模板会让所有应用都
+   背着一段生产代码（铁律 2 的反面），所以它是**产物的一部分，不是源码**。
+3. **跑模板自己的 `build` / `build:api`**，不在导出代码里拼 `vite build`。Agent 可能改过
+   `build`（加 prebuild、换工具链），自己拼就会与它脱节。
+4. **默认带 prod 依赖**（`installDeps: false` 可关）。这让产物真的"拷到服务器就能跑"，
+   代价是体积（全栈应用 136MB、纯前端 16MB）与导出时要联网。
+
+**一个实现时才发现的坑**：导出要跑 `pnpm run build`，而"从没起过预览就直接导出"完全可能
+（用户建完应用先去点了导出）—— 那时 `node_modules` 还没有，`vite: not found`。
+所以导出第一步复用 preview 的 `ensureDeps`（它已经处理了超时、日志尾、打包态下的随包 pnpm）。
+
+**验证**（`pnpm e2e:export`，22 项）：建一个 nest-api 应用 → 真导出 → 用 `PgliteProvider`
+起一个**真 TCP 的 PostgreSQL** 顶替"用户自备的库" → 在产物目录里跑 `./start.sh` →
+`/api/health` 200、首页 HTML、`/api/items` 真转到后端、未知路径回 index.html（前端路由）、
+**不配 `DATABASE_URL` 时退出码非零且报错说清**。PGlite 顶替是刻意的：它证明产物只认
+`DATABASE_URL`、不知道对面是 WASM 还是真 PG（铁律 2 的验证方式）。
+
+界面入口在发布对话框里（`pnpm shot:export` 人眼验收）：按钮 → 「导出中… Ns」→ 产物路径 +
+复制 + 「136MB · 19 个文件 · 含后端」。**不做成顶栏按钮**：导入/导出是同一刻的决定。
+
+**这一档还没有的**：Docker 上下文（从静态包派生，验证要容器运行时 → 留给 CI）、
+Git push（要凭据）、`lint` 进闸门。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1712,6 +1757,8 @@ timeoutMs: options.timeoutMs ?? this.timeoutMs     // 脚本给的值优先
 | **脚本的 `@options` 能放大超时** | 上游是 `options.timeoutMs ?? this.timeoutMs`，脚本写 `// @options: {"timeout_ms": 3600000}` 就绕过了我们设的 60 秒。**我们自己的上限必须自己夹**（在工具入口，起 worker 之前），否则"上限"只是一句注释 |
 | **`electronMain()` 那段模板字符串里不能出现反引号** | 注释里顺手写 `` `git.log` `` 会让模板字符串提前结束，报的是 `TS1005: ';' expected`（看着像别的地方坏了）。同理 `${...}` 会被当成插值。写这类"代码生成代码"的脚本时，注释里只用引号 |
 | **React 受控输入不能直接赋 `input.value`** | React 用内部的 value tracker 比对，直接赋值 + `dispatchEvent('input')` 会被判成"没变"。要用原型上的原生 setter（`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set`）再派发事件。e2e 里填输入框都得这么写 |
+| **导出的产物里不能有 pglite** | PGlite 是预览用的零安装数据库；把它（wasm + `pg-gateway`）打进产物，等于让产物自带一个数据库运行时 —— 那是另一个产品，也违背"应用只认 `DATABASE_URL`"。验证方式：`e2e:export` 断言产物里没有 `pgdata/`、`serve.mjs` 里不出现 `pglite` |
+| **生成出来的代码要过 `node --check`** | `serve.mjs` / `start.sh` 是模板字符串拼的，转义错（`\.`、`$`、反引号）在源码里看不出来，症状要到用户服务器上才出现。单测里写盘再 `spawnSync(node, ['--check', file])`，两种变体都跑 |
 | **组件的"装了"与"用上了"是两件事** | 装是本机全局的，用不用由每个应用的版本区间决定（解析器只挑满足区间的最高版本）。所以"装到 2.0.0 但应用声明 ^1.0.0"等于没装 —— 界面必须点名是哪个应用挡住了，也不要为此重载它（重载了也不会有任何变化） |
 | **Hub 装到哪必须等于加载器的 hub 根** | 两处各算一次目录，不一致的表现是"装成功了却加载不到"——而装的时候一切正常（文件真的写下去了）。所以安装器与 `pluginRoots` 走同一个 `hubPluginsDir(env, home)` |
 | **验签必须在解析之前** | 先 `parseManifest` 再验签，等于让未签名的内容进解析器；顺序反了还容易被误以为"反正验过了"。正确顺序：结构形状 → 验签 → 清单校验 → 路径检查 → 落盘 |
@@ -1845,14 +1892,16 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 **收口三件**（授权模型定稿 DESIGN §21.5 / Hub 配置随包分发：`env > 随包 hub.json > 未配置` /
 `pnpm e2e:hub` 32 项从零发布）。顺带修了两个真问题：付费组件能被下载到本机、Agent 装付费组件说"找不到"。
 
-669 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 18 + shot:settings 5 + shot:plugins 12
+678 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
++ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 18 + e2e:export 22 + shot:settings 5 + shot:plugins 12 + shot:export
 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **收口后补的一批**（盘点"还剩什么没完善"时做的）：
 §4.36 界面缺口三连 —— **应用能删了**（`app.delete` 的后端从 M1 就在，界面上一直没有入口，
 `deleteApp` 是一段没人调用的死代码）、**能改名了**、**顶栏看得见未发布版本数**；
-§4.37 脚本的 `@options` 曾被用来放大超时上限（"60 秒"其实不是 60 秒），现在在工具入口夹住。
-**欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
+§4.37 脚本的 `@options` 曾被用来放大超时上限（"60 秒"其实不是 60 秒），现在在工具入口夹住；
+§4.38 **导出静态包**（`export.static`）—— 产物拷走就能跑，`e2e:export` 22 项验到"真起 PG、真跑
+`./start.sh`、`/api` 真分流"。这也是 Docker 那一档的上游（Dockerfile = `COPY 产物`）。
+**欠账**：① ~~静态包导出~~ → **已落地（§4.38）**；Docker 上下文是它的派生品，验证留给 CI（runner 自带 Docker）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；
 ④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了“哪个角色花了多少”（聚合层看不见归属）；
