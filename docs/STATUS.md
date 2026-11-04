@@ -1,7 +1,7 @@
 # STATUS.md — 当前状态与下一步
 
 > **用途：新会话 / 新协作者的唯一入口。读完这一页即可开工，不必先读完整 `DESIGN.md`。**
-> 最后更新：2026-11-03（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
+> 最后更新：2026-11-04（**M1 全部 9 步 + M2 七步落地（第 8 步 Docker 产物按用户决定跳过）+ M3 全部完成
 > + M4 第 1–7 步（子 Agent 能派活 + 任务图面板 + 用量与预算熔断 + e2e 子 Agent 的预览工具
 > + Reviewer 出风险清单 + CodeAct 的脚本沙箱 + 发布前质量门禁）
 > + **发布预检**（`release.check`：打开对话框就知道能不能发）
@@ -11,7 +11,8 @@
 > + **M5 第 3 步（b）**（界面半边：web facet + 网关注入 + WS 链路）
 > + **M5 第 4–8 步**（install / remove 工具、插件页开关、另两个官方组件、组件端到端 5/5）
 > + **M5.5**（真模型验收 12/12、模型设置页与热切换、依赖安装时机、模型价格表）
-> + **M6 第 1–3 步**（Hub 客户端：验签 + 原子落盘；签名索引 + 更新检查；组件商店：装/卸 + 付费门禁）**：631 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + **M6 第 1–5 步（M6 收口）**（Hub 客户端：验签 + 原子落盘；签名索引 + 更新检查；组件商店：装/卸 + 付费门禁；
+> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**649 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -1391,6 +1392,81 @@ host + **新的** storage 再 `activate()` 一次，中间只共享产品库（`
 才清理（`ComponentStore.removeApp`）。代价是移除再装回来的组件会看到旧数据，这在审批流
 这种场景里恰好是对的（同一批单据）。
 
+### 4.35 M6 第 5 步：M6 收口 —— ✅ 已完成
+
+三件事：**订阅/授权模型定稿**、**Hub 配置随包分发**、**从零发布一个组件的可复跑链路**。
+其中第二件改代码，另外两件一件是文档定稿、一件是把"发布"变成一条命令。
+
+#### (a) 订阅/授权模型：定稿为「现在不做」
+
+结论写进 DESIGN §21.5（含 Phase 3 的 `license.json` 结构、四个校验点、四个要改的文件）。
+一句话：**Phase 2 全线免费；`pricing: paid` 保留在协议里，作用是"装不了"的安全阀，不是商业模式**。
+
+`pricing.type === 'paid'` 现在的语义只有一个：这个组件**不属于官方免费范围**，安装端
+一律拒绝并明说"购买流程还没做"。为什么不做半套：没有第三方上架就不存在"卖谁的组件"，
+而半套 license 的典型死法是"付了钱装不上"或"装上了但界面不说已授权"，支持成本远高于收入。
+
+#### (b) Hub 配置随包分发
+
+**这是这一步真正的 bug 修复**：M6 前四步里，Hub 配置只能来自 `TENON_HUB_URL` /
+`TENON_HUB_PUBLIC_KEY` 两个环境变量 —— 而**用户双击打开的 `.app` 里没有环境变量**。
+于是打包版的组件商店永远显示"未配置"，而那不是错误、日志里一个字都没有。
+
+| 交付 | 落点 | 关键决定 |
+|---|---|---|
+| 解析优先级 | `component-host/src/hub.ts` 的 `resolveHubConfig` | `env > 随包 hub.json > 未配置`，并返回 `origin`（`env`/`file`）与 `note` |
+| 壳只指路径 | `apps/desktop/src/main.ts` | 设 `TENON_HUB_CONFIG_FILE`，**不读内容**（壳不认识 `@tenon/*`，铁律 1） |
+| 构建产物 | `apps/desktop/build.mjs` + `electron-builder.yml` | 写 `dist/hub.json` → `Resources/hub.json`；`TENON_REQUIRE_HUB=1` 时缺配置直接失败 |
+| 界面 | `PluginsPanel` + `hub.status` | 显示地址、指纹、**来源（随包内置/环境变量）**；配错了就把 `note` 显示出来 |
+
+三个刻意的选择：
+
+1. **壳指路径而不是壳塞值**。与 `TENON_PLUGINS_DIR` / `TENON_TEMPLATES_DIR` 同一个模式。
+   好处是业务侧能分辨"包里的"和"用户设的"—— 塞进环境变量的话两者长得一模一样，
+   而界面恰恰需要回答"我这个包连的是哪个源"。
+2. **没配也写一份空 `hub.json`**。`extraResources` 的来源不存在会让整次打包失败，
+   那等于"没配 Hub 就没法打包"。空值在 `resolveHubConfig` 里是"就是没配"
+   （与"字段名拼错"分开报），所以商店显示「筹备中」而不是一句配置错误。
+3. **只给一半环境变量时不回落到文件**。那是"我要换源"，而换源必须连公钥一起换
+   （只换 URL 一定验不过签）。回落会让人以为自己的设置生效了。
+
+#### (c) 从零发布一个组件：`pnpm e2e:hub`（32 项断言）
+
+发布链路横跨四个环节，每一环都有"看起来成功、其实没生效"的错法。单测验的是
+`fake-hub.ts` **手搓的索引**；这个脚本验的是 `pnpm pack:plugin` 的**真实产物**。
+
+```
+生成临时密钥 → startStaticHub(空目录) → packComponent(免费) → packComponent(付费变体)
+→ 真 server（env 指向这个 Hub）→ hub.status / hub.check / hub.install
+→ app.create + component.install（source=hub、loaded=true、AGENTS.md 同步）
+→ 付费：HUB_PAID_NOT_AVAILABLE 且磁盘不留目录
+→ 篡改索引：reachable=false、原因指向验签、目录为空；还原后立刻恢复
+→ component.remove：回到可安装，本机的包还在
+→ 换一把公钥：bad-signature
+```
+
+为了让 CLI 与脚本走**同一段代码**，打包逻辑抽到了 `scripts/lib/pack.ts`
+（`packComponent`），`pack-plugin.ts` 变成薄壳。分成两份的话，验收验的是"另一套打包器"。
+
+#### 这一步顺带抓到两个真问题
+
+1. **付费组件能被下载到本机**。`installComponent` 拦付费，而那是"装进应用"的入口；
+   `hub.install`（"装到本机"）不拦 —— 包会原样落到 `~/.tenon/plugins/`。
+   于是"付费"变成"付不了但能下载"。已修：`installFromHubIndex` 在**下载前**看索引的
+   `pricing`，直接返回 `paid-not-available`（新错误码 `HUB_PAID_NOT_AVAILABLE`，409）。
+   用索引判是安全的 —— 这一层误拒的代价是"用户看到一句暂未开放"，漏判的代价是
+   "付费内容已经在磁盘上"。真判据仍在包里，两层不冲突。
+2. **`packComponent` 没把 `pricing` 写进索引**。不写的话上面那道门永远不会触发。
+   这是"发布了付费组件但客户端不知道"的典型漏法 —— 只有真的发一次才会发现。
+
+3. **Agent 装付费组件会说"找不到组件"**（`tools/components.ts` 只看了 `problems`，
+   `downloadError` 被忽略 —— 而"本机没有这个包"正好是 `missing`）。已改成先报下载侧原因。
+
+**一个测出来的指纹坑**：`hubKeyFingerprint` 原本直接哈希入参，而 PEM 从文件读出来带尾换行、
+从环境变量读出来被 trim 过 —— 同一把 key 得到两个指纹，界面就会误报"发布方换过密钥"。
+已改成先 trim 再哈希，并在 `parseHubPair` 里把顺序固定为「先还原字面量 `\n` 再 trim」
+（反过来会留下一个尾换行）。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1551,6 +1627,11 @@ host + **新的** storage 再 `activate()` 一次，中间只共享产品库（`
 | **"装进应用"与"装到本机"是两件事** | 前者写装配声明 + 同步 `AGENTS.md` + 重新激活（`component.install` / `install_component`），后者只是把包放到 `<home>/plugins`（`hub.install`）。混成一个的话，要么"下载了但没装上"，要么"装上了但 Agent 不知道" |
 | **付费门禁只拦安装，不装 DRM** | 组件文件是明文落盘的，谁拿到目录都能读。在加载层再拦是自我安慰，还容易让人以为这里有防护。门禁放唯一入口（`installComponent`），并在文案与文档里说清 |
 | **索引也要签名，否则可以降级** | 包签名拦得住"装恶意代码"，拦不住"把最新指向一个旧的、确实签过名的版本"。客户端看不出区别，用户点完更新就退回有漏洞的那一版。同一个密钥签索引与包就够 |
+| **"付费"要在下载前拦，不能只拦装配** | M6 第 5 步才发现：`installComponent` 拦付费，但那是"装进应用"的入口；`hub.install`（装到本机）不拦 → 付费包原样落到 `~/.tenon/plugins/`，"付不了但能下载"。修法是 `installFromHubIndex` 在**请求包之前**看索引的 `pricing`。用索引判是安全的：这一层误拒只是"看到一句暂未开放"，漏判是"付费内容已经在本机磁盘上"。真判据仍在包里，两层不冲突 |
+| **`packComponent` 必须把 `pricing` 写进索引** | 不写的话上面那道门永远不触发（索引里没有 paid 这个信息，客户端无从判）—— 而"发布了付费组件但客户端不知道"只有真的发一次才会暴露 |
+| **PEM 的尾换行会造出第二个指纹** | 文件里读出来的 PEM 带尾换行、环境变量里读出来的被 trim 过。`hubKeyFingerprint` 不先 trim 的话，同一把 key 得到两个指纹，界面就会误报"发布方换过密钥"。同理 `resolveHubConfig` 的顺序必须是「先还原字面量 `\n` 再 trim」，反了会留下一个尾换行 |
+| **打包版的配置不能只靠环境变量** | 双击打开的 `.app` 里没有 `TENON_*`。M6 前四步的 Hub 配置只能来自环境变量 → 打包版的组件商店**永远**显示"未配置"，而那不是错误、日志里一个字都没有。修法沿用既有模式：**壳指路径**（`TENON_HUB_CONFIG_FILE`），业务侧 `resolveHubConfig` 读内容并判定 `env > 文件 > 未配置`，界面显示来源 |
+| **`extraResources` 的来源不存在会让整次打包失败** | 于是"没配 Hub 就没法打包"。`build.mjs` **总是**写 `dist/hub.json`（没配就写空值），空值在 `resolveHubConfig` 里是"就是没配"，与"字段名拼错"分开报 |
 | **组件的"装了"与"用上了"是两件事** | 装是本机全局的，用不用由每个应用的版本区间决定（解析器只挑满足区间的最高版本）。所以"装到 2.0.0 但应用声明 ^1.0.0"等于没装 —— 界面必须点名是哪个应用挡住了，也不要为此重载它（重载了也不会有任何变化） |
 | **Hub 装到哪必须等于加载器的 hub 根** | 两处各算一次目录，不一致的表现是"装成功了却加载不到"——而装的时候一切正常（文件真的写下去了）。所以安装器与 `pluginRoots` 走同一个 `hubPluginsDir(env, home)` |
 | **验签必须在解析之前** | 先 `parseManifest` 再验签，等于让未签名的内容进解析器；顺序反了还容易被误以为"反正验过了"。正确顺序：结构形状 → 验签 → 清单校验 → 路径检查 → 落盘 |
@@ -1678,12 +1759,14 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 （`install_component` 在真实运行时从没挂上过、工具失败显示成成功、工具抛异常被压成 `<harness>`）。
 之后补了模型设置页与热切换、依赖安装时机（TS2688 摩擦）、模型价格表（真账复算偏差 1.28%）。
 
-**M6 第 1–4 步完成**：Hub 客户端（Ed25519 验签 + 原子落盘 + 来源改写）、签名索引 + 更新检查、
+**M6 第 1–5 步完成（M6 收口）**：Hub 客户端（Ed25519 验签 + 原子落盘 + 来源改写）、签名索引 + 更新检查、
 **组件商店**（两个页签 / 装到应用 / 移除 / 付费门禁；真 Chromium 12/12）、
-**组件持久化**（`db:*` 权限 + `(appId, componentId)` 命名空间 + 配额；审批流数据活过重启）。
+**组件持久化**（`db:*` 权限 + `(appId, componentId)` 命名空间 + 配额；审批流数据活过重启）、
+**收口三件**（授权模型定稿 DESIGN §21.5 / Hub 配置随包分发：`env > 随包 hub.json > 未配置` /
+`pnpm e2e:hub` 32 项从零发布）。顺带修了两个真问题：付费组件能被下载到本机、Agent 装付费组件说"找不到"。
 
-631 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:component 5 + e2e:provider 7 + e2e:real 12 + shot:settings 5 + shot:plugins 12 + e2e:fullstack
+649 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
++ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + shot:settings 5 + shot:plugins 12 + e2e:fullstack
 + spike:chord 10 + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
@@ -1691,9 +1774,12 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 ④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了“哪个角色花了多少”（聚合层看不见归属）；
 ⑥ Reviewer 的 `lint` 未接（模板没有 eslint 配置），清单也只有文本、没有结构化事件/面板；
 ⑦ 脚本的 `// @options: timeout_ms` 能放大沙箱默认超时（上游语义），我们没夹；
-⑧ 门禁不看 `lint`（模板没有 eslint 配置）；⑨ 主界面没有「这个应用现在能不能发」的指示。
+⑧ 门禁不看 `lint`（模板没有 eslint 配置）；⑨ 主界面没有「这个应用现在能不能发」的指示；
+⑩ **真 Hub 还没上线**：`pack:plugin` 与 `e2e:hub` 证明"包与索引生成得出来、客户端装得上"，
+但静态托管、域名、CDN 缓存策略都还没有 —— 换域名必须重新发布（索引里是绝对地址）。
 `pnpm test` / `pnpm smoke` 要一直保持绿；动到预览链路跑 `pnpm e2e:preview`，动到库/模板跑 `pnpm e2e:fullstack`，
-动到 git / 回滚跑 `pnpm e2e:diff`，动到发布跑 `pnpm e2e:release`，动到 Agent 工具/角色跑 `pnpm e2e:e2e`。
+动到 git / 回滚跑 `pnpm e2e:diff`，动到发布跑 `pnpm e2e:release`，动到 Agent 工具/角色跑 `pnpm e2e:e2e`，
+动到组件发布 / Hub 客户端跑 `pnpm e2e:hub`。
 
 三条铁律不要违反：Electron 只做壳 / 生成应用不感知运行环境 / 实验性依赖锁版本 + adapter 包装。
 （「安装包零原生模块」**不在**这三条里 —— v1.2.13 起已降为偏好，别再拿它当硬约束挡需求。）

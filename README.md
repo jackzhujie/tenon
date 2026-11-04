@@ -126,7 +126,7 @@ typescript」「测试红了」「超时了」必拦 —— 混成一个"不通�
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 631 项单测 / 集成测试（约 295s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 649 项单测 / 集成测试（约 210s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
@@ -135,19 +135,23 @@ pnpm e2e:release            # 44 项发布链路：预检只读 → 门禁拦截
 pnpm e2e:e2e                # ★ 9 项自验收：真 Electron 里由 e2e 子 Agent 点页面，注入的 bug 被断言抓到、修好后同一条断言通过
 pnpm e2e:fullstack          # ★ 全栈真机链路（要联网装 Nest）：起库 → 迁移 → 双进程 → CRUD → 重启后数据还在
 pnpm spike:chord            # 10 项：chord 宿主（契约 / 变体 / 跨 host / 热重载 / 打包），M5 的回归网
+pnpm e2e:hub                # 32 项：从零发布一个组件（现场生成密钥 → 真打包 → 静态 Hub → 真 server 装进应用）
 pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后不留孤儿进程
 ```
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**真模型验收已通过**（DeepSeek V4.1 Flash，`pnpm e2e:real` 12/12：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问，46s / 13.3k token）。见 STATUS §4.27。**设置页与模型热切换已落地**（顶栏「未配置模型」点开就能填 key，保存即生效、不用重启）。**依赖安装时机也修了**（建应用就装、第一轮前就绪），**模型价格表也有**（填了价才算得出钱，没填显示「未定价」而不是 $0.00）。**M6 第 1–4 步完成**：Hub 客户端（Ed25519 验签 + 原子落盘）、打包签名脚本 `pnpm pack:plugin`
+**真模型验收已通过**（DeepSeek V4.1 Flash，`pnpm e2e:real` 12/12：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问，46s / 13.3k token）。见 STATUS §4.27。**设置页与模型热切换已落地**（顶栏「未配置模型」点开就能填 key，保存即生效、不用重启）。**依赖安装时机也修了**（建应用就装、第一轮前就绪），**模型价格表也有**（填了价才算得出钱，没填显示「未定价」而不是 $0.00）。**M6 第 1–5 步完成**（M6 收口）：Hub 客户端（Ed25519 验签 + 原子落盘）、打包签名脚本 `pnpm pack:plugin`
 （同一次产出**签名索引**）、**更新检查**、**组件商店**（两个页签，装/卸 + 来源 + 付费标记），
 以及**组件持久化** —— `manifest.permissions` 第一次真的生效：`db:read` / `db:write`
 换到一个按 `(应用, 组件)` 命名的键值空间（配额 500 键 / 单值 64KB），审批流的数据现在活过重启。
 「检查更新 → 更新」与「商店 → 装到此应用」都在真 Chromium 里跑通（12/12）。
 界面会明确说"装了也用不上"：应用声明的版本区间不接受新版时点名是哪个应用挡住了。
-**下一步**：M6 第 5 步 —— M6 收口（订阅/授权模型定稿 + 桌面打包带 Hub 配置 + 发布一个组件的走通记录）。旧文：M5 第 3 步（b）—— 第一个真组件的界面半边（web facet + 网关 WS 链路 + `app.shell.overlay` 渲染）。
+收口三件：**授权模型定稿**（DESIGN §21.5：现在不做 license，`paid` 只是"装不了"的安全阀）、
+**Hub 配置随包分发**（`env > 随包 hub.json > 未配置`，双击打开也有商店）、
+**`pnpm e2e:hub` 32 项**（现场生成密钥 → 真打包 → 静态 Hub → 真 server 装进应用 → 篡改与付费两种拒绝）。
+下一步：真 Hub 上线（静态托管 / 域名 / 缓存策略），以及 M7 的第三方上架。
 服务端半边已经落地：契约 + server facet + 插件构建（`pnpm build:plugins`，410KB 单文件）+ 宿主装载。
 M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，
 M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17、第 2 步（组件加载器）见 §4.18、第 3 步 a（真组件）见 §4.19。
