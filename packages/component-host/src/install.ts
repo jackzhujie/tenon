@@ -20,6 +20,7 @@ import {
   type ComponentEntry,
   type ComponentMountSpec,
 } from './assembly.js'
+import { installFromHubIndex, type HubConfig } from './hub.js'
 import { findSlot } from './slots.js'
 import { buildPlan, type PlanInput } from './plan.js'
 import { pickPlugin, type UsablePlugin } from './resolve.js'
@@ -117,6 +118,31 @@ export async function installComponent(request: InstallRequest): Promise<Install
     )
   }
 
+  /*
+   * 付费门禁（M6 第 3 步）。
+   *
+   * 这里是**唯一**的安装入口（Agent 的 install_component 与插件页的「装到此应用」
+   * 都走它），所以一道门就够，不需要在两处各写一遍 —— 那种"两个入口一个忘加"的漏洞
+   * 是最常见的付费绕过方式。
+   *
+   * 为什么是"装不了"而不是"装了但跑不起来"：我们还没有购买流程，所以"装上了"只会
+   * 让用户以为能用了。宁可现在直说"付费组件暂未开放"。
+   *
+   * 为什么不做成 DRM：组件的文件是明文落盘的（esbuild 产物），谁拿到目录都能读。
+   * 在"加载"那一层再拦只是把可读的代码当成加密的，属于自我安慰。所以门禁只放在
+   * 安装这一步，并且**明说这一点**，免得后来有人以为这里有防护。
+   */
+  if (plugin.manifest.pricing.type === 'paid') {
+    return fail(
+      problem(
+        'paid-not-available',
+        request.id,
+        `${request.id} 是付费组件（${plugin.manifest.pricing.sku}），现在还不能装`,
+        '付费与购买流程还没做。等它上线之后这里会有「购买」按钮',
+      ),
+    )
+  }
+
   const read = await readAssembly(request.repoDir)
   if (read.kind === 'invalid') {
     return fail(
@@ -133,7 +159,8 @@ export async function installComponent(request: InstallRequest): Promise<Install
   const entry: ComponentEntry = {
     id: request.id,
     version: request.version ?? `^${plugin.manifest.version}`,
-    license: plugin.manifest.pricing.type === 'paid' ? plugin.manifest.pricing.sku : 'free',
+    // 上面的付费门禁已经把 paid 挡掉了，所以走到这里必然是 free —— 类型检查也这么认为
+    license: 'free',
     enabled: true,
     mount: [...(request.mounts ?? defaultMounts(plugin))],
   }
@@ -258,4 +285,76 @@ export async function uninstallComponent(request: UninstallRequest): Promise<Uni
   const planned = await buildPlan(plan)
   const agentsDoc = await syncAgentsDoc(request.repoDir, planned.components)
   return { removed: true, agentsDoc, remaining: planned.components }
+}
+
+/**
+ * 装组件，**本机没有就先去 Hub 拿**。
+ *
+ * 两个入口（Agent 的 `install_component` 与插件页的「装到此应用」）都走这里：
+ * 各写一份的话，一边改了另一边忘，表现是"商店能装、Agent 装不了"（或反过来），
+ * 而用户看到的只是"装不上"。
+ *
+ * 三条判断刻意分开报：
+ * - **下载失败**（网络 / 验签 / Hub 上没有）→ `downloadError`，调用方该按这种情况说话；
+ * - **装失败**（版本区间、槽位、付费门禁）→ `result.ok === false` 的 problems；
+ * - 两者都有时以**下载失败**为先 —— 那是更根本的一层，装的问题在这种情况下没机会发生。
+ */
+export interface InstallWithHubRequest extends InstallRequest {
+  /**
+   * Hub。\`config\` 为 null（未配置）时退化成"只装本机"，与不传完全一样 ——
+   * 因为官方 Hub 上线前就是这个状态，不该因此报错。
+   */
+  readonly hub?: { readonly config: HubConfig | null; readonly dir: string } | undefined
+}
+
+export interface InstallWithHubResult {
+  readonly result: InstallResult
+  /** 这个包是这一次从 Hub 下的吗 */
+  readonly downloaded: boolean
+  /** 下载失败的原因（没下载、或下载成功时为 null） */
+  readonly downloadError: { readonly code: 'HUB_BAD_BUNDLE' | 'HUB_BAD_SIGNATURE'; readonly message: string; readonly hint: string | null } | null
+}
+
+export async function installComponentWithHub(
+  request: InstallWithHubRequest,
+): Promise<InstallWithHubResult> {
+  const first = await installComponent(request)
+  const missing = !first.ok && first.problems.some((item) => item.code === 'missing')
+  if (!missing || request.hub?.config == null) {
+    return { result: first, downloaded: false, downloadError: null }
+  }
+
+  /*
+   * 只对 `missing` 重试。\`version-unsatisfied\` 时下载也没用（区间已经不接受了），
+   * 白等一次网络只会让"装不上"变得更慢。
+   */
+  const fetched = await installFromHubIndex({
+    hubDir: request.hub.dir,
+    config: request.hub.config,
+    id: request.id,
+    ...(request.version === undefined ? {} : { version: exactVersion(request.version) }),
+  })
+  if (!fetched.ok) {
+    return {
+      result: first,
+      downloaded: false,
+      downloadError: {
+        code: fetched.problem.code === 'bad-signature' ? 'HUB_BAD_SIGNATURE' : 'HUB_BAD_BUNDLE',
+        message: fetched.problem.message,
+        hint: fetched.problem.hint,
+      },
+    }
+  }
+  return { result: await installComponent(request), downloaded: true, downloadError: null }
+}
+
+/**
+ * 装配声明里的 `version` 是**区间**（`^1.0.0`），而 Hub 的索引里只有精确版本。
+ *
+ * 所以这里只在"看起来就是个精确版本"时才把它当版本传给索引；区间一律交给
+ * `installComponent` 自己的区间判断（下载最新的，装的时候再按区间挑）。
+ * 硬把 `^1.0.0` 当成版本号去索引里找，只会得到"Hub 上没有 ^1.0.0"这种莫名其妙的错。
+ */
+function exactVersion(value: string): string | undefined {
+  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.trim()) ? value.trim() : undefined
 }

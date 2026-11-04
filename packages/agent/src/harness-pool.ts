@@ -15,7 +15,7 @@ import type { Extension, ToolRegistration } from '@earendil-works/pi-durable'
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node'
 import type { TenonHome } from '@tenon/core'
 import { appPaths } from '@tenon/core'
-import type { PluginRoot } from '@tenon/component-host'
+import type { HubConfig, PluginRoot } from '@tenon/component-host'
 import type { ModelChoice, ResolvedModel } from './models.js'
 import { codingExtension } from './tools/coding.js'
 import { codeactExtension } from './tools/codeact.js'
@@ -57,6 +57,12 @@ export interface HarnessPoolOptions {
     readonly roots: readonly PluginRoot[]
     readonly tenonVersion: string
     readonly onChanged?: (appId: string) => void | Promise<void>
+    /**
+     * Hub（M6 第 3 步）。给了它，`install_component` 才能装"本机还没有"的组件 ——
+     * 也就是"跟 Agent 说一句就装上了"，而不是"请你去插件页点一下"。
+     * 未配置时是 `{config: null}`：退化成只装本机，不报错。
+     */
+    readonly hub?: { readonly config: HubConfig | null; readonly dir: string } | undefined
   }
   /**
    * 页面通道的提供者（M4 第 4 步）：由 server 接到 `PreviewManager.pages`。
@@ -146,6 +152,9 @@ export class HarnessPool {
           ...(this.options.components.onChanged === undefined
             ? {}
             : { onChanged: this.options.components.onChanged }),
+          ...(this.options.components.hub === undefined
+            ? {}
+            : { hub: this.options.components.hub }),
         })
     // `subagent` 需要 Harness（子会话的模型/工具只能在创建那一刻定），而扩展必须在
     // `Harness.open` 之前建好 —— 所以给一个懒读取器，调用发生时它一定已经有值。

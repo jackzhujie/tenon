@@ -456,6 +456,39 @@ export const rpcMethods = {
     }),
   },
 
+  /**
+   * 把组件装进这个应用（M6 第 3 步：组件商店）。
+   *
+   * 与 `install_component` 工具走**同一个** `installComponent`：写装配声明 + 同步
+   * `docs/AGENTS.md` + 让宿主重新激活。少写一处，Agent 就会"不知道有这个组件"。
+   *
+   * 本机没有这个包时，若 Hub 已配置会先下载再装（`downloaded` 告诉你是不是这次下载的）。
+   * 下载失败不等于装失败 —— 两个原因分开报，用户才知道该修哪一头。
+   */
+  'component.install': {
+    input: z.object({
+      appId: Id,
+      id: Id,
+      /** 版本区间；不给 = 当前可用的最高版本 */
+      version: z.string().min(1).optional(),
+    }),
+    output: z.object({
+      components: z.array(InstalledComponent),
+      problems: z.array(ComponentProblem),
+      /** 这个包是这一次从 Hub 下的吗 */
+      downloaded: z.boolean(),
+    }),
+  },
+  /** 从应用里卸掉（不删本机的包，也不动 `AGENTS.md` 之外的任何东西） */
+  'component.remove': {
+    input: z.object({ appId: Id, id: Id }),
+    output: z.object({
+      components: z.array(InstalledComponent),
+      /** false = 本来就没装（幂等，不是错误） */
+      removed: z.boolean(),
+    }),
+  },
+
   'settings.get': {
     input: Empty,
     output: z.object({ values: z.record(z.string(), z.unknown()) }),
@@ -544,6 +577,8 @@ export const rpcMethods = {
           latest: z.string(),
           notes: z.string().nullable(),
           update: z.boolean(),
+          /** 付费组件（还不能装）。索引上的标记，判据在包里 */
+          paid: z.boolean(),
           blockedBy: z.array(z.string()),
         }),
       ),

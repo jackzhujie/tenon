@@ -367,6 +367,14 @@ export interface HubIndexComponent {
   readonly name: string
   readonly description: string
   /**
+   * 付费标记。**只是显示用的提示**，不是判据 ——
+   * 判据在包里（清单带签名），所以索引把 paid 写成 free 也不会变成免费：
+   * 装上那一刻会按清单拒绝。反过来写错只会让一个免费组件在商店里显示成付费。
+   *
+   * 缺省当 free：早期索引没有这个字段，不能让它们全部变成"付费"。
+   */
+  readonly pricing?: 'free' | 'paid' | undefined
+  /**
    * 版本列表。**不假设有序** —— 合约里没写"按版本升序"，所以取最新一律走比较，
    * 不取 `versions.at(-1)`。索引是别人生成的，靠顺序假设是最容易崩的一种信任。
    */
@@ -462,6 +470,58 @@ export function verifyHubIndex(
   return { ok: true, value: { index, keyFingerprint: hubKeyFingerprint(publicKeyPem) } }
 }
 
+export interface InstallFromIndexOptions {
+  readonly hubDir: string
+  readonly config: HubConfig
+  readonly id: string
+  /** 精确版本；不给 = 索引里的最新 */
+  readonly version?: string | undefined
+  readonly fetch?: typeof globalThis.fetch
+}
+
+/**
+ * 「按 id 从 Hub 装到本机」—— `hub.install` 与「装组件时本机没有」两处共用。
+ *
+ * 为什么要经过索引而不是让调用方给地址：校验只剩"是不是同一个源"的时候，
+ * "装的是不是用户以为的那个组件"就没人管得着。地址只从签名索引里来。
+ */
+export async function installFromHubIndex(
+  options: InstallFromIndexOptions,
+): Promise<HubResult<InstalledBundle>> {
+  const fetched = await fetchHubIndex({
+    config: options.config,
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+  })
+  if (!fetched.ok) return fetched
+
+  const component = findIndexComponent(fetched.value.index, options.id)
+  if (component === undefined) {
+    return fail('bad-bundle', `Hub 上没有 ${options.id} 这个组件`, '检查 id 拼写；或者它还没发布')
+  }
+  const wanted =
+    options.version === undefined
+      ? latestVersion(component)
+      : component.versions.find((entry) => entry.version === options.version)
+  if (wanted === undefined) {
+    const known = component.versions.map((entry) => entry.version).join('、')
+    return fail(
+      'bad-bundle',
+      `Hub 上没有 ${options.id}@${options.version ?? '(最新)'}`,
+      `现有版本：${known === '' ? '（无）' : known}`,
+    )
+  }
+
+  return installFromHub({
+    hubDir: options.hubDir,
+    config: options.config,
+    bundleUrl: wanted.url,
+    // 索引说 A@1.1.0、包里是别的 → 拒。索引签名只证明"这份索引没被改"，
+    // 不证明"这个地址上的包就是它"
+    expect: { id: component.id, version: wanted.version },
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+  })
+}
+
 export interface FetchHubIndexOptions {
   readonly config: HubConfig
   readonly fetch?: typeof globalThis.fetch
@@ -548,6 +608,8 @@ export interface HubUpdate {
   readonly installedVersion: string | null
   readonly latest: string
   readonly notes: string | null
+  /** 付费标记（**显示用**；真判据在包里，见 `HubIndexComponent.pricing`） */
+  readonly paid: boolean
   /** 有更新 = 装过、且 latest 比本机高。**降级不算更新**（见函数注释） */
   readonly update: boolean
   /**
@@ -599,6 +661,7 @@ export function planHubUpdates(input: {
       installedVersion,
       latest: latest.version,
       notes: latest.notes,
+      paid: component.pricing === 'paid',
       update,
       blockedBy: [...new Set(blockedBy)],
     })

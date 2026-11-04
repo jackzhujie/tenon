@@ -68,6 +68,8 @@ export const COMPONENT_PROBLEM_CODES = [
   'dependency-missing',
   'dependency-blocked',
   'dependency-cycle',
+  /** 付费组件：还没有购买流程，所以装不了（见 install.ts 的门禁说明） */
+  'paid-not-available',
 ] as const
 export type ComponentProblemCode = (typeof COMPONENT_PROBLEM_CODES)[number]
 

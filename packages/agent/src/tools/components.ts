@@ -16,10 +16,11 @@ import type { Extension, ToolRegistration } from '@earendil-works/pi-durable'
 import { defineExtension } from '@earendil-works/pi-durable'
 import { Type } from 'typebox'
 import {
-  installComponent,
+  installComponentWithHub,
   listAvailable,
   readAssembly,
   uninstallComponent,
+  type HubConfig,
   type PluginRoot,
 } from '@tenon/component-host'
 
@@ -35,6 +36,8 @@ export interface ComponentsToolsOptions {
   readonly tenonVersion: string
   /** 装/卸之后通知宿主重新激活（不给就"重启才生效"） */
   readonly onChanged?: (appId: string) => void | Promise<void>
+  /** 给了它，装组件时本机没有就去 Hub 拿（M6 第 3 步） */
+  readonly hub?: { readonly config: HubConfig | null; readonly dir: string } | undefined
 }
 
 type Text = { output: { type: 'text'; text: string }[]; isError?: boolean }
@@ -110,26 +113,29 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
        * 甚至可能是空的），模型看到的就是这四个字母 —— 既不知道发生了什么，也没法自救。
        * 这里兜住，把它变成一句人话回去。
        */
-      let result: Awaited<ReturnType<typeof installComponent>>
+      let run: Awaited<ReturnType<typeof installComponentWithHub>>
       try {
-        result = await installComponent({
+        run = await installComponentWithHub({
           repoDir: options.repoDir,
           roots: options.roots,
           tenonVersion: options.tenonVersion,
           id,
           ...(mounts === undefined ? {} : { mounts }),
           ...(args.version === undefined || args.version === '' ? {} : { version: args.version }),
+          // 本机没有就先去 Hub 拿 —— "跟 Agent 说一句就装上了"靠的是这一行
+          ...(options.hub === undefined ? {} : { hub: options.hub }),
         })
       } catch (error) {
         return fail(`装 ${id} 时出错了：${error instanceof Error ? error.message : String(error)}`)
       }
 
-      if (!result.ok) {
-        const detail = result.problems
+      if (!run.result.ok) {
+        const detail = run.result.problems
           .map((item) => `- ${item.message}${item.hint === null ? '' : `（${item.hint}）`}`)
           .join('\n')
         return fail(`没装上 ${id}：\n${detail}\n不要自己写一个替代品；把这条原因告诉用户。`)
       }
+      const result = run.result
 
       try {
         await options.onChanged?.(options.appId)
@@ -146,7 +152,7 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
               .join('、')
       const notes = result.notes.length === 0 ? '' : `\n注意：${result.notes.join('；')}`
       return ok(
-        `已装 ${component.name}（${component.id} v${component.version}），挂载：${where}。` +
+        `已装 ${component.name}（${component.id} v${component.version}）${run.downloaded ? '，刚从 Hub 下载' : ''}，挂载：${where}。` +
           `装配声明写在 ${result.assemblyFile}，docs/AGENTS.md 的「已装组件」已同步。` +
           `它的 UI 由平台注入，**不要再去写悬浮球/聊天框**。${notes}`,
       )

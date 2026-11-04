@@ -8,13 +8,12 @@
  *   4. 应用声明的区间不接受新版时，必须出现在 `blockedBy` 里（装了也不会被用）
  */
 import { generateKeyPairSync } from 'node:crypto'
-import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { HUB_INDEX_FORMAT, signBundle, signHubIndex, type HubBundle, type HubIndexComponent } from '@tenon/component-host'
+import { signBundle, type HubBundle } from '@tenon/component-host'
+import { startFakeHub, type FakeHub } from './fake-hub.js'
 import { boot, rpc } from './support.js'
 import type { RunningServer } from '../src/index.js'
 
@@ -26,13 +25,13 @@ const COMPONENT = 'tenon.official.ai-assistant'
 
 let dir: string | undefined
 let running: RunningServer | undefined
-let hub: Server | undefined
+let hub: FakeHub | undefined
 
 afterEach(async () => {
   await running?.close()
   running = undefined
   if (hub !== undefined) {
-    await new Promise<void>((resolve) => hub?.close(() => resolve()))
+    await hub.close()
     hub = undefined
   }
   if (dir !== undefined) await rm(dir, { recursive: true, force: true })
@@ -67,76 +66,19 @@ function bundle(version = '1.1.0', tamper = false): HubBundle {
   return tamper ? { ...signed, files: { 'server.js': 'evil()', 'web.js': 'evil()' } } : signed
 }
 
-function indexOf(
-  hubUrl: string,
-  versions: readonly string[],
-  options: { tamper?: boolean } = {},
-): unknown {
-  const components: HubIndexComponent[] = [
-    {
-      id: COMPONENT,
-      name: 'AI 小助手',
-      description: 'Hub 上的新版',
-      // 故意倒序：客户端不许靠数组顺序取最新
-      versions: [...versions].reverse().map((version) => ({
-        version,
-        url: `${hubUrl}/bundles/${version}.json`,
-        notes: `${version} 的说明`,
-        publishedAt: 1,
-      })),
-    },
-  ]
-  const signed = signHubIndex({ format: HUB_INDEX_FORMAT, generatedAt: 1, components }, PRIVATE_PEM)
-  return options.tamper === true ? { ...signed, components: [] } : signed
-}
-
-interface HubHandle {
-  readonly url: string
-  /** 换一批版本（模拟"Hub 上又发了一版"） */
-  setVersions(versions: readonly string[]): void
-  setTampered(tampered: boolean): void
-}
-
-/**
- * 一个能发索引与包的假 Hub。
- *
- * `versions` 是**可变的**：更新这件事的本质就是"过一会儿 Hub 上多了一版"，
- * 用固定的索引测不出来。
- */
-async function startHub(bundles: Record<string, unknown>, initial: readonly string[]): Promise<HubHandle> {
-  let versions = initial
-  let tampered = false
-  hub = createServer((req, res) => {
-    const url = req.url ?? ''
-    if (url === '/index.json') {
-      const origin = `http://127.0.0.1:${(hub!.address() as AddressInfo).port}`
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(indexOf(origin, versions, { tamper: tampered })))
-      return
-    }
-    const match = /^\/bundles\/(.+)\.json$/.exec(url)
-    if (match !== null) {
-      const payload = bundles[match[1] ?? '']
-      if (payload !== undefined) {
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify(payload))
-        return
-      }
-    }
-    res.writeHead(404)
-    res.end('{}')
+/** 薄包装：这一个文件里所有用例都是同一个组件、同一把钥匙 */
+function startHub(bundles: Record<string, unknown>, versions: readonly string[]): Promise<FakeHub> {
+  return startFakeHub({
+    componentId: COMPONENT,
+    name: 'AI 小助手',
+    description: 'Hub 上的新版',
+    privateKeyPem: PRIVATE_PEM,
+    bundles,
+    versions,
+  }).then((fake) => {
+    hub = fake
+    return fake
   })
-  await new Promise<void>((resolve) => hub?.listen(0, '127.0.0.1', () => resolve()))
-  const base = `http://127.0.0.1:${(hub.address() as AddressInfo).port}`
-  return {
-    url: base,
-    setVersions(next) {
-      versions = next
-    },
-    setTampered(value) {
-      tampered = value
-    },
-  }
 }
 
 async function bootWithHub(hubUrl: string | null): Promise<void> {

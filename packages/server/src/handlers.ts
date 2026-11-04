@@ -22,9 +22,9 @@ import {
   ASSEMBLY_FILE,
   buildPlan,
   fetchHubIndex,
-  findIndexComponent,
   hubKeyFingerprint,
-  installFromHub,
+  installComponentWithHub,
+  installFromHubIndex,
   latestVersion,
   listAvailable,
   listInstalledHubComponents,
@@ -32,6 +32,7 @@ import {
   readAssembly,
   satisfiesRange,
   setComponentEnabled,
+  uninstallComponent,
   type HubConfig,
   type HubDeclaration,
   type PluginRoot,
@@ -41,6 +42,8 @@ import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { listTemplates } from '@tenon/generator'
 import type {
+  ComponentProblem,
+  InstalledComponent,
   ModelState,
   RpcArgs,
   RpcMethod,
@@ -131,6 +134,21 @@ function pushTenonLog(
       repeat: 1,
     },
   })
+}
+
+/** 重新算一遍装配计划（"现在这个应用到底是什么状态"的唯一来源） */
+async function readPlan(
+  core: CoreServices,
+  deps: ServerDeps,
+  appId: string,
+): Promise<{ components: InstalledComponent[]; problems: ComponentProblem[] }> {
+  const plan = await buildPlan({
+    repoDir: appPaths(core.home, appId).repoDir,
+    roots: deps.plugins.roots,
+    tenonVersion: deps.version,
+  })
+  // readonly → 可变：出参会被 JSON 序列化，不该带 readonly
+  return { components: [...plan.components], problems: [...plan.problems] }
 }
 
 /**
@@ -526,6 +544,48 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       }
     },
 
+    'component.install': async (input) => {
+      const app = core.apps.require(input.appId)
+      const run = await installComponentWithHub({
+        repoDir: appPaths(core.home, app.id).repoDir,
+        roots: deps.plugins.roots,
+        tenonVersion: deps.version,
+        id: input.id,
+        ...(input.version === undefined ? {} : { version: input.version }),
+        // 本机没有就先去 Hub 拿。未配置时退化成"只装本机"，不报错
+        hub: deps.hub,
+      })
+
+      // 下载失败优先报：装的问题在这种情况下根本没机会发生
+      if (run.downloadError !== null) {
+        throw new TenonError(run.downloadError.code, run.downloadError.message, {
+          hint: run.downloadError.hint,
+        })
+      }
+
+      // 装上之后立刻重新激活：否则用户点了"装"，界面上什么也没有（要等下次预览）
+      await deps.components.reload(app.id)
+      const plan = await readPlan(core, deps, app.id)
+      return {
+        components: plan.components,
+        // 装失败时把"为什么装不上"而不是"现在有哪些问题"交回去
+        problems: run.result.ok ? plan.problems : [...run.result.problems],
+        downloaded: run.downloaded,
+      }
+    },
+
+    'component.remove': async (input) => {
+      const app = core.apps.require(input.appId)
+      const result = await uninstallComponent({
+        repoDir: appPaths(core.home, app.id).repoDir,
+        roots: deps.plugins.roots,
+        tenonVersion: deps.version,
+        id: input.id,
+      })
+      await deps.components.reload(app.id)
+      return { components: [...result.remaining], removed: result.removed }
+    },
+
     'component.setEnabled': async (input) => {
       const app = core.apps.require(input.appId)
       const result = await setComponentEnabled({
@@ -666,51 +726,20 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         )
       }
 
-      /*
-       * 下载地址来自**签名索引**，不由调用方给。否则校验只剩"是不是同一个源"，
-       * 而"装的是不是用户以为的那个组件"没人管得着。
-       */
-      const fetched = await fetchHubIndex({ config })
-      if (!fetched.ok) {
-        throw new TenonError('HUB_BAD_BUNDLE', fetched.problem.message, {
-          hint: fetched.problem.hint,
-          reason: fetched.problem.code,
-        })
-      }
-      const component = findIndexComponent(fetched.value.index, input.id)
-      if (component === undefined) {
-        throw new TenonError('HUB_BAD_BUNDLE', `Hub 上没有 ${input.id} 这个组件`, {
-          hint: '检查 id 拼写；也可以让 Agent 用 list_components 看本机有什么',
-        })
-      }
-      const wanted =
-        input.version === undefined
-          ? latestVersion(component)
-          : component.versions.find((entry) => entry.version === input.version)
-      if (wanted === undefined) {
-        const known = component.versions.map((entry) => entry.version).join('、')
-        throw new TenonError(
-          'HUB_BAD_BUNDLE',
-          `Hub 上没有 ${input.id}@${input.version ?? '(最新)'}`,
-          { hint: `现有版本：${known === '' ? '（无）' : known}` },
-        )
-      }
-
-      const result = await installFromHub({
+      // 地址来自**签名索引**，不由调用方给（否则"装的是不是用户以为的那个"没人管）
+      const result = await installFromHubIndex({
         hubDir: deps.hub.dir,
         config,
-        bundleUrl: wanted.url,
-        // 索引说 A@1.1.0、包里是别的 → 拒。索引签名只证明"这份索引没被改"，
-        // 不证明"这个地址上的包就是它"
-        expect: { id: component.id, version: wanted.version },
+        id: input.id,
+        ...(input.version === undefined ? {} : { version: input.version }),
       })
       if (!result.ok) {
         // 签名不对与"包坏了"分开：前者是安全问题，后者是内容问题
-        const code = result.problem.code === 'bad-signature' ? 'HUB_BAD_SIGNATURE' : 'HUB_BAD_BUNDLE'
-        throw new TenonError(code, result.problem.message, {
-          hint: result.problem.hint,
-          reason: result.problem.code,
-        })
+        throw new TenonError(
+          result.problem.code === 'bad-signature' ? 'HUB_BAD_SIGNATURE' : 'HUB_BAD_BUNDLE',
+          result.problem.message,
+          { hint: result.problem.hint, reason: result.problem.code },
+        )
       }
 
       /*

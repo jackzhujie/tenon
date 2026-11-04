@@ -127,6 +127,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
    */
   let componentsRef: ComponentRuntime | undefined
   const resolvedRoots = options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root })
+  /*
+   * Hub 配置（M6）：两个环境变量都给才算配置好。**必须在建 agent 之前算**，
+   * 因为 `install_component` 也要用它（本机没有就去 Hub 拿）。
+   * 装到哪里与加载器的 hub 根**必须同一个** —— 否则"装成功了却加载不到"。
+   */
+  const hubConfig = hubConfigFromEnv(env)
+  const hubDir = hubPluginsDir(env, core.home.root)
   const agent = createAgentRuntime({
     core,
     env,
@@ -153,17 +160,12 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       onChanged: async (appId) => {
         await componentsRef?.reload(appId)
       },
+      // 让 Agent 也能装"本机还没有"的组件（否则它只能说"请去插件页点一下"）
+      hub: { config: hubConfig, dir: hubDir },
     },
   })
   /** 每个应用的组件链路：进程退出/预览重起时要能收干净（wss 不会自己关） */
   const bridges = new Map<string, AppComponentBridge>()
-  /*
-   * Hub 配置（M6）：两个环境变量都给才算配置好。
-   * 装到哪里与加载器的 hub 根**必须同一个** —— 否则"装成功了却加载不到"，
-   * 而这种错查起来最费劲（装的时候一切正常）。
-   */
-  const hubConfig = hubConfigFromEnv(env)
-  const hubDir = hubPluginsDir(env, core.home.root)
   const components = new ComponentRuntime({
     home: core.home,
     agent,

@@ -11,7 +11,7 @@
 > + **M5 第 3 步（b）**（界面半边：web facet + 网关注入 + WS 链路）
 > + **M5 第 4–8 步**（install / remove 工具、插件页开关、另两个官方组件、组件端到端 5/5）
 > + **M5.5**（真模型验收 12/12、模型设置页与热切换、依赖安装时机、模型价格表）
-> + **M6 第 1–2 步**（Hub 客户端：验签 + 原子落盘；签名索引 + 更新检查 + 插件页「更新」）**：610 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> + **M6 第 1–3 步**（Hub 客户端：验签 + 原子落盘；签名索引 + 更新检查；组件商店：装/卸 + 付费门禁）**：618 个测试 + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -45,7 +45,7 @@ Composer 顶部出现一个可删除的上下文 chip，发送时一并交给 Ag
 但记录里会标成 `带问题`，半年后查得出来。
 
 **组件能装了**（M5 第 2 步）：应用里装了什么组件写在它自己的仓库里（`app.components.json`，跟着 git 走），
-加载器按 `hub > bundled` 的覆盖层挑版本、逐条独立判定，装不上的原因（19 个稳定 code）原样返回给界面 ——
+加载器按 `hub > bundled` 的覆盖层挑版本、逐条独立判定，装不上的原因（21 个稳定 code）原样返回给界面 ——
 `component.list` 恒 200，插件页要能说清"它要求 Tenon ≥ 1.4.0，你是 1.2.0"。真组件（AI 小助手）是下一步。
 
 **而且打开对话框就知道能不能发（预检 `release.check`）**：不用点了才知道。查一次是**真跑**
@@ -732,7 +732,7 @@ M5 整套押在 chord 上（DESIGN §21「不要自研插件框架」），所�
 | 清单校验 | `src/manifest.ts` | 14 项：未知权限 / 绝对路径 / `../` 越界 / 未知插槽 / 重复项 / 收费缺 sku 全拒，且指出哪一行 |
 | 装配声明 | `src/assembly.ts` | 10 项：文件不存在 = 空装配（不是错误）、坏 JSON = invalid、**原子写**（tmp+rename）、增删幂等 |
 | 覆盖层解析 | `src/resolve.ts` + `src/roots.ts` | 认两种布局（bundled 平铺 / hub `<id>/<version>/`），`hub > bundled` |
-| 加载计划 | `src/plan.ts` | 30 项：19 个 problem code、依赖拓扑排序、成环整组不加载、前缀冲突、**坏一个不影响别的** |
+| 加载计划 | `src/plan.ts` | 30 项：problem code（现 21 个）、依赖拓扑排序、成环整组不加载、前缀冲突、**坏一个不影响别的** |
 | RPC | `component.list` | 5 项：走真 HTTP；装不上带原因且**恒 200**（插件页不该看到 500）；appId 错是 404 |
 | 打包 | `apps/desktop` | `TENON_PLUGINS_DIR` → `dist/plugins` → `extraResources`（与 `templates` 同一套约定） |
 
@@ -787,7 +787,7 @@ packages/
 │   ├── src/manifest.ts  #   清单校验：权限白名单 / facet 路径不许越界 / 未知插槽
 │   ├── src/assembly.ts  #   app.components.json 读写（原子写 = tmp + rename）
 │   ├── src/{roots,resolve}.ts # 覆盖层：hub > bundled，认平铺与 <id>/<version>/ 两种布局
-│   └── src/plan.ts      #   ★ 加载计划：19 个 problem code / 依赖拓扑 / 成环 / 前缀冲突 / targets(目录+facet)
+│   └── src/plan.ts      #   ★ 加载计划：problem code（现 21 个） / 依赖拓扑 / 成环 / 前缀冲突 / targets(目录+facet)
 ├── core/                # 领域服务，不认识 HTTP
 │   ├── src/paths.ts     #   TENON_HOME 布局（唯一算路径的地方）
 │   ├── src/db.ts        #   node:sqlite + PRAGMA user_version 线性迁移
@@ -1298,6 +1298,51 @@ RPC：`hub.status`（界面据此显示"筹备中/已连接"）、`hub.install`�
 烤进去），所以换域名/端口之后**必须重新发布索引**；否则客户端会以 `url-outside-hub` 拒装。
 这个检查本身是对的（它挡掉了"索引指向别处"），只是换域名时容易忘。
 
+### 4.33 M6 第 3 步：组件商店 —— ✅ 已完成
+
+**这一步之前，插件页只能管"已经装进这个应用的组件"**：想装新的只能跟 Agent 说一句，
+或者去手改 `app.components.json`。商店要回答的是另一个问题：**还能装什么**。
+
+| 交付 | 落点 | 关键决定 |
+|---|---|---|
+| 两个页签 | `PluginsPanel` | 「已装 N」/「商店」；有更新时页签上标 `↑1`（否则用户根本不会点进去看） |
+| 装进应用 | `component.install` RPC | 与 `install_component` 工具走**同一个** `installComponent`：写声明 + 同步 `AGENTS.md` + 重新激活 |
+| 移除 | `component.remove` RPC | 有"装"就得有"移除"，否则用户只能靠 Agent 才能反悔 |
+| 本机没有就去 Hub 拿 | `installComponentWithHub`（component-host 内） | 收纳了两处重复的"挑版本 + 下载 + 重试"；Agent 工具与界面**共用这一条** |
+| 付费门禁 | `installComponent` 里的 `paid-not-available` | 唯一入口里一道门；Agent 与界面都绕不过 |
+| 付费标记 | 索引的 `pricing` + 商店的「付费」标签 | **只是显示**，判据在包里的清单（见下） |
+
+**为什么"装进应用"必须和 Agent 同一条路**：装配声明有三个下游（web 注入 / server 激活 /
+`AGENTS.md` 索引）。界面自己写声明的话，第三个下游会漏 —— 表现是"界面上装了，对话里
+Agent 还是不知道有这个组件，于是自己又写一个"。这条在 M5 第 4 步就定过，这次是复用。
+
+**付费门禁为什么只做在"安装"这一步**：组件的文件是明文落盘的（esbuild 产物），
+谁拿到目录都能读；在"加载"那一层再拦只是把可读的代码当成加密的，属于自我安慰。
+所以门禁只拦安装，并且**在清单、错误文案、STATUS 里都明说这一点** —— 免得后来有人
+以为这里有防护。索引里的 `pricing` 也说明是"显示用"：写成 free 也变不成免费，
+装上那一刻会按**包里的清单**（带签名）拒绝。
+
+**一个被顺手消掉的重复**：原本 `hub.install` 与 `component.install` 各写一遍
+"读索引 → 挑版本 → 下载 → 校验 expect"，而 Agent 的 `install_component` 连这条路都没有
+（所以"跟 Agent 说一句装一个 Hub 组件"是坏的）。现在收成两个函数：
+`installFromHubIndex`（按 id 装到本机）与 `installComponentWithHub`（装进应用，缺了就下载），
+三处入口全都走它们。
+
+**人眼验收 `pnpm shot:plugins`（12/12 通过）**：脚本用真的组件内容打三个签名包
+（AI 小助手 1.1.0 / 1.2.0、导出 CSV 1.0.0），起一个假 Hub，然后在真 Chromium 里
+把整条路走一遍：开插件页 → 检查更新（`v1.1.0 → v1.2.0`）→ 更新 → 切「商店」
+（列出导出 CSV 与审批流）→ 点"导出 CSV"那一行的「装到此应用」→ 回「已装」看到两个组件。
+五张截图在 `/tmp/tenon-plugins/`。
+
+顺带一个**测试自身的教训**：第一次跑，脚本按"页面上第一个装按钮"去点，结果装成了审批流
+（本机 bundled 的那两个都在商店里）。改成**按行找按钮**（在含"导出 CSV"的那个 `li` 里找），
+断言也改成"本机有就优先用本机那份"—— 这不是脚本的妥协，而是产品的真实顺序。
+
+测试 8 项（`component-store.test.ts`，真 server + 真工具 + 真假 Hub）：
+本机有包 → 装进应用且 AGENTS.md 同步 / 幂等 / 本机没有 → 下载再装（`downloaded=true`）/
+本机没有且 Hub 未配置 → 说"找不到"不 500 / 付费组件装不上且磁盘不留痕 /
+移除后回到"可安装"且重复卸幂等 / 装到别的应用不影响这个 / **Agent 的工具也能装 Hub 组件**。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1444,7 +1489,7 @@ RPC：`hub.status`（界面据此显示"筹备中/已连接"）、`hub.install`�
 | **无参方法的实现签名是 `(ctx)`** | 有入参才是 `(args, ctx)`；写错会被类型检查拦住（不静默）。`invalid` 也是两个参数：`invalid(reason, message)` |
 | **覆盖层要按"根"选版本，不是按全局最高版本** | 顺序是 `hub > bundled`：先看哪个根有满足区间的版本，再看该根里的最高版本。按全局最高选的话 bundled 1.3 会盖掉 hub 1.2 —— 官方修了 bug 推到 Hub 也装不上，而现象只是"更新没生效" |
 | **一个组件坏不能连累别的组件** | 装配声明逐条独立判定：失败的落一条 problem，其余照常加载。整份拒（"有个字段不认识就全不装"）会让用户以为所有组件都被卸载了，比装不上更吓人 |
-| **装不上要返回 problem，不要抛 500** | `component.list` 恒 200，原因在 `problems`（19 个稳定 code）。插件页要能说"它要求 Tenon ≥ 1.4.0，你是 1.2.0"；一个红叉加 Internal Server Error 什么也说明不了 |
+| **装不上要返回 problem，不要抛 500** | `component.list` 恒 200，原因在 `problems`（现 21 个稳定 code）。插件页要能说"它要求 Tenon ≥ 1.4.0，你是 1.2.0"；一个红叉加 Internal Server Error 什么也说明不了 |
 | **`minTenonVersion` 对 `0.0.0` 恒通过** | 仓库构建就是 `0.0.0`，代表"还没发版的开发树"。不这么判所有清单都得写 `0.0.0`，字段当场失去意义。**代价：开发态测不出写错**，所以真实分支（host=1.2.0 / 组件要 1.4.0）单独有用例 |
 | **组件目录名就是 id** | 清单 `id` 与目录名不一致 → `id-mismatch` 直接拦。否则放错一个目录就是"装配了 A、装上了 B"，而且两者都合法、都能跑 |
 | **状态字段不能叫 `status` / `error` / `variant` / `ready` / `shape` / `release` / `then` / `contract`** | 那是 chord Ref 自己的成员，撞名在**定义契约那一刻**抛 `member name is reserved`。AI 小助手的状态因此叫 `phase` 而不是 `status` |
@@ -1453,6 +1498,8 @@ RPC：`hub.status`（界面据此显示"筹备中/已连接"）、`hub.install`�
 | **`executeJavaScript` 里拼选择器必须过 `JSON.stringify`** | `'document.querySelector("' + ball + '")` 这种写法在 ball 自带双引号时是语法错误；而外层 `.catch(() => false)` 会把它吞掉 —— 现象是"元素一直没出现"，排查方向全错（M5 第 8 步在这上面卡了两轮） |
 | **一轮结束不能只看"最后一条是助手"** | 真模型会"先说一句、接着继续调工具"（"我先看看结构"），只看消息形状会在它干活中途判成结束 → 后面所有断言都在它还没写完时执行。判据必须是 **应用回到 idle + 末尾是 `settled` 助手消息** 两个条件同时成立 |
 | **判"文件改了吗"要前后对比，别猜关键词** | 我用 `!content.includes('Tenon')` 当"没改"的标志，而模型正好把标题写成「Tenon · 待办」→ 把成功报成失败。猜关键词的断言迟早误判，两个方向都有害 |
+| **"装进应用"与"装到本机"是两件事** | 前者写装配声明 + 同步 `AGENTS.md` + 重新激活（`component.install` / `install_component`），后者只是把包放到 `<home>/plugins`（`hub.install`）。混成一个的话，要么"下载了但没装上"，要么"装上了但 Agent 不知道" |
+| **付费门禁只拦安装，不装 DRM** | 组件文件是明文落盘的，谁拿到目录都能读。在加载层再拦是自我安慰，还容易让人以为这里有防护。门禁放唯一入口（`installComponent`），并在文案与文档里说清 |
 | **索引也要签名，否则可以降级** | 包签名拦得住"装恶意代码"，拦不住"把最新指向一个旧的、确实签过名的版本"。客户端看不出区别，用户点完更新就退回有漏洞的那一版。同一个密钥签索引与包就够 |
 | **组件的"装了"与"用上了"是两件事** | 装是本机全局的，用不用由每个应用的版本区间决定（解析器只挑满足区间的最高版本）。所以"装到 2.0.0 但应用声明 ^1.0.0"等于没装 —— 界面必须点名是哪个应用挡住了，也不要为此重载它（重载了也不会有任何变化） |
 | **Hub 装到哪必须等于加载器的 hub 根** | 两处各算一次目录，不一致的表现是"装成功了却加载不到"——而装的时候一切正常（文件真的写下去了）。所以安装器与 `pluginRoots` 走同一个 `hubPluginsDir(env, home)` |
@@ -1489,7 +1536,7 @@ pnpm test                  # vitest：58 个测试文件（540 项，含迁移�
 pnpm smoke                 # 端到端：spawn bin.ts → health → 建应用 → SSE → 历史 → git
 pnpm e2e:preview           # 真机预览链路（要联网装 React）：模板 → dev server → 网关 → HMR
 pnpm pack:plugin <id>      # ★ 把官方组件打包并签名，同时合并签名索引（需要 TENON_HUB_PRIVATE_KEY 与 TENON_HUB_URL）
-pnpm shot:plugins          # ★ 插件页的人眼验收：假 Hub + 真签名包 → 检查更新 → 点更新 → 截图（9 项）
+pnpm shot:plugins          # ★ 插件页的人眼验收：假 Hub + 真签名包 → 检查更新→更新 → 商店装组件（12 项）
 pnpm shot:settings         # ★ 设置页的人眼验收：真 Chromium 里填表→保存→截图（4 张）
 pnpm e2e:provider          # ★ BYOK 通路：本地假 OpenAI 服务，真跑流式 + 工具调用 + 落盘（不要 key）
 TENON_REAL_MOCK=1 pnpm e2e:real  # ★ 真模型验收的排练：假 provider 走完三个阶段（不要 key）
@@ -1581,11 +1628,11 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 （`install_component` 在真实运行时从没挂上过、工具失败显示成成功、工具抛异常被压成 `<harness>`）。
 之后补了模型设置页与热切换、依赖安装时机（TS2688 摩擦）、模型价格表（真账复算偏差 1.28%）。
 
-**M6 第 1–2 步完成**：Hub 客户端（Ed25519 验签 + 原子落盘 + 来源改写）与**签名索引 + 更新检查**
-（`hub.check` / 插件页「检查更新 → 更新」，真 Chromium 9/9，`pnpm shot:plugins`）。
+**M6 第 1–3 步完成**：Hub 客户端（Ed25519 验签 + 原子落盘 + 来源改写）、签名索引 + 更新检查、
+**组件商店**（两个页签 / 装到应用 / 移除 / 付费门禁；真 Chromium 12/12，`pnpm shot:plugins`）。
 
-610 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:component 5 + e2e:provider 7 + e2e:real 12 + shot:settings 5 + shot:plugins 9 + e2e:fullstack
+618 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
++ e2e:component 5 + e2e:provider 7 + e2e:real 12 + shot:settings 5 + shot:plugins 12 + e2e:fullstack
 + spike:chord 10 + 桌面包全绿。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；

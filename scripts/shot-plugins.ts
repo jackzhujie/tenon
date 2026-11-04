@@ -52,52 +52,71 @@ const PRIVATE_PEM = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString
 
 /* ---------- 1. 用真的组件内容打两个版本的签名包 ---------- */
 
-const pluginDir = join(repo, 'plugins', 'bundled', COMPONENT)
-const baseManifest = JSON.parse(await readFile(join(pluginDir, 'manifest.json'), 'utf8')) as Record<string, unknown>
-const sourceFiles: Record<string, string> = {}
-for (const name of ['server.js', 'web.js', 'README.md']) {
-  sourceFiles[name] = await readFile(join(pluginDir, name), 'utf8').catch(() => '')
-}
-for (const [name, content] of Object.entries(sourceFiles)) {
-  if (content === '') {
-    console.error(`缺 ${name} —— 先跑 pnpm build:plugins`)
-    process.exit(1)
+const CSV = 'tenon.official.csv-export'
+
+/** 用**真的**组件内容造一个包（版本号由这里定，内容与内置那份一样） */
+async function makeBundle(id: string, version: string): Promise<unknown> {
+  const dir = join(repo, 'plugins', 'bundled', id)
+  const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as Record<string, unknown>
+  const files: Record<string, string> = {}
+  for (const name of ['server.js', 'web.js']) {
+    const content = await readFile(join(dir, name), 'utf8').catch(() => '')
+    if (content === '') {
+      console.error(`缺 ${id}/${name} —— 先跑 pnpm build:plugins`)
+      process.exit(1)
+    }
+    files[name] = content
   }
+  // README 可选（与 pack:plugin 一致：它是给 Agent 读的说明，不是运行时必需）
+  const readme = await readFile(join(dir, 'README.md'), 'utf8').catch(() => '')
+  if (readme !== '') files['README.md'] = readme
+  return signBundle({ format: 1, manifest: { ...manifest, version, source: 'hub' } as never, files }, PRIVATE_PEM)
 }
 
-function bundleOf(version: string): unknown {
-  return signBundle(
-    {
-      format: 1,
-      manifest: { ...baseManifest, version, source: 'hub' } as never,
-      files: sourceFiles,
-    },
-    PRIVATE_PEM,
-  )
+const bundles: Record<string, unknown> = {
+  [`${COMPONENT}-1.1.0`]: await makeBundle(COMPONENT, '1.1.0'),
+  [`${COMPONENT}-1.2.0`]: await makeBundle(COMPONENT, '1.2.0'),
+  // 商店里要有一个"这个应用还没装"的组件，否则看到的是空列表
+  [`${CSV}-1.0.0`]: await makeBundle(CSV, '1.0.0'),
 }
-
-const bundles: Record<string, unknown> = { '1.1.0': bundleOf('1.1.0'), '1.2.0': bundleOf('1.2.0') }
 
 /* ---------- 2. 假 Hub：真发索引与包 ---------- */
 
-let published = ['1.0.0', '1.1.0']
+/** Hub 上"现在发布了哪些版本"。更新这件事的本质就是它会变 */
+let publishedAi = ['1.0.0', '1.1.0']
+
 const hub = createServer((req, res) => {
   const url = req.url ?? ''
   if (url === '/index.json') {
     const origin = `http://127.0.0.1:${(hub.address() as AddressInfo).port}`
-    const component: HubIndexComponent = {
-      id: COMPONENT,
-      name: 'AI 小助手',
-      description: '应用内悬浮球 + 对话（宿主注入模型能力）',
-      versions: published.map((version) => ({
-        version,
-        url: `${origin}/bundles/${version}.json`,
-        notes: version === '1.2.0' ? '回答支持中断；球可以拖到任意角落' : '首个 Hub 版',
-        publishedAt: Date.now(),
-      })),
-    }
+    const components: HubIndexComponent[] = [
+      {
+        id: COMPONENT,
+        name: 'AI 小助手',
+        description: '应用内悬浮球 + 对话（宿主注入模型能力）',
+        versions: publishedAi.map((version) => ({
+          version,
+          url: `${origin}/bundles/${COMPONENT}-${version}.json`,
+          notes: version === '1.2.0' ? '回答支持中断；球可以拖到任意角落' : '首个 Hub 版',
+          publishedAt: Date.now(),
+        })),
+      },
+      {
+        id: CSV,
+        name: '导出 CSV',
+        description: '抓页面上的 table 导成 CSV（Excel 直接打开）',
+        versions: [
+          {
+            version: '1.0.0',
+            url: `${origin}/bundles/${CSV}-1.0.0.json`,
+            notes: '首个 Hub 版',
+            publishedAt: Date.now(),
+          },
+        ],
+      },
+    ]
     const index = signHubIndex(
-      { format: HUB_INDEX_FORMAT, generatedAt: Date.now(), components: [component] },
+      { format: HUB_INDEX_FORMAT, generatedAt: Date.now(), components },
       PRIVATE_PEM,
     )
     res.writeHead(200, { 'content-type': 'application/json' })
@@ -198,8 +217,61 @@ async function run() {
   })()\`)
   await win.capturePage().then((img) => require('node:fs').writeFileSync(out + '/3-已更新.png', img.toPNG()))
 
+  // 商店：这里应该有一个"这个应用还没装"的组件（导出 CSV）
+  const storeOpened = await frame.executeJavaScript(\`(() => {
+    const btn = [...document.querySelectorAll('button')].find((node) => (node.textContent || '').trim() === '商店')
+    if (!btn) return false
+    btn.click()
+    return true
+  })()\`)
+  await sleep(1800)
+  const store = await frame.executeJavaScript(\`(() => {
+    const text = document.body.innerText || ''
+    const lines = text.split(String.fromCharCode(10)).map((line) => line.trim()).filter((line) => line !== '')
+    const row = lines.find((line) => line.indexOf('导出 CSV') !== -1) || null
+    return { hasCsv: row !== null, row: row, text: text.slice(0, 1200) }
+  })()\`)
+  await win.capturePage().then((img) => require('node:fs').writeFileSync(out + '/4-商店.png', img.toPNG()))
+
+  // 点「下载并安装」
+  /*
+   * 点**那一行**的按钮，不是"页面上第一个装按钮"。商店里同时有"导出 CSV"与"审批流"
+   * 两个可装项（本机 bundled 的那两个），按文案取第一个会装错 —— 我第一次就装成了审批流。
+   */
+  const storeClicked = await frame.executeJavaScript(\`(() => {
+    const row = [...document.querySelectorAll('li')].find((node) => (node.textContent || '').indexOf('导出 CSV') !== -1)
+    if (!row) return false
+    const btn = [...row.querySelectorAll('button')].find((node) => {
+      const label = (node.textContent || '').trim()
+      return label === '下载并安装' || label === '装到此应用'
+    })
+    if (!btn) return false
+    btn.click()
+    return true
+  })()\`)
+  await sleep(4000)
+
+  // 回到「已装」：现在应该有两个组件
+  const backToInstalled = await frame.executeJavaScript(\`(() => {
+    const btn = [...document.querySelectorAll('button')].find((node) => (node.textContent || '').trim().indexOf('已装') === 0)
+    if (!btn) return false
+    btn.click()
+    return true
+  })()\`)
+  await sleep(1200)
+  const installedView = await frame.executeJavaScript(\`(() => {
+    const text = document.body.innerText || ''
+    const count = [...document.querySelectorAll('li')].filter((node) => (node.textContent || '').indexOf('tenon.official.') !== -1).length
+    return {
+      hasCsv: text.indexOf('导出 CSV') !== -1,
+      both: text.indexOf('AI 小助手') !== -1 && text.indexOf('导出 CSV') !== -1,
+      count: count
+    }
+  })()\`)
+  await win.capturePage().then((img) => require('node:fs').writeFileSync(out + '/5-装完.png', img.toPNG()))
+
   await win.close()
-  return { opened, checked, before, clicked, after }
+  return { opened, checked, before, clicked, after, storeOpened, store, storeClicked, backToInstalled, installedView }
 }
 
 app.whenReady().then(async () => {
@@ -240,7 +312,7 @@ try {
   })
   console.log(`从 Hub 装了 v${installed.version}（重载 ${installed.reloadedApps} 个应用）`)
   // Hub 之后又发了一版：这是"检查更新"要看见的东西
-  published = ['1.0.0', '1.1.0', '1.2.0']
+  publishedAi = ['1.0.0', '1.1.0', '1.2.0']
 
   const status = await rpc<{ configured: boolean; hubUrl: string | null }>('hub.status')
   check('Hub 已配置（配置从环境变量读进来）', status.configured && status.hubUrl === hubUrl)
@@ -294,6 +366,11 @@ try {
     before: { hasUpdateRow: boolean; row: string | null }
     clicked: boolean
     after: { has12: boolean; notice: string | null }
+    storeOpened: boolean
+    store: { hasCsv: boolean; row: string | null }
+    storeClicked: boolean
+    backToInstalled: boolean
+    installedView: { hasCsv: boolean; both: boolean; count: number }
   }
 
   check('插件页打得开', result.opened)
@@ -301,6 +378,29 @@ try {
   check('界面上写着 1.1.0 → 1.2.0', result.before.hasUpdateRow, result.before.row ?? '')
   check('「更新」按钮点得动', result.clicked)
   check('更新完界面显示 1.2.0', result.after.has12, result.after.notice ?? '')
+
+  check('商店页签打得开', result.storeOpened)
+  check('商店里列出了没装过的组件（导出 CSV）', result.store.hasCsv, result.store.row ?? '')
+  check('「下载并安装」按钮点得动', result.storeClicked)
+  check('装完回到「已装」，两个组件都在', result.backToInstalled && result.installedView.both, result.installedView.count + ' 行')
+
+  const appsAfter = await rpc<{ components: { id: string; version: string; source: string }[] }>(
+    'component.list',
+    { appId },
+  )
+  /*
+   * 注意 source 是 **bundled**：导出 CSV 本来就随包（本机有），所以商店优先装本机那份，
+   * 不走网络。这正是想要的顺序 —— "本机能装的不该因为没网就装不了"。
+   * （Hub 下载那条路在 `component-store.test.ts` 里验：本机没有 → downloaded=true。）
+   */
+  check(
+    '装配声明里真的多了第二个组件，且优先用本机那份（没白下）',
+    appsAfter.components.length === 2 &&
+      appsAfter.components.some(
+        (item) => item.id === 'tenon.official.csv-export' && item.source === 'bundled',
+      ),
+    JSON.stringify(appsAfter.components.map((item) => item.id + '@' + item.version + '(' + item.source + ')')),
+  )
 
   const finalCheck = await rpc<{ components: { installedVersion: string | null; update: boolean }[] }>('hub.check')
   check(
