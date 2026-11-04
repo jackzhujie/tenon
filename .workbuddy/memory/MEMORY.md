@@ -18,9 +18,11 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 **组件持久化**（`db:*` → `(appId, componentId)` 键值空间，配额 500 键/64KB）+
 **收口**：授权模型定稿（DESIGN §21.5，现在不做 license）+ **Hub 配置随包分发** +
 `pnpm e2e:hub` 32 项从零发布）。
-全绿基线：typecheck 18 project / test **652** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
-e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / spike:chord 10 /
-smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
+**收口后补的一批**（盘点"还剩什么没完善"）：应用能删（原来是死代码）、能改名、顶栏有
+未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）。
+全绿基线：typecheck 18 project / test **669** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** /
+spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
 `install_component`/`remove_component`/插件页 → 真 Chromium 端到端。
@@ -60,6 +62,11 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
   真判据仍在签名包里。发布脚本必须把 `pricing` 写进索引，否则那道门永不触发
 - **PEM 尾换行会造出第二个指纹**（文件读出来带换行、env 读出来 trim 过）→ `hubKeyFingerprint` 先 trim；
   `resolveHubConfig` 顺序必须「先还原字面量 `\n` 再 trim」
+- **脚本的 `@options` 能放大超时**：上游是 `options.timeoutMs ?? this.timeoutMs`，脚本写
+  `// @options: {"timeout_ms": 3600000}` 就绕过了 60 秒上限。**自己设的上限必须自己在工具入口夹**
+  （`codeact.ts` 的 `checkScriptOptions`），拒绝而不是静默钳制
+- **`electronMain()` 模板字符串里不能出现反引号**（注释里写 `` `git.log` `` 会提前结束模板，
+  报 TS1005 像别处坏了）；React 受控输入直接赋 `value` 无效，要原生 setter + `input` 事件
 - **"装了"≠"用上了"**：组件装在本机是全局的，用不用由应用声明的版本区间定；
   `planHubUpdates` 的 `blockedBy` 就是这件事，install 不重载区间不接受的应用
 - **"装到本机"≠"装进应用"**：前者写 `<home>/plugins`，后者写装配声明 + `AGENTS.md` + reload。
