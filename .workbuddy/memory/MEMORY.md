@@ -11,19 +11,21 @@
 2. **生成应用永不感知运行环境**，只认 `DATABASE_URL`（`POOL_MAX` 是容量参数，不是环境判断）
 3. **pi 全家与 PGlite 是实验性 API** → `save-exact` 锁版本 + adapter 包一层
 
-## 状态（2026-11-03）
+## 状态（2026-11-04）
 M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 七步 + **M5 八步全部收口**
-（DoD ①②③④ 满足）→ DESIGN v1.2.25。九个包 + `apps/web` + `apps/desktop`。
-**M6 第 1–4 步完成**（Hub 客户端验签/落盘 + 签名索引 + `hub.check` + **组件商店** +
-**组件持久化**：`db:*` 权限 → `(appId, componentId)` 键值空间，配额 500 键/64KB）。
-全绿基线：typecheck 18 project / test **631** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
-e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / spike:chord 10 /
-smoke:desktop:packaged 8 / build:web 322KB。
+（DoD ①②③④ 满足）。九个包 + `apps/web` + `apps/desktop`。
+**M6 五步全部收口**（Hub 客户端验签/落盘 + 签名索引 + `hub.check` + **组件商店** +
+**组件持久化**（`db:*` → `(appId, componentId)` 键值空间，配额 500 键/64KB）+
+**收口**：授权模型定稿（DESIGN §21.5，现在不做 license）+ **Hub 配置随包分发** +
+`pnpm e2e:hub` 32 项从零发布）。
+全绿基线：typecheck 18 project / test **652** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / spike:chord 10 /
+smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
 `install_component`/`remove_component`/插件页 → 真 Chromium 端到端。
-**欠账**：Docker compose 产物、真远端 push、`lint` 未接、额度无跨应用总闸、
-用量答不了"哪个角色花了多少"、组件无持久化（审批数据重启即失）、三个 web bundle 各 735KB 未共享运行时。
+**欠账**：Docker compose 产物、真远端 push、**真 Hub 未上线**（静态托管/域名/缓存）、`lint` 未接、
+额度无跨应用总闸、用量答不了"哪个角色花了多少"、三个 web bundle 各 735KB 未共享运行时。
 
 ## 已定的架构选择（推翻要重做很多）
 - server 与生成应用后端都 Fastify 5 / NestJS 11 + TS ESM；应用库 `pglite`（默认）/ `postgres`，产品库 `node:sqlite`
@@ -49,6 +51,15 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
   host `name` 必须等于契约 `hostNamed(…)`；**链路要在 socket 建出来那一刻挂上**（等 `open` 会丢帧 → ack 越界）
 - **Hub 索引必须签名**：包签名拦不住"把最新指向旧的、确实签过名的版本"（降级）；
   索引地址固定 `<hubUrl>/index.json`，里面的 URL 是绝对的 → 换域名必须重新发布
+- **打包版的配置不能只靠环境变量**：双击打开的 `.app` 里没有 `TENON_*` → 商店永远"未配置"且不报错。
+  模式固定为「壳只指路径 + 业务侧读内容 + 界面报来源」（`TENON_HUB_CONFIG_FILE` 与
+  `TENON_PLUGINS_DIR`/`TENON_TEMPLATES_DIR` 同构）；`extraResources` 来源不存在会让打包失败，所以
+  `build.mjs` 总是写一份（没配就写空值）
+- **付费（`pricing: paid`）要拦在"下载"之前**，`installComponent`（装进应用）拦不住 `hub.install`
+  （装到本机）→ 包会落到 `~/.tenon/plugins`。判据用索引（误拒只是"暂未开放"，漏判是"付费内容已在磁盘"）；
+  真判据仍在签名包里。发布脚本必须把 `pricing` 写进索引，否则那道门永不触发
+- **PEM 尾换行会造出第二个指纹**（文件读出来带换行、env 读出来 trim 过）→ `hubKeyFingerprint` 先 trim；
+  `resolveHubConfig` 顺序必须「先还原字面量 `\n` 再 trim」
 - **"装了"≠"用上了"**：组件装在本机是全局的，用不用由应用声明的版本区间定；
   `planHubUpdates` 的 `blockedBy` 就是这件事，install 不重载区间不接受的应用
 - **"装到本机"≠"装进应用"**：前者写 `<home>/plugins`，后者写装配声明 + `AGENTS.md` + reload。
