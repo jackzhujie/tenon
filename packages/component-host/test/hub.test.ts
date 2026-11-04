@@ -14,11 +14,14 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   bundleSigningBytes,
+  HUB_INDEX_FORMAT,
   hubBundleDir,
   hubConfigFromEnv,
   installBundle,
   installFromHub,
+  installFromHubIndex,
   signBundle,
+  signHubIndex,
   verifyBundle,
   type HubBundle,
 } from '../src/hub.js'
@@ -287,5 +290,83 @@ describe('配置', () => {
     expect(config?.hubUrl).toBe('https://hub.example.com')
     // 还原之后才能被 createPublicKey 读出来
     expect(() => verifyBundle(signBundle(bundleOf(), PRIVATE_PEM), config!.publicKey)).not.toThrow()
+  })
+})
+
+/**
+ * 付费组件（M6 第 5 步）。
+ *
+ * 之前只有 `installComponent`（装进应用）拦付费，`hub.install`（下载到本机）不拦 ——
+ * 于是"付费组件"变成了"付不了但能下载"，包原样躺在 `~/.tenon/plugins/` 里。
+ * 这一组守的是"连下载都不做"，以及**真的没去请求那个包**（不然拦了也没意义）。
+ */
+describe('付费组件', () => {
+  const PAID_ID = 'tenon.official.hub-test'
+
+  /** 一个只发索引与包的 Hub；`onBundle` 数一下包被请求了几次 */
+  async function startPaidHub(pricing: 'free' | 'paid'): Promise<{ url: string; bundleHits: () => number }> {
+    let hits = 0
+    server = createServer((req, res) => {
+      const origin = `http://127.0.0.1:${(server?.address() as AddressInfo).port}`
+      if (req.url === '/index.json') {
+        const index = signHubIndex(
+          {
+            format: HUB_INDEX_FORMAT,
+            generatedAt: 1,
+            components: [
+              {
+                id: PAID_ID,
+                name: '付费组件',
+                description: '只在测试里存在',
+                pricing,
+                versions: [{ version: '1.1.0', url: `${origin}/bundles/1.1.0.json`, notes: null, publishedAt: 1 }],
+              },
+            ],
+          },
+          PRIVATE_PEM,
+        )
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(index))
+        return
+      }
+      if (req.url === '/bundles/1.1.0.json') {
+        hits += 1
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(signBundle({ ...bundleOf(), manifest: { ...bundleOf().manifest, version: '1.1.0' } }, PRIVATE_PEM)))
+        return
+      }
+      res.writeHead(404)
+      res.end('{}')
+    })
+    await new Promise<void>((resolve) => server?.listen(0, '127.0.0.1', () => resolve()))
+    return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, bundleHits: () => hits }
+  }
+
+  it('索引说 paid → 拒，而且**没有去下载那个包**（磁盘上也不留痕）', async () => {
+    const hub = await startPaidHub('paid')
+    hubUrl = hub.url
+    const result = await installFromHubIndex({
+      hubDir: dir,
+      config: { hubUrl: hub.url, publicKey: PUBLIC_PEM },
+      id: PAID_ID,
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.problem.code).toBe('paid-not-available')
+    // 关键：不是"下下来再拒"，是根本不去请求
+    expect(hub.bundleHits()).toBe(0)
+    await expect(stat(join(dir, PAID_ID, '1.1.0'))).rejects.toThrow()
+  })
+
+  it('索引说 free → 照常下载（这条挡住"付费门禁把免费组件也拦了"）', async () => {
+    const hub = await startPaidHub('free')
+    hubUrl = hub.url
+    const result = await installFromHubIndex({
+      hubDir: dir,
+      config: { hubUrl: hub.url, publicKey: PUBLIC_PEM },
+      id: PAID_ID,
+    })
+    expect(result.ok).toBe(true)
+    expect(hub.bundleHits()).toBe(1)
   })
 })

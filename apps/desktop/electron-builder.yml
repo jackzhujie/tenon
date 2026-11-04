@@ -40,6 +40,11 @@ extraResources:
   # 官方组件：加载器按真实目录扫描 manifest.json，同样必须在 asar 外面
   - from: dist/plugins
     to: plugins
+  # ★ Hub 配置（M6 第 5 步）：主进程把它指成 `TENON_HUB_CONFIG_FILE`，业务侧负责读。
+  # `build.mjs` **总是**写这个文件（没配 Hub 就写空值），因为这里指向一个不存在的来源
+  # 会让打包整个失败 —— 那等于"没配 Hub 就没法打包"，太脆了。
+  - from: dist/hub.json
+    to: hub.json
 
 asar: true
 # 模板与页面在 asar 外面（生成器要按真实路径读文件），所以只有主进程进 asar

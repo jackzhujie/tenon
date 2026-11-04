@@ -34,6 +34,7 @@ import {
   setComponentEnabled,
   uninstallComponent,
   type HubConfig,
+  type HubConfigOrigin,
   type HubDeclaration,
   type PluginRoot,
 } from '@tenon/component-host'
@@ -65,8 +66,17 @@ export interface ServerDeps {
   /**
    * 官方 Hub（M6）。`config` 为 null 是**正常状态** —— 官方 Hub 上线前就是它，
    * 界面显示「筹备中」而不是报错。
+   *
+   * `origin` / `note` 是 M6 第 5 步补的：配置可能来自环境变量，也可能来自安装包里的
+   * `hub.json`。界面必须说得出来自哪 —— 否则「商店是空的」只能靠猜（是没配？配错了？
+   * 还是网络不通？）。
    */
-  hub: { readonly config: HubConfig | null; readonly dir: string }
+  hub: {
+    readonly config: HubConfig | null
+    readonly dir: string
+    readonly origin: HubConfigOrigin | null
+    readonly note: string | null
+  }
   bus: SseBus
   version: string
   /**
@@ -675,6 +685,9 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         configured: config !== null,
         hubUrl: config?.hubUrl ?? null,
         keyFingerprint: config === null ? null : hubKeyFingerprint(config.publicKey),
+        // 来源与"为什么没配上"（M6 第 5 步）：界面第一句就能回答"商店为什么是空的"
+        origin: deps.hub.origin,
+        note: deps.hub.note,
       }
     },
 
@@ -734,12 +747,17 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         ...(input.version === undefined ? {} : { version: input.version }),
       })
       if (!result.ok) {
-        // 签名不对与"包坏了"分开：前者是安全问题，后者是内容问题
-        throw new TenonError(
-          result.problem.code === 'bad-signature' ? 'HUB_BAD_SIGNATURE' : 'HUB_BAD_BUNDLE',
-          result.problem.message,
-          { hint: result.problem.hint, reason: result.problem.code },
-        )
+        // 三种分开：签名不对是安全问题，付费是"产品没做"，其余是"包/网络不对"
+        const code =
+          result.problem.code === 'bad-signature'
+            ? 'HUB_BAD_SIGNATURE'
+            : result.problem.code === 'paid-not-available'
+              ? 'HUB_PAID_NOT_AVAILABLE'
+              : 'HUB_BAD_BUNDLE'
+        throw new TenonError(code, result.problem.message, {
+          hint: result.problem.hint,
+          reason: result.problem.code,
+        })
       }
 
       /*

@@ -312,7 +312,11 @@ export interface InstallWithHubResult {
   /** 这个包是这一次从 Hub 下的吗 */
   readonly downloaded: boolean
   /** 下载失败的原因（没下载、或下载成功时为 null） */
-  readonly downloadError: { readonly code: 'HUB_BAD_BUNDLE' | 'HUB_BAD_SIGNATURE'; readonly message: string; readonly hint: string | null } | null
+  readonly downloadError: {
+    readonly code: 'HUB_BAD_BUNDLE' | 'HUB_BAD_SIGNATURE' | 'HUB_PAID_NOT_AVAILABLE'
+    readonly message: string
+    readonly hint: string | null
+  } | null
 }
 
 export async function installComponentWithHub(
@@ -335,14 +339,21 @@ export async function installComponentWithHub(
     ...(request.version === undefined ? {} : { version: exactVersion(request.version) }),
   })
   if (!fetched.ok) {
+    /*
+     * 三种下载侧原因分开报：签名不对是**安全问题**，付费是**产品没做**，
+     * 其余是"包/网络不对"。合成一个 `HUB_BAD_BUNDLE` 会让用户去查网络，
+     * 而真正的原因在他查不到的地方。
+     */
+    const code: NonNullable<InstallWithHubResult['downloadError']>['code'] =
+      fetched.problem.code === 'bad-signature'
+        ? 'HUB_BAD_SIGNATURE'
+        : fetched.problem.code === 'paid-not-available'
+          ? 'HUB_PAID_NOT_AVAILABLE'
+          : 'HUB_BAD_BUNDLE'
     return {
       result: first,
       downloaded: false,
-      downloadError: {
-        code: fetched.problem.code === 'bad-signature' ? 'HUB_BAD_SIGNATURE' : 'HUB_BAD_BUNDLE',
-        message: fetched.problem.message,
-        hint: fetched.problem.hint,
-      },
+      downloadError: { code, message: fetched.problem.message, hint: fetched.problem.hint },
     }
   }
   return { result: await installComponent(request), downloaded: true, downloadError: null }

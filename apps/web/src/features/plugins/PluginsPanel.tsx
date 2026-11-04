@@ -69,7 +69,15 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
    * Hub 状态。**未配置是正常状态**（官方 Hub 上线前就是它），所以这里不显示错误，
    * 只把"现在用的是哪一套"说清楚 —— 写死一句"筹备中"会在 Hub 上线那天变成假话。
    */
-  const [hub, setHub] = useState<{ configured: boolean; hubUrl: string | null; keyFingerprint: string | null } | null>(null)
+  const [hub, setHub] = useState<{
+    configured: boolean
+    hubUrl: string | null
+    keyFingerprint: string | null
+    /** 配置打哪来（M6 第 5 步）：环境变量 / 安装包里的 hub.json */
+    origin: 'env' | 'file' | null
+    /** 配了但不对时的原因（只给了一半、文件坏了） */
+    note: string | null
+  } | null>(null)
   /**
    * 更新检查的结果 —— 同时也是商店的目录。
    *
@@ -386,6 +394,11 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                       {hub.keyFingerprint !== null && (
                         <span className="ml-1 font-mono">· 密钥 {hub.keyFingerprint}</span>
                       )}
+                      {/*
+                        「随包内置 / 环境变量」这一句是为了回答"我这个包为什么连的是这个地址"。
+                        没有它就是：用户在另一台机器上装了同一个 dmg，看到的地址却是本机环境变量决定的。
+                      */}
+                      <span className="ml-1">· {hub.origin === 'file' ? '随包内置' : '环境变量'}</span>
                     </span>
                     <button
                       type="button"
@@ -468,6 +481,9 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                       <span className="font-mono text-muted">{hub.hubUrl}</span>
                       {hubCount > 0 && <span> · {hubCount} 个来自 Hub</span>}
                     </>
+                  ) : hub?.note != null ? (
+                    /* 配了但不对（只给了一半 / 文件坏了）：这是"商店为什么是空的"的答案 */
+                    <span className="text-warn">Hub 配置有问题：{hub.note}</span>
                   ) : (
                     '官方 Hub 筹备中：现在只有随包发布的内置组件。'
                   )}

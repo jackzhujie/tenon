@@ -18,6 +18,7 @@
  * 边界：这一步只做「给一个 bundle 地址 → 装好」。索引、更新检查、界面在下一步。
  */
 import { createHash, createPublicKey, randomUUID, sign, verify } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { parseManifest, type ComponentManifest } from './manifest.js'
@@ -31,9 +32,11 @@ export const BUNDLE_FORMAT = 1
  * 环境变量：
  * - `TENON_HUB_URL` 只认这个源下面的地址（否则一个 RPC 就能装任意 URL 的代码）
  * - `TENON_HUB_PUBLIC_KEY` Ed25519 公钥（PEM）。**没有它 Hub 就是"未配置"**
+ * - `TENON_HUB_CONFIG_FILE` 打包时随包带的那份配置（见 `resolveHubConfig`）
  */
 export const HUB_URL_ENV = 'TENON_HUB_URL'
 export const HUB_PUBLIC_KEY_ENV = 'TENON_HUB_PUBLIC_KEY'
+export const HUB_CONFIG_FILE_ENV = 'TENON_HUB_CONFIG_FILE'
 
 export interface HubConfig {
   /** 去掉尾部斜杠的源地址 */
@@ -59,6 +62,8 @@ export type HubProblemCode =
   | 'wrong-source'
   | 'fetch-failed'
   | 'url-outside-hub'
+  /** 索引说这个组件是付费的，而购买流程还没做（M6 第 5 步：连下载都不给） */
+  | 'paid-not-available'
 
 export interface HubProblem {
   readonly code: HubProblemCode
@@ -74,16 +79,141 @@ function fail<T>(code: HubProblemCode, message: string, hint: string | null = nu
 }
 
 /**
+ * 把一对原始字符串归一成配置。两边都空 = 未配置（正常）；只给一边 = 配错了（不正常）。
+ *
+ * 三条校验都在这里做，因为它们**都是"配错了"而不是"装的时候才炸"**：
+ * - URL 必须是 http(s)：`file://` 会让"下载"变成"读本机任意文件"，那是另一类问题了
+ * - PEM 必须是公钥形状：形状不对时 `createPublicKey` 要到第一次安装才抛，
+ *   而那时用户看到的是一句来自 node:crypto 的英文报错
+ * - 字面量 `\n` 要还原：systemd / docker compose 写 PEM 都会变成一行
+ */
+function parseHubPair(
+  url: string | undefined,
+  key: string | undefined,
+): { ok: true; value: HubConfig | null } | { ok: false; message: string } {
+  const rawUrl = url?.trim() ?? ''
+  const rawKey = key?.trim() ?? ''
+  if (rawUrl === '' && rawKey === '') return { ok: true, value: null }
+  if (rawUrl === '') return { ok: false, message: '有公钥但没有 URL' }
+  if (rawKey === '') return { ok: false, message: '有 URL 但没有公钥' }
+  if (!/^https?:\/\//i.test(rawUrl)) {
+    return { ok: false, message: `Hub 地址必须是 http(s):// 开头（现在是 ${rawUrl.slice(0, 40)}）` }
+  }
+  /*
+   * 顺序不能反：先把字面量 `\n` 还成真换行，**再** trim。
+   * 反过来会留下一个尾换行 —— 而尾换行参与指纹，同一把 key 的两种写法就会给出
+   * 两个指纹，界面上看起来像"发布方换过密钥"。
+   */
+  const publicKey = (rawKey.includes('\\n') ? rawKey.replaceAll('\\n', '\n') : rawKey).trim()
+  if (!publicKey.includes('BEGIN') || !publicKey.includes('PUBLIC KEY')) {
+    return { ok: false, message: '公钥不是 PEM 形状（应该以 -----BEGIN PUBLIC KEY----- 开头）' }
+  }
+  return { ok: true, value: { hubUrl: rawUrl.replace(/\/+$/, ''), publicKey } }
+}
+
+/**
  * 读取 Hub 配置。**两个都缺 = 未配置**（这是正常的：官方 Hub 上线前就是未配置）。
  * 只配了一个 = 配置错了，此时宁可当"未配置"也不要用一个半截的配置去下载代码。
+ *
+ * 只管环境变量。要"环境变量 > 随包配置 > 未配置"这个优先级，用 `resolveHubConfig`。
  */
 export function hubConfigFromEnv(env: NodeJS.ProcessEnv = process.env): HubConfig | null {
-  const url = env[HUB_URL_ENV]?.trim()
-  const key = env[HUB_PUBLIC_KEY_ENV]?.trim()
-  if (url === undefined || url === '' || key === undefined || key === '') return null
-  // 环境变量里换行常被写成字面量 \n（systemd / docker compose 都会）——不还原的话 PEM 解不开
-  const publicKey = key.includes('\\n') ? key.replaceAll('\\n', '\n') : key
-  return { hubUrl: url.replace(/\/+$/, ''), publicKey }
+  const parsed = parseHubPair(env[HUB_URL_ENV], env[HUB_PUBLIC_KEY_ENV])
+  return parsed.ok ? parsed.value : null
+}
+
+/** 配置从哪来。界面要显示它 —— "为什么我的商店是空的"第一句就该能回答 */
+export type HubConfigOrigin = 'env' | 'file'
+
+export interface HubConfigResolution {
+  readonly config: HubConfig | null
+  readonly origin: HubConfigOrigin | null
+  /**
+   * 没配上时的原因（配错了 / 文件坏了）。
+   * **`null` 且 `config === null` 才是"就是没配"** —— 这一区分是为了让界面能说
+   * "你设了 URL 但忘了公钥"，而不是干巴巴一句"未配置"。
+   */
+  readonly note: string | null
+}
+
+/** 随包配置文件的形状。字段名与 manifest 无关，只描述"连哪儿、验谁的签" */
+export interface HubConfigFile {
+  readonly hubUrl: string
+  readonly publicKey: string
+}
+
+export interface ResolveHubConfigInput {
+  readonly env?: NodeJS.ProcessEnv
+  /** 便于测试注入；默认 `readFileSync(utf8)` */
+  readonly readFile?: (path: string) => string
+}
+
+/**
+ * Hub 配置的**唯一**解析入口（M6 第 5 步）。
+ *
+ * 优先级：`TENON_HUB_URL`+`TENON_HUB_PUBLIC_KEY`（环境变量） > `TENON_HUB_CONFIG_FILE`
+ * 指向的 JSON（安装包里那份）> 未配置。
+ *
+ * 为什么需要"随包配置"这一档：M6 之前 Hub 配置只能靠环境变量，而**用户双击打开
+ * `.app` 时没有环境变量** —— 于是商店永远显示"未配置"，且这不是错误，不会有人发现。
+ * 官方 Hub 的地址与公钥是公开信息（公钥本来就该随客户端发布，像 VS Code 内置
+ * marketplace 公钥那样），所以它应该像模板、插件一样打在包里。
+ *
+ * 为什么文件由壳指路径、而不是壳读完塞进环境变量：与 `TENON_PLUGINS_DIR` /
+ * `TENON_TEMPLATES_DIR` 同一个模式 —— 壳只负责"指一个位置"，内容由业务侧读。
+ * 好处是这里能分辨来源并如实报出来（`origin`），而不是让"包里的"和"用户设的"
+ * 在环境变量里长得一模一样。
+ *
+ * 为什么环境变量只设一半时**不**回落到文件：那是"我要换源"，而换源必须连公钥一起换
+ * （只换 URL 一定验不过签）。这时候用包里的旧配置会让人以为自己的设置生效了。
+ */
+export function resolveHubConfig(input: ResolveHubConfigInput = {}): HubConfigResolution {
+  const env = input.env ?? process.env
+  const readFile = input.readFile ?? ((path: string) => readFileSync(path, 'utf8'))
+
+  const fromEnv = parseHubPair(env[HUB_URL_ENV], env[HUB_PUBLIC_KEY_ENV])
+  if (!fromEnv.ok) return { config: null, origin: null, note: fromEnv.message }
+  if (fromEnv.value !== null) return { config: fromEnv.value, origin: 'env', note: null }
+
+  const file = env[HUB_CONFIG_FILE_ENV]?.trim() ?? ''
+  if (file === '') return { config: null, origin: null, note: null }
+
+  let raw: string
+  try {
+    raw = readFile(file)
+  } catch (error) {
+    // 文件是壳指的，指到了不存在的路径说明打包漏了东西 —— 说出来，别当成"没配"
+    return {
+      config: null,
+      origin: null,
+      note: `读不到 Hub 配置文件 ${file}：${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    return { config: null, origin: null, note: `${file} 不是合法 JSON：${error instanceof Error ? error.message : String(error)}` }
+  }
+  const shape = parsed as Partial<Record<keyof HubConfigFile, unknown>> | null
+  if (shape === null || typeof shape !== 'object') {
+    return { config: null, origin: null, note: `${file} 的内容不是一个对象` }
+  }
+  /*
+   * 两个键都不在 = 文件写错了（字段名拼错）。
+   * 两个键都在但都是空串 = **构建时就没配**（`build.mjs` 会写这样一份占位），
+   * 那是正常状态，不该报"配置错误"。这个区分能省掉一次"商店为什么是空的"排查。
+   */
+  if (!('hubUrl' in shape) && !('publicKey' in shape)) {
+    return { config: null, origin: null, note: `${file} 里没有 hubUrl / publicKey` }
+  }
+  const url = typeof shape.hubUrl === 'string' ? shape.hubUrl : undefined
+  const key = typeof shape.publicKey === 'string' ? shape.publicKey : undefined
+  const fromFile = parseHubPair(url, key)
+  if (!fromFile.ok) return { config: null, origin: null, note: `${file}：${fromFile.message}` }
+  if (fromFile.value === null) return { config: null, origin: null, note: null }
+  return { config: fromFile.value, origin: 'file', note: null }
 }
 
 /**
@@ -130,9 +260,14 @@ export interface VerifyResult {
   readonly keyFingerprint: string
 }
 
-/** 公钥指纹（sha256 前 16 位）：界面上显示它，换过 key 时能看出来 */
+/**
+ * 公钥指纹（sha256 前 16 位）：界面上显示它，换过 key 时能看出来。
+ *
+ * **先 trim**：PEM 的尾换行不该改变指纹。不 trim 的话同一把 key 从环境变量
+ * （已归一）与从文件（带尾换行）读出来会得到两个指纹，界面就会误报"发布方换过密钥"。
+ */
 export function hubKeyFingerprint(publicKeyPem: string): string {
-  return createHash('sha256').update(publicKeyPem).digest('hex').slice(0, 16)
+  return createHash('sha256').update(publicKeyPem.trim()).digest('hex').slice(0, 16)
 }
 
 /** 校验结构的顺序很重要：先看形状，再看签名，最后才看清单内容 */
@@ -497,6 +632,25 @@ export async function installFromHubIndex(
   const component = findIndexComponent(fetched.value.index, options.id)
   if (component === undefined) {
     return fail('bad-bundle', `Hub 上没有 ${options.id} 这个组件`, '检查 id 拼写；或者它还没发布')
+  }
+  /*
+   * 付费组件**连下载都不做**（M6 第 5 步补的门）。
+   *
+   * 之前只有 `installComponent` 拦付费，而那是"装进应用"的入口；`hub.install` 是
+   * "装到本机"，它会把包原样落到 `~/.tenon/plugins/` —— 于是"付费组件"变成了
+   * "付不了但能下载"。文件是明文的，真要说 DRM 那本来就不成立；但**主动帮用户
+   * 把没买的组件下载下来**是另一回事，不做。
+   *
+   * 为什么可以用索引上的 `pricing` 判：这一层拒错的代价是"用户看到一句'暂未开放'"
+   * （可以重试），而漏判的代价是"付费内容已经在本机磁盘上"。宁可误拒。
+   * 真判据仍在包里 —— 索引说 free 而包里是 paid 时，装配那一步会拦下来。
+   */
+  if (component.pricing === 'paid') {
+    return fail(
+      'paid-not-available',
+      `${component.id} 是付费组件，现在还不能下载`,
+      '付费与购买流程还没做（DESIGN §21.5）。这里拦的是"下载"，装进应用时还会再拦一次',
+    )
   }
   const wanted =
     options.version === undefined

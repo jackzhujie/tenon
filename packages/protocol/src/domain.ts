@@ -461,7 +461,12 @@ export type ComponentSource = z.infer<typeof ComponentSource>
 
 export const ComponentPricing = z.discriminatedUnion('type', [
   z.object({ type: z.literal('free') }),
-  /** Phase 3 才用得到；M5 / M6 的官方插件恒为 free */
+  /**
+   * Phase 3 才用得到；M5 / M6 的官方插件恒为 free。
+   * 现在的语义是**安全阀**：`paid` 会在安装那一步被直接拒（`paid-not-available`），
+   * 因为还没有购买流程 —— 「装了但用不了」比「装不了」糟得多。
+   * 门禁在哪、为什么不是 DRM、Phase 3 的 license 长什么样，见 DESIGN §21.5。
+   */
   z.object({ type: z.literal('paid'), sku: z.string() }),
 ])
 export type ComponentPricing = z.infer<typeof ComponentPricing>

@@ -7,6 +7,7 @@
  *   server/server.mjs     ← 整个 server 打成一个文件（12MB，含 fastify/pi/isomorphic-git）
  *   templates/            ← 建应用用的模板（真实文件，必须随包走）
  *   plugins/              ← 官方组件（真实文件，加载器按目录扫描 manifest.json）
+ *   hub.json              ← 官方 Hub 的地址与公钥（M6 第 5 步；没配就写空值）
  *   web/                  ← 渲染器产物（`pnpm build:web` 的 dist）
  * ```
  *
@@ -27,8 +28,9 @@
  * 2. `templates` 必须落在 `dist/templates`：`registry.ts` 按 `import.meta.url` 找 `../templates`
  */
 import { build } from 'esbuild'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { cp, mkdir, readdir, rm, stat, realpath } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm, stat, realpath, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,6 +44,13 @@ const BANNER = `import { createRequire as __tenonCreateRequire } from 'node:modu
 const require = __tenonCreateRequire(import.meta.url)`
 
 const kib = (bytes) => `${(bytes / 1024).toFixed(0)}KB`
+
+/**
+ * 公钥指纹：与 `@tenon/component-host` 的 `hubKeyFingerprint` **必须同算法**
+ * （sha256 十六进制前 16 位）。这里不 import 它，是因为构建脚本跑在 ts 源码之外，
+ * 为了一个 16 字符的哈希去引一整包不划算；两处都只有一行，改一处要改两处。
+ */
+const fingerprint = (pem) => createHash('sha256').update(pem).digest('hex').slice(0, 16)
 
 async function sizeOf(path) {
   let total = 0
@@ -271,6 +280,35 @@ async function main() {
     filter: (src) => !src.includes('node_modules'),
   })
 
+  /*
+   * 3c) Hub 配置（M6 第 5 步）。
+   *
+   * 为什么必须进包：环境变量在双击打开的 `.app` 里不存在，于是打包版的组件商店
+   * **永远**显示「未配置」—— 而那不是错误，界面上只是一片空，没有人会报。
+   *
+   * 为什么公钥可以进包：它本来就是公开的（客户端要拿它验签），私钥才是秘密，
+   * 而私钥只在发布流水线上（`pnpm pack:plugin`）。
+   *
+   * 为什么没配也要写一份空文件：`electron-builder.yml` 里 `extraResources` 的来源
+   * 不存在会直接报错，本地打包就再也打不出来了。空值（`""`）在 `resolveHubConfig`
+   * 里是"就是没配"，与"文件字段拼错"分开。
+   */
+  const hubUrl = (process.env['TENON_HUB_URL'] ?? '').trim().replace(/\/+$/, '')
+  const rawKey = (process.env['TENON_HUB_PUBLIC_KEY'] ?? '').trim()
+  const hubKey = rawKey.includes('\\n') ? rawKey.replaceAll('\\n', '\n') : rawKey
+  const hubReady = hubUrl !== '' && hubKey !== ''
+  if (!hubReady && process.env['TENON_REQUIRE_HUB'] === '1') {
+    throw new Error(
+      'TENON_REQUIRE_HUB=1，但没同时给 TENON_HUB_URL 与 TENON_HUB_PUBLIC_KEY ——\n' +
+        '打出来的包商店会是空的，而那种包在界面上看不出任何异常。',
+    )
+  }
+  await writeFile(
+    join(dist, 'hub.json'),
+    `${JSON.stringify({ hubUrl: hubReady ? hubUrl : '', publicKey: hubReady ? hubKey : '' }, null, 2)}\n`,
+    'utf8',
+  )
+
   // 4) 渲染器产物
   const webDist = join(root, 'apps', 'web', 'dist')
   try {
@@ -299,6 +337,11 @@ async function main() {
       `codemode      ${kib(await sizeOf(join(dist, 'server', 'node_modules', '@earendil-works', 'pi-codemode')))} + quickjs.wasm ${kib((await stat(join(dist, 'server', 'node_modules', 'quickjs-wasi', 'quickjs.wasm'))).size)}`,
       `templates     ${kib(await sizeOf(join(dist, 'templates')))}`,
       `plugins       ${kib(await sizeOf(join(dist, 'plugins')))}`,
+      /*
+       * Hub 配置要打得出来"是配了还是没配"：这一行是打包机上唯一能看出
+       * "这个包会不会有一个空商店"的地方（跑起来之后看不出任何区别）。
+       */
+      `hub           ${hubReady ? `${hubUrl}（指纹 ${fingerprint(hubKey)}）` : '未配置（商店不可用，内置组件不受影响）'}`,
       `web           ${kib(await sizeOf(join(dist, 'web')))}`,
       ...reportNatives(natives),
     ].join('\n') + '\n',

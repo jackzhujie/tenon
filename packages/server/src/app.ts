@@ -69,7 +69,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
     bus,
     version: options.version ?? '0.0.0',
     plugins: { roots: options.pluginRoots ?? [] },
-    hub: options.hub ?? { config: null, dir: '' },
+    hub: options.hub ?? { config: null, dir: '', origin: null, note: null },
     components:
       options.components ??
       // 直接调 buildServer 的调用方（测试、未来的 IPC 传输）：现建一个也够用

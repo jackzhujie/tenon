@@ -64,6 +64,11 @@ export const ErrorCode = z.enum([
   'HUB_BAD_BUNDLE',
   'HUB_BAD_SIGNATURE',
   'HUB_INSTALL_FAILED',
+  /**
+   * 付费组件（M6 第 5 步）。**不是"你付不起"，是"我们还没做购买流程"** ——
+   * 所以状态码是 409 而不是 402：402 在这个项目里已经是「预算用完」。
+   */
+  'HUB_PAID_NOT_AVAILABLE',
 
   /**
    * 组件碰了它没声明的能力（M6 第 4 步）。
@@ -125,6 +130,7 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['HUB_BAD_BUNDLE', 422],
   ['HUB_BAD_SIGNATURE', 422],
   ['HUB_INSTALL_FAILED', 500],
+  ['HUB_PAID_NOT_AVAILABLE', 409],
   ['COMPONENT_PERMISSION_DENIED', 403],
   ['RELEASE_NO_COMMITS', 409],
   ['RELEASE_FAILED', 500],

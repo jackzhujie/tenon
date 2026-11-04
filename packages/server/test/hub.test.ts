@@ -8,7 +8,7 @@
  *   4. 应用声明的区间不接受新版时，必须出现在 `blockedBy` 里（装了也不会被用）
  */
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -112,11 +112,21 @@ async function appWithBundled(version = '^1.0.0'): Promise<string> {
 describe('Hub 接线', () => {
   it('没配置时说"未配置"：status / check / install 三条都不崩', async () => {
     await bootWithHub(null)
-    const status = await rpc<{ configured: boolean; hubUrl: string | null; keyFingerprint: string | null }>(
-      running!,
-      'hub.status',
-    )
-    expect(status).toEqual({ configured: false, hubUrl: null, keyFingerprint: null })
+    const status = await rpc<{
+      configured: boolean
+      hubUrl: string | null
+      keyFingerprint: string | null
+      origin: string | null
+      note: string | null
+    }>(running!, 'hub.status')
+    // origin 与 note 都是 null = 就是没配（不是配错了）—— 界面据此说「筹备中」
+    expect(status).toEqual({
+      configured: false,
+      hubUrl: null,
+      keyFingerprint: null,
+      origin: null,
+      note: null,
+    })
 
     // 未配置 → 检查更新是「没得查」，不是错误
     const check = await rpc<{ reachable: boolean; error: string | null; components: unknown[] }>(
@@ -133,6 +143,32 @@ describe('Hub 接线', () => {
     expect(response.status).toBe(409)
     const body = (await response.json()) as { error?: { code?: string } }
     expect(body.error?.code).toBe('HUB_NOT_CONFIGURED')
+  })
+
+  /*
+   * 打包版走的正是这条路：双击打开的 `.app` 里没有环境变量，配置由主进程指一个
+   * `hub.json`（M6 第 5 步）。单测里 `resolveHubConfig` 过了不代表接线通 ——
+   * 这条守的是"那一档真的接到了 startServer 上"，并且 status 说得出来源。
+   */
+  it('配置来自随包文件：status 报 file，check 真能连上', async () => {
+    const fake = await startHub({ '1.1.0': bundle('1.1.0') }, ['1.0.0', '1.1.0'])
+    dir = await mkdtemp(join(tmpdir(), 'tenon-hub-file-'))
+    const file = join(dir, 'hub.json')
+    // 形状与 `apps/desktop/build.mjs` 写出来的完全一致
+    await writeFile(file, `${JSON.stringify({ hubUrl: fake.url, publicKey: PUBLIC_PEM }, null, 2)}\n`)
+    running = await boot(dir, { env: { TENON_HUB_CONFIG_FILE: file } })
+
+    const status = await rpc<{ configured: boolean; hubUrl: string | null; origin: string | null }>(
+      running,
+      'hub.status',
+    )
+    expect(status.configured).toBe(true)
+    expect(status.origin).toBe('file')
+    expect(status.hubUrl).toBe(fake.url)
+
+    const check = await rpc<{ reachable: boolean; components: unknown[] }>(running, 'hub.check')
+    expect(check.reachable).toBe(true)
+    expect(check.components.length).toBeGreaterThan(0)
   })
 
   it('装好之后加载器用的是 hub 版（覆盖层真的生效了）', async () => {

@@ -34,6 +34,18 @@ function buildEnv(paths: DesktopPaths): NodeJS.ProcessEnv {
    * "插件页空空如也"，没有任何报错。这与 `TENON_TEMPLATES_DIR` 是同一个坑。
    */
   env['TENON_PLUGINS_DIR'] = paths.pluginsDir
+  /*
+   * Hub 配置同理（M6 第 5 步）：壳只**指路径**，不读内容 —— 读法是
+   * `@tenon/component-host` 的 `resolveHubConfig`（壳不认识任何 `@tenon/*`，铁律 1）。
+   *
+   * 为什么需要这一行：环境变量在双击打开的 `.app` 里根本不存在，于是 M6 之前
+   * 打包版的组件商店**永远**显示"未配置"，而且那不是错误、没人会报。
+   *
+   * 用 `??=`：用户显式设了 `TENON_HUB_CONFIG_FILE` 时以他为准（私有 Hub / 排障）。
+   * 另外两个环境变量（`TENON_HUB_URL`/`TENON_HUB_PUBLIC_KEY`）仍由业务侧判优先级，
+   * 壳不判断"配了没配"——那属于配置语义，不属于生命周期。
+   */
+  env['TENON_HUB_CONFIG_FILE'] ??= paths.hubConfigFile
   env['TENON_HOME'] ??= join(app.getPath('userData'), 'home')
 
   // 开发态便利：没配 provider 就先跑 faux，否则第一次启动只会得到"没有可用模型"

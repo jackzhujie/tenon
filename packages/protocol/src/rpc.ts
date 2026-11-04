@@ -546,6 +546,16 @@ export const rpcMethods = {
       hubUrl: z.string().nullable(),
       /** 公钥指纹（sha256 前 16 位）：换过 key 时能看出来 */
       keyFingerprint: z.string().nullable(),
+      /**
+       * 配置从哪来（M6 第 5 步）：`env` 环境变量、`file` 安装包里的 `hub.json`。
+       * 未配置时是 null。
+       */
+      origin: z.enum(['env', 'file']).nullable(),
+      /**
+       * 没配上时的原因（配错了 / 配置坏了）。**与 `origin: null` 一起看**：
+       * 两者都 null 才是"就是没配"，有 note 就是"配了但不对"。
+       */
+      note: z.string().nullable(),
     }),
   },
   /**

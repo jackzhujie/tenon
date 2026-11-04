@@ -129,6 +129,22 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
         return fail(`装 ${id} 时出错了：${error instanceof Error ? error.message : String(error)}`)
       }
 
+      /*
+       * 下载侧的原因要**先**看：`installComponent` 在"本机没有这个包"时返回的是
+       * `missing`（"找不到组件"），而真正的原因可能是"它是付费的，我们没给下载"。
+       * 光看 problems 的话，用户会得到一句"找不到 xxx"，然后去查 id 拼写。
+       */
+      if (run.downloadError !== null) {
+        const detail = run.downloadError
+        const tail =
+          detail.code === 'HUB_PAID_NOT_AVAILABLE'
+            ? '这是付费组件，购买流程还没做，现在装不了。把这条告诉用户，不要自己写一个替代品。'
+            : '把这条原因告诉用户，不要自己写一个替代品。'
+        return fail(
+          `没装上 ${id}：${detail.message}${detail.hint === null ? '' : `（${detail.hint}）`}\n${tail}`,
+        )
+      }
+
       if (!run.result.ok) {
         const detail = run.result.problems
           .map((item) => `- ${item.message}${item.hint === null ? '' : `（${item.hint}）`}`)

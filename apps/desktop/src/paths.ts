@@ -26,6 +26,13 @@ export interface DesktopPaths {
    * 所以它必须像 templates 一样**在 asar 外面**，且开发态与打包态同构。
    */
   readonly pluginsDir: string
+  /**
+   * 随包分发的 Hub 配置（`hub.json`，M6 第 5 步）。
+   *
+   * **可能不存在** —— 本地开发、或者打包时没给 Hub 地址就是没有。存在与不存在的区别
+   * 只是"商店能不能从官方源装组件"，不是故障，所以这里不判存在性。
+   */
+  readonly hubConfigFile: string
   /** 打包后的应用资源根（日志里打得出来，排查"到底读的哪份"） */
   readonly base: string
 }
@@ -46,5 +53,6 @@ export function resolveDesktopPaths(input: ResolvePathsInput): DesktopPaths {
     webDir: join(base, 'web'),
     templatesDir: join(base, 'templates'),
     pluginsDir: join(base, 'plugins'),
+    hubConfigFile: join(base, 'hub.json'),
   }
 }

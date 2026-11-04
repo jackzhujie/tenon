@@ -12,7 +12,7 @@ import { createAgentRuntime, type AgentRuntime, type PageDriverProvider } from '
 import { PreviewManager, type PreviewManagerOptions } from '@tenon/gateway'
 import { scaffoldApp } from '@tenon/generator'
 import { buildServer, type TenonServer } from './app.js'
-import { hubConfigFromEnv, hubPluginsDir } from '@tenon/component-host'
+import { hubPluginsDir, resolveHubConfig } from '@tenon/component-host'
 import { ComponentRuntime } from './components.js'
 import { createComponentBridge, type AppComponentBridge } from './components-link.js'
 import { SseBus } from './sse.js'
@@ -128,12 +128,15 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   let componentsRef: ComponentRuntime | undefined
   const resolvedRoots = options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root })
   /*
-   * Hub 配置（M6）：两个环境变量都给才算配置好。**必须在建 agent 之前算**，
-   * 因为 `install_component` 也要用它（本机没有就去 Hub 拿）。
+   * Hub 配置（M6）：`env > 随包 hub.json > 未配置`，见 `resolveHubConfig`。
+   * **必须在建 agent 之前算**，因为 `install_component` 也要用它（本机没有就去 Hub 拿）。
    * 装到哪里与加载器的 hub 根**必须同一个** —— 否则"装成功了却加载不到"。
    */
-  const hubConfig = hubConfigFromEnv(env)
+  const hub = resolveHubConfig({ env })
+  const hubConfig = hub.config
   const hubDir = hubPluginsDir(env, core.home.root)
+  // 配了但不对（只给了一半、文件坏了）要说出来：静默当"未配置"会让排障停在"商店是空的"
+  if (hub.note !== null) process.stderr.write(`[tenon] Hub 配置有问题，按未配置处理：${hub.note}\n`)
   const agent = createAgentRuntime({
     core,
     env,
@@ -160,7 +163,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       onChanged: async (appId) => {
         await componentsRef?.reload(appId)
       },
-      // 让 Agent 也能装"本机还没有"的组件（否则它只能说"请去插件页点一下"）
+      /*
+       * 让 Agent 也能装"本机还没有"的组件（否则它只能说"请去插件页点一下"）。
+       * 只给 config/dir：`origin`/`note` 是给界面解释"配置打哪来"的，工具不需要。
+       */
       hub: { config: hubConfig, dir: hubDir },
     },
   })
@@ -184,7 +190,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     ...(options.version === undefined ? {} : { version: options.version }),
     pluginRoots: options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root }),
     components,
-    hub: { config: hubConfig, dir: hubDir },
+    hub: { config: hubConfig, dir: hubDir, origin: hub.origin, note: hub.note },
     ...(options.logger === undefined ? {} : { logger: options.logger }),
     ...(options.webDir === undefined ? {} : { web: { dir: options.webDir } }),
   })
