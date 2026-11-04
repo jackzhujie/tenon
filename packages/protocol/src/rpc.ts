@@ -161,6 +161,17 @@ export const rpcMethods = {
     input: z.object({ id: Id, removeFiles: z.boolean().default(true) }),
     output: z.object({ deleted: z.literal(true) }),
   },
+  /**
+   * 改显示名（M6 收口后补）。
+   *
+   * **只改名字，不重命名目录、不改 slug** —— 目录名是 `appPaths` 的一部分，
+   * 改它要搬 git 仓库和整个 PGlite 数据目录，而用户要的只是列表里那行字。
+   * 建应用时随手起的名字（"test"、"未命名"）应该能改。
+   */
+  'app.rename': {
+    input: z.object({ id: Id, name: z.string().trim().min(1).max(64) }),
+    output: z.object({ app: App }),
+  },
 
   'chat.submit': {
     input: ChatSubmitInput,

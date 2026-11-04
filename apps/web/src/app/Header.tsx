@@ -7,6 +7,7 @@ import { PlusIcon } from '../components/icons.js'
 import { Button } from '../components/ui/Button.js'
 import { cn } from '../lib/cn.js'
 import type { ActiveModel, Outcome } from '../hooks/useWorkspace.js'
+import { releaseBadge, releaseTooltip, type ReleaseHint } from '../lib/release-hint.js'
 import type { StreamState } from '../lib/stream.js'
 
 const STREAM_LABEL: Record<StreamState, string> = {
@@ -48,6 +49,10 @@ export interface HeaderProps {
   onCreate(): void
   /** 删除应用（代码 + 数据库 + 日志一起删） */
   onDeleteApp(appId: string): Promise<void>
+  /** 改显示名（不动目录与 slug） */
+  onRenameApp(appId: string, name: string): Promise<void>
+  /** 上次发布之后又改了几版（null = 不显示徽标） */
+  unreleased: ReleaseHint | null
   /** 打开发布对话框 */
   onRelease(): void
 }
@@ -64,6 +69,8 @@ export function Header({
   onSelectApp,
   onCreate,
   onDeleteApp,
+  onRenameApp,
+  unreleased,
   onRelease,
 }: HeaderProps) {
   return (
@@ -83,6 +90,7 @@ export function Header({
         onSelect={onSelectApp}
         onCreate={onCreate}
         onDelete={onDeleteApp}
+        onRename={onRenameApp}
       />
 
       <Button variant="ghost" size="sm" className="px-1.5" title="新建应用" onClick={onCreate}>
@@ -103,10 +111,20 @@ export function Header({
           variant="outline"
           size="sm"
           disabled={activeApp === null}
-          title="把这个版本冻结下来并推到备份库"
+          title={
+            unreleased === null
+              ? '把这个版本冻结下来并推到备份库'
+              : releaseTooltip(unreleased)
+          }
           onClick={onRelease}
         >
           发布
+          {/* 有了这个数字，「现在值不值得点开预检」不用点进去才知道 */}
+          {unreleased !== null && (
+            <span className="rounded-sm bg-brand/20 px-1 font-mono text-[10px] leading-4 text-brand-soft">
+              {releaseBadge(unreleased)}
+            </span>
+          )}
         </Button>
       </div>
     </header>

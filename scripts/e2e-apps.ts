@@ -34,6 +34,7 @@ const electronPath = require(join(repo, 'apps', 'desktop', 'node_modules', 'elec
 const TOKEN = 'e2e-apps-token'
 /** 故意取有辨识度的名字：断言靠 textContent 里找它，不靠位置 */
 const KEEP = '留下的应用'
+const RENAMED = '改过名的应用'
 const DROP = '要删掉的应用'
 
 let failures = 0
@@ -88,6 +89,7 @@ function electronMain(): string {
   return `const { app, BrowserWindow } = require('electron')
 const url = ${JSON.stringify(server.url)}
 const keep = ${JSON.stringify(KEEP)}
+const renamed = ${JSON.stringify(RENAMED)}
 const drop = ${JSON.stringify(DROP)}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -123,12 +125,52 @@ async function run() {
   out.headerBefore = await frame.executeJavaScript(
     '(() => { const b = document.querySelector("[data-tenon-app-menu-trigger]"); return b ? b.textContent.trim() : null })()',
   )
+  /*
+   * 发布徽标依赖 git.log 的结果，而 header 出现的那一帧提交数还是 0。
+   * 所以等**徽标本身**出现（"发布"后面跟着数字），别等那句会显示 "0 个版本" 的文案 ——
+   * 后者一开始就成立，等于没等。
+   */
+  await waitFor(
+    frame,
+    '[...document.querySelectorAll("header button")].some((b) => /^发布[0-9]/.test((b.textContent || "").trim()))',
+    '发布徽标出现',
+    15000,
+  )
+  out.releaseButton = await frame.executeJavaScript(
+    '(() => { const btn = [...document.querySelectorAll("header button")].find((b) => (b.textContent || "").trim().indexOf("发布") === 0); return btn ? btn.textContent.trim() : null })()',
+  )
 
   // ② 菜单列得出来
   await click(frame, '[data-tenon-app-menu-trigger]')
   await waitFor(frame, 'document.querySelector("[data-tenon-app-menu]") !== null', '菜单打开')
   await waitFor(frame, 'document.querySelectorAll("[data-tenon-app]").length === 2', '两个应用都在')
   out.namesBefore = await menuNames(frame)
+
+  /*
+   * ②b 改名（就地输入框，不弹模态）。
+   *
+   * 注意受控输入：直接给 input.value 赋值 React 收不到（它靠内部的 value tracker 比对），
+   * 必须走原型上的原生 setter 再派发 input 事件。这不是脚本的技巧，是 React 的既定行为。
+   */
+  await frame.executeJavaScript(
+    '(() => { const nodes = [...document.querySelectorAll("[data-tenon-app]")]; const row = nodes.find((n) => (n.textContent || "").indexOf(' + JSON.stringify(keep) + ') !== -1); if (!row) return false; const btn = row.parentElement.querySelector("[data-tenon-action=rename-app]"); if (!btn) return false; btn.click(); return true })()',
+  )
+  await waitFor(frame, 'document.querySelector("[data-tenon-rename-input]") !== null', '改名输入框出现')
+  out.renameDraft = await frame.executeJavaScript(
+    '(() => { const i = document.querySelector("[data-tenon-rename-input]"); return i ? i.value : null })()',
+  )
+  await frame.executeJavaScript(
+    '(() => { const input = document.querySelector("[data-tenon-rename-input]"); const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; setter.call(input, ' +
+      JSON.stringify(renamed) +
+      '); input.dispatchEvent(new Event("input", { bubbles: true })); return true })()',
+  )
+  await click(frame, '[data-tenon-action="confirm-rename"]')
+  await waitFor(
+    frame,
+    '[...document.querySelectorAll("[data-tenon-app]")].some((n) => (n.textContent || "").indexOf(' + JSON.stringify(renamed) + ') !== -1)',
+    '菜单显示新名字',
+  )
+  out.namesAfterRename = await menuNames(frame)
 
   // ③ 删除要二次确认 —— 这一步是"防误点"的全部
   const targets = await frame.executeJavaScript(
@@ -192,11 +234,15 @@ try {
   const dropDir = appPaths(homeRoot, second.app.id).dir
   check('两个应用的目录都在磁盘上', (await exists(keepDir)) && (await exists(dropDir)))
 
+  // 徽标依赖 `git.log`：先在 RPC 层确认这条数据真的存在（否则界面为空就是数据的事）
+  const log = await rpc<{ commits: { sha: string }[] }>('git.log', { appId: second.app.id, limit: 20 })
+  console.log(`  git.log → ${log.commits.length} 个提交`)
+
   // 造一个"发布过"的痕迹：备份裸库。删应用时要一起清掉（否则留下没人能访问的孤儿）
   const dropBackup = appPaths(homeRoot, second.app.id).backupRepo
   await mkdir(dropBackup, { recursive: true })
 
-  console.log('\n2) 真 Chromium：打开菜单 → 删除 → 取消 → 再删除 → 确认')
+  console.log('\n2) 真 Chromium：打开菜单 → 改名 → 删除 → 取消 → 再删除 → 确认')
   mainFile = join(home, 'e2e-apps-main.cjs')
   const { writeFile } = await import('node:fs/promises')
   await writeFile(mainFile, electronMain(), 'utf8')
@@ -229,7 +275,10 @@ try {
   if (matched?.[1] === undefined) throw new Error(`Electron 没吐出结果：${stdout.slice(-600)}`)
   const ui = JSON.parse(matched[1]) as {
     headerBefore: string | null
+    releaseButton: string | null
     namesBefore: string[]
+    renameDraft: string | null
+    namesAfterRename: string[]
     victim: { id: string; name: string } | null
     confirmText: string
     namesAfterCancel: string[]
@@ -240,17 +289,34 @@ try {
   console.log('\n3) 界面上的观察')
   check('菜单里有两条', ui.namesBefore.length === 2, JSON.stringify(ui.namesBefore))
   check(`当前应用是「${DROP}」`, (ui.headerBefore ?? '').includes(DROP), String(ui.headerBefore))
+  // 新应用：提交数 > 0、一次都没发布过 → 徽标就是提交数（不带 +：列表没被截断，数字是准的）
+  check(
+    `发布按钮带未发布版本数（新应用 = ${log.commits.length}）`,
+    ui.releaseButton === `发布${log.commits.length}`,
+    String(ui.releaseButton),
+  )
+  check('改名输入框预填的是原名（不是空框）', ui.renameDraft === KEEP, String(ui.renameDraft))
+  check(
+    '改完菜单里显示新名字',
+    ui.namesAfterRename.some((name) => name.includes(RENAMED)),
+    JSON.stringify(ui.namesAfterRename),
+  )
   check('点删除先要二次确认（不会一下就没）', ui.confirmText.includes('不能恢复'), ui.confirmText)
   check('确认文案说了会连数据库和日志一起删', ui.confirmText.includes('数据库'), ui.confirmText)
   check('取消之后两条都还在', ui.namesAfterCancel.length === 2, JSON.stringify(ui.namesAfterCancel))
   check('确认之后菜单里只剩一条', ui.namesAfter.length === 1, JSON.stringify(ui.namesAfter))
-  check('剩下的是没被删的那个', (ui.namesAfter[0] ?? '').includes(KEEP), String(ui.namesAfter[0]))
-    check(`当前应用自动切到「${KEEP}」（删的正是当前那个）`, (ui.headerAfter ?? '').includes(KEEP), String(ui.headerAfter))
+  check('剩下的是没被删的那个', (ui.namesAfter[0] ?? '').includes(RENAMED), String(ui.namesAfter[0]))
+  check(
+    `当前应用自动切到「${RENAMED}」（删的正是当前那个）`,
+    (ui.headerAfter ?? '').includes(RENAMED),
+    String(ui.headerAfter),
+  )
 
   console.log('\n4) 后端与磁盘同步')
   const list = await rpc<{ apps: { id: string; name: string }[] }>('app.list', { includeArchived: false })
   check('app.list 里只剩一个', list.apps.length === 1, JSON.stringify(list.apps.map((a) => a.name)))
   check('留下的那个还在', list.apps[0]?.id === first.app.id)
+  check('RPC 层的名字也是新的（不只是界面上改了）', list.apps[0]?.name === RENAMED, String(list.apps[0]?.name))
   check('删掉的那个目录已经不在了', !(await exists(dropDir)))
   check('留下的那个目录没被动', await exists(keepDir))
   check('发布用的备份裸库也清掉了', !(await exists(dropBackup)))
@@ -266,4 +332,4 @@ if (failures > 0) {
   console.log(`\n${failures} 项失败`)
   process.exit(1)
 }
-console.log('\n全部通过：应用能从界面上建、也能从界面上删干净。')
+console.log('\n全部通过：应用能从界面上改名、删除，未发布版本数看得见。')

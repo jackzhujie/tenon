@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Header } from './Header.js'
 import { ChatPanel } from '../features/chat/ChatPanel.js'
 import { PreviewPanel } from '../features/preview/PreviewPanel.js'
@@ -10,6 +10,7 @@ import { TaskGraphPanel } from '../features/tasks/TaskGraphPanel.js'
 import { useWorkspace } from '../hooks/useWorkspace.js'
 import { useInspectorSelection } from '../hooks/useInspectorSelection.js'
 import { cn } from '../lib/cn.js'
+import { releaseHint } from '../lib/release-hint.js'
 
 function BootScreen({ label }: { label: string }) {
   return (
@@ -50,6 +51,11 @@ export function App() {
   const [releaseOpen, setReleaseOpen] = useState(false)
   // 预览里"按住 Alt 点一下"选中的东西，从 iframe 发回来（跨源，靠 origin + token 认）
   const inspectorToken = useInspectorSelection(state.preview, workspace.setSelection)
+  /* 顶栏那个数字：上次发布之后又改了几版（算法与边界见 lib/release-hint.ts） */
+  const unreleased = useMemo(
+    () => releaseHint(state.commits, state.releases),
+    [state.commits, state.releases],
+  )
 
   /**
    * 打开改动面板。默认看**最新一版** —— 用户点这个按钮想的通常是"刚才那轮改了什么"，
@@ -85,6 +91,8 @@ export function App() {
         onSelectApp={workspace.selectApp}
         onCreate={() => setCreating(true)}
         onDeleteApp={workspace.deleteApp}
+        onRenameApp={workspace.renameApp}
+        unreleased={unreleased}
         onRelease={() => setReleaseOpen(true)}
       />
 

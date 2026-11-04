@@ -84,6 +84,25 @@ describe('应用注册表', () => {
     }
   })
 
+  it('改名只动 name：slug 与目录都不变，空名被拒', async () => {
+    const core = openCore({ env: { TENON_HOME: join(dir, 'home') } })
+    const created = await core.apps.create({ name: 'old name', templateId: 'blank', styleId: null })
+    const { appPaths } = await import('../src/index.js')
+    const { existsSync } = await import('node:fs')
+    const repoDir = appPaths(core.home, created.id).repoDir
+
+    // 前后空格会被 trim（界面上手滑多打一个空格不该变成名字的一部分）
+    const renamed = core.apps.rename(created.id, '  新名字  ')
+    expect(renamed.name).toBe('新名字')
+    // 这两条是重点：目录名与 slug 是 appPaths 的一部分，改名不该搬仓库
+    expect(renamed.slug).toBe(created.slug)
+    expect(existsSync(repoDir)).toBe(true)
+
+    expect(() => core.apps.rename(created.id, '   ')).toThrowError(/不能为空/)
+    expect(() => core.apps.rename('app_nope', 'x')).toThrowError(/应用不存在/)
+    core.close()
+  })
+
   it('重名会拿到不同 slug，删除会清掉目录（连发布用的备份裸库一起）', async () => {
     const core = openCore({ env: { TENON_HOME: join(dir, 'home') } })
     const a = await core.apps.create({ name: 'todo', templateId: 'blank', styleId: null })

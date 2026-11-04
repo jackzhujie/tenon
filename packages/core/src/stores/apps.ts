@@ -166,6 +166,27 @@ export class AppStore {
     return this.require(id)
   }
 
+  /**
+   * 改显示名。
+   *
+   * **只改 `name`，不动 `slug` 与目录。** 目录名是 `appPaths` 的一部分，改它意味着
+   * 搬 git 仓库、搬 `.tenon/`（含 PGlite 数据目录）、改所有在跑的子进程 cwd ——
+   * 一次改名换来一次全链路迁移，而用户要的只是"列表里那行字换个说法"。
+   *
+   * 代价是名字与 slug 会不一致（`我的应用` / `wo-de-ying-yong`）。slug 从来没有
+   * 展示给用户看过，它只在 `appPaths` 与备份库文件名里用 —— 所以这个不一致看不见。
+   */
+  rename(id: string, name: string): App {
+    this.require(id)
+    const trimmed = name.trim()
+    // 协议层已经校过一遍（zod）；core 再判一次是给"绕过 RPC 直接调 core"的调用方兜底
+    if (trimmed === '' || trimmed.length > 64) {
+      throw new TenonError('VALIDATION_FAILED', '应用名不能为空，且不超过 64 个字', { appId: id })
+    }
+    this.db.run('UPDATE apps SET name = ?, updated_at = ? WHERE id = ?', trimmed, Date.now(), id)
+    return this.require(id)
+  }
+
   async delete(id: string, removeFiles = true): Promise<void> {
     this.require(id)
     this.db.transaction(() => {

@@ -75,6 +75,16 @@ export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+/** 改名的铅笔。比"编辑"两个字轻，也不占用行宽 */
+export function PencilIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5 4 20Z" />
+      <path d="M13.5 6.5 17.5 10.5" />
+    </Base>
+  )
+}
+
 /** 删除：垃圾桶。用"删掉一件东西"而不是一个 ×（× 在这里更像"关闭这个面板"） */
 export function TrashIcon(props: SVGProps<SVGSVGElement>) {
   return (

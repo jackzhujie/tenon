@@ -445,6 +445,8 @@ export interface Workspace {
   activeApp: App | null
   selectApp(appId: string | null): void
   createApp(name: string, templateId: string): Promise<void>
+  /** 改显示名（不动目录与 slug） */
+  renameApp(appId: string, name: string): Promise<void>
   deleteApp(appId: string): Promise<void>
   submit(content: string): Promise<void>
   stop(): Promise<void>
@@ -698,6 +700,20 @@ export function useWorkspace(): Workspace {
     [],
   )
 
+  /**
+   * 改名。只改显示名 —— 目录与 slug 不动（那是 `appPaths` 的一部分，改它等于搬仓库）。
+   * 成功后把整个列表换掉：`updated_at` 变了，列表顺序也可能变。
+   */
+  const renameApp = useCallback(async (appId: string, name: string) => {
+    try {
+      await rpc('app.rename', { id: appId, name })
+      const apps = await rpc('app.list', { includeArchived: false })
+      dispatch({ kind: 'apps', apps: apps.apps })
+    } catch (err) {
+      dispatch({ kind: 'error', message: messageOf(err) })
+    }
+  }, [])
+
   const deleteApp = useCallback(
     async (appId: string) => {
       try {
@@ -936,6 +952,7 @@ export function useWorkspace(): Workspace {
     activeApp,
     selectApp,
     createApp,
+    renameApp,
     deleteApp,
     submit,
     stop,

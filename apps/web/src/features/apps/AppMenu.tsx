@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { App } from '@tenon/protocol'
-import { ChevronDownIcon, PlusIcon, TrashIcon } from '../../components/icons.js'
+import { ChevronDownIcon, PencilIcon, PlusIcon, TrashIcon } from '../../components/icons.js'
 import { cn } from '../../lib/cn.js'
 
 export interface AppMenuProps {
@@ -10,14 +10,20 @@ export interface AppMenuProps {
   onCreate(): void
   /** 删除应用（代码 + 数据库 + 日志一起删）。M6 收口时补 —— 之前只有后端有这个方法 */
   onDelete(appId: string): Promise<void>
+  /** 改显示名（不动目录与 slug）。同样曾经只有后端有 */
+  onRename(appId: string, name: string): Promise<void>
 }
 
-export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete }: AppMenuProps) {
+export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRename }: AppMenuProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   /** 正在等二次确认的那一行。删除是**不可逆**的，不做这一步的话一次误点就没了 */
   const [pending, setPending] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  /** 正在改名的那一行，以及输入框里的草稿 */
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -25,12 +31,15 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete }: AppMe
       if (ref.current !== null && !ref.current.contains(event.target as Node)) {
         setOpen(false)
         setPending(null)
+        setRenaming(null)
       }
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
-        // Esc 先取消确认，再关菜单：不然"想取消删除"会顺手把菜单也关了
-        if (pending !== null) setPending(null)
+        // 按"最近一层"取消：改名 → 删除确认 → 关菜单。
+        // 不这么排的话，想取消改名会顺手把菜单也关了
+        if (renaming !== null) setRenaming(null)
+        else if (pending !== null) setPending(null)
         else setOpen(false)
       }
     }
@@ -40,7 +49,27 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete }: AppMe
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [open, pending])
+  }, [open, pending, renaming])
+
+  const startRename = (app: App): void => {
+    setPending(null)
+    setRenaming(app.id)
+    setDraft(app.name)
+  }
+
+  const commitRename = (appId: string): void => {
+    const name = draft.trim()
+    // 空名/没改都不发请求：前者会被服务端拒，后者只是白跑一趟
+    if (name === '' || name === (apps.find((item) => item.id === appId)?.name ?? '')) {
+      setRenaming(null)
+      return
+    }
+    setSaving(true)
+    void onRename(appId, name).finally(() => {
+      setSaving(false)
+      setRenaming(null)
+    })
+  }
 
   return (
     <div ref={ref} className="relative">
@@ -66,6 +95,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete }: AppMe
             )}
             {apps.map((app) => {
               const isPending = pending === app.id
+              const isRenaming = renaming === app.id
               return (
                 <div key={app.id} className="group">
                   {isPending ? (
@@ -104,6 +134,46 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete }: AppMe
                         </button>
                       </div>
                     </div>
+                  ) : isRenaming ? (
+                    /* 改名就地展开：一个输入框 + 两个按钮，不弹模态 */
+                    <div className="px-2 py-1.5" data-tenon-rename>
+                      <input
+                        autoFocus
+                        value={draft}
+                        data-tenon-rename-input
+                        onChange={(event) => setDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          // 自己处理 Esc：不然文档级那个 handler 会把菜单一起关了
+                          if (event.key === 'Escape') {
+                            event.stopPropagation()
+                            setRenaming(null)
+                          }
+                          if (event.key === 'Enter') commitRename(app.id)
+                        }}
+                        maxLength={64}
+                        className="w-full rounded border border-line bg-panel px-1.5 py-1 text-[12.5px] text-ink outline-none focus:border-brand"
+                      />
+                      <div className="mt-1 flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          disabled={saving}
+                          data-tenon-action="cancel-rename"
+                          onClick={() => setRenaming(null)}
+                          className="rounded border border-line px-2 py-0.5 text-[11px] text-muted transition-colors hover:text-ink disabled:opacity-40"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          disabled={saving || draft.trim() === ''}
+                          data-tenon-action="confirm-rename"
+                          onClick={() => commitRename(app.id)}
+                          className="rounded bg-brand/90 px-2 py-0.5 text-[11px] font-medium text-[#20120a] transition-colors hover:bg-brand disabled:opacity-40"
+                        >
+                          {saving ? '保存中…' : '保存'}
+                        </button>
+                      </div>
+                    </div>
                   ) : (
                     <div className="flex items-center">
                       <button
@@ -134,9 +204,18 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete }: AppMe
                         </span>
                       </button>
                       {/*
-                        平时隐形、hover 或聚焦时出现：删除是低频操作，常驻一个红叉会让整列看起来
-                        像"待清理的列表"。`opacity-0` 不影响 Tab 聚焦，键盘仍然够得到。
+                        平时隐形、hover 或聚焦时出现：这两个都是低频操作，常驻一行图标会让整列
+                        看起来像"待清理的列表"。`opacity-0` 不影响 Tab 聚焦，键盘仍然够得到。
                       */}
+                      <button
+                        type="button"
+                        title={`重命名「${app.name}」`}
+                        data-tenon-action="rename-app"
+                        onClick={() => startRename(app)}
+                        className="shrink-0 rounded p-1 text-[11px] text-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus:opacity-100"
+                      >
+                        <PencilIcon className="size-3.5" />
+                      </button>
                       <button
                         type="button"
                         title={`删除「${app.name}」`}

@@ -295,6 +295,9 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       return { app }
     },
 
+    /* 改名只动库里的 `name`：目录与 slug 不变（见 `core.apps.rename` 的注释） */
+    'app.rename': async (input) => ({ app: core.apps.rename(input.id, input.name) }),
+
     'app.delete': async (input) => {
       // 只停这一个应用的 watcher。这里**不能**调 `chat.close()` ——
       // 那会把 closed 置上，之后所有应用的 `app.status` 都不再落库也不再推事件
