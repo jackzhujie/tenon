@@ -136,6 +136,7 @@ pnpm e2e:e2e                # ★ 9 项自验收：真 Electron 里由 e2e 子 A
 pnpm e2e:fullstack          # ★ 全栈真机链路（要联网装 Nest）：起库 → 迁移 → 双进程 → CRUD → 重启后数据还在
 pnpm spike:chord            # 10 项：chord 宿主（契约 / 变体 / 跨 host / 热重载 / 打包），M5 的回归网
 pnpm e2e:hub                # 32 项：从零发布一个组件（现场生成密钥 → 真打包 → 静态 Hub → 真 server 装进应用）
+pnpm e2e:apps               # 14 项：应用菜单与删除（真 Chromium 里点：菜单 → 删除 → 取消 → 确认 → 磁盘同步）
 pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后不留孤儿进程
 ```
@@ -152,6 +153,8 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 **Hub 配置随包分发**（`env > 随包 hub.json > 未配置`，双击打开也有商店）、
 **`pnpm e2e:hub` 32 项**（现场生成密钥 → 真打包 → 静态 Hub → 真 server 装进应用 → 篡改与付费两种拒绝）。
 下一步：真 Hub 上线（静态托管 / 域名 / 缓存策略），以及 M7 的第三方上架。
+另外补了一个死代码留下的洞：**应用现在能删了**（后端 `app.delete` 从 M1 就在，界面上一直没有入口），
+删除会连同代码、数据库、日志和已发布的备份裸库一起清掉，`pnpm e2e:apps` 14 项在真 Chromium 里验过。
 服务端半边已经落地：契约 + server facet + 插件构建（`pnpm build:plugins`，410KB 单文件）+ 宿主装载。
 M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，
 M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17、第 2 步（组件加载器）见 §4.18、第 3 步 a（真组件）见 §4.19。

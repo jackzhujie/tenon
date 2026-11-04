@@ -705,13 +705,18 @@ export function useWorkspace(): Workspace {
         const apps = await rpc('app.list', { includeArchived: false })
         dispatch({ kind: 'apps', apps: apps.apps })
         if (activeAppIdRef.current === appId) {
-          dispatch({ kind: 'select', appId: apps.apps[0]?.id ?? null })
+          /*
+           * 删的正是当前应用 → 切到剩下的第一个。走 `selectApp` 而不是裸 dispatch：
+           * 它会把改动面板一起清掉。不清的话面板里还挂着那个应用的 sha 与文件路径，
+           * 点"回滚"会把已经不存在的应用当成目标 —— 看着像数据串了。
+           */
+          selectApp(apps.apps[0]?.id ?? null)
         }
       } catch (err) {
         dispatch({ kind: 'error', message: messageOf(err) })
       }
     },
-    [],
+    [selectApp],
   )
 
   const submit = useCallback(async (content: string) => {

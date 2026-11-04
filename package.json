@@ -43,6 +43,7 @@
     "shot:settings": "tsx scripts/shot-settings.ts",
     "pack:plugin": "tsx scripts/pack-plugin.ts",
     "e2e:hub": "tsx scripts/e2e-hub.ts",
+    "e2e:apps": "tsx scripts/e2e-apps.ts",
     "shot:plugins": "tsx scripts/shot-plugins.ts"
   },
   "devDependencies": {

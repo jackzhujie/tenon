@@ -46,6 +46,8 @@ export interface HeaderProps {
   onSetBudget(maxCostUsd: number | null, maxTokens: number | null): Promise<Outcome>
   onSelectApp(appId: string): void
   onCreate(): void
+  /** 删除应用（代码 + 数据库 + 日志一起删） */
+  onDeleteApp(appId: string): Promise<void>
   /** 打开发布对话框 */
   onRelease(): void
 }
@@ -61,6 +63,7 @@ export function Header({
   onSetBudget,
   onSelectApp,
   onCreate,
+  onDeleteApp,
   onRelease,
 }: HeaderProps) {
   return (
@@ -74,7 +77,13 @@ export function Header({
 
       <span className="h-4 w-px bg-line" />
 
-      <AppMenu apps={apps} activeApp={activeApp} onSelect={onSelectApp} onCreate={onCreate} />
+      <AppMenu
+        apps={apps}
+        activeApp={activeApp}
+        onSelect={onSelectApp}
+        onCreate={onCreate}
+        onDelete={onDeleteApp}
+      />
 
       <Button variant="ghost" size="sm" className="px-1.5" title="新建应用" onClick={onCreate}>
         <PlusIcon className="size-3.5" />

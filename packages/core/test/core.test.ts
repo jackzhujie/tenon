@@ -84,19 +84,27 @@ describe('应用注册表', () => {
     }
   })
 
-  it('重名会拿到不同 slug，删除会清掉目录', async () => {
+  it('重名会拿到不同 slug，删除会清掉目录（连发布用的备份裸库一起）', async () => {
     const core = openCore({ env: { TENON_HOME: join(dir, 'home') } })
     const a = await core.apps.create({ name: 'todo', templateId: 'blank', styleId: null })
     const b = await core.apps.create({ name: 'todo', templateId: 'blank', styleId: null })
     expect(a.slug).toBe('todo')
     expect(b.slug).toBe('todo-2')
 
+    const { appPaths } = await import('../src/index.js')
+    const { existsSync, mkdirSync, writeFileSync } = await import('node:fs')
+    /*
+     * 造一个"发布过"的痕迹：备份裸库。不删的话它会永远留着 —— 应用没了、界面上
+     * 也没有任何入口能 clone 它，只会在 backups/ 里堆成看不懂名字的孤儿目录。
+     */
+    const backup = appPaths(core.home, a.id).backupRepo
+    mkdirSync(backup, { recursive: true })
+    writeFileSync(join(backup, 'HEAD'), 'ref: refs/heads/main\n')
+
     await core.apps.delete(a.id)
     expect(core.apps.find(a.id)).toBeUndefined()
-
-    const { appPaths } = await import('../src/index.js')
-    const { existsSync } = await import('node:fs')
     expect(existsSync(appPaths(core.home, a.id).dir)).toBe(false)
+    expect(existsSync(backup)).toBe(false)
     core.close()
   })
 

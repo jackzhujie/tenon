@@ -1467,6 +1467,40 @@ host + **新的** storage 再 `activate()` 一次，中间只共享产品库（`
 已改成先 trim 再哈希，并在 `parseHubPair` 里把顺序固定为「先还原字面量 `\n` 再 trim」
 （反过来会留下一个尾换行）。
 
+### 4.36 应用能删掉了（顺手补的缺口）
+
+M6 收口之后做了一次"还剩什么没完善"的盘点，第一件撞上的不是设计欠账，是**一个死代码**：
+
+`app.delete` 的后端从 M1 就在（还专门踩过"不能调 `chat.close()`"那个坑，`budget.test` 里钉着），
+`useWorkspace.deleteApp` 也写好了 —— 但**界面上没有任何入口**，那个函数没有任何调用点。
+于是用户建了几个试验应用之后，一个都删不掉，只能去删 `~/.tenon/home/apps` 目录。
+
+这类漏法**不会被任何测试报警**：单测都在验 RPC，e2e 都在走既有的界面路径，而"应该有个按钮"
+不是任何断言的对象。所以补的不只是 UI，还有一个专门验界面的脚本。
+
+| 交付 | 落点 |
+|---|---|
+| 菜单里的删除 | `AppMenu`：hover/聚焦时出现 × 图标，**就地二次确认**（不弹模态） |
+| 删的是当前应用就自动切换 | `useWorkspace.deleteApp` 走 `selectApp`，顺带清掉改动面板（旧 sha 留着像数据串了） |
+| 备份裸库一起清 | `apps.delete` 删 `<home>/backups/<appId>.git` |
+| 真机验证 | `pnpm e2e:apps`（14 项） |
+
+**为什么二次确认就地展开而不是弹模态**：删应用是"我知道我在删什么"的操作，一个居中的
+模态框反而会让人下意识去点默认按钮。就地展开还省掉一次焦点搬迁。
+
+**为什么连备份裸库一起删**：应用不存在之后，界面上没有任何入口能 `clone` 那个裸库 ——
+留着就是一个没人能访问、却占着完整历史的孤儿目录，删几个试验应用之后 `backups/` 会变成
+一堆看不懂名字的目录。这与"删除不可恢复"是同一件事，确认文案里已经写明"包括已发布的备份"。
+
+**`pnpm e2e:apps` 验的是界面**（`scripts/e2e-apps.ts`）：菜单列得出来 / 删除先要确认 /
+取消后什么都没变 / 确认后菜单少一条**且当前应用自动切到剩下的** / `app.list` 与磁盘同步 /
+备份裸库也没了。它顺带成了第一条"从建到删"的界面旅程 —— 之前连"从界面建应用"都没有 e2e。
+
+**写这个脚本时踩的一个坑**（值得记）：删除进行中，那一行渲染的是确认区，**不渲染
+`data-tenon-app`**。所以 `waitFor('[data-tenon-app].length === 1')` 在 RPC 还没回来时
+就已经成立 —— 断言"菜单少了一条"通过得太早，于是"当前应用切换"看着像坏了。
+正确条件是**两个都要**：确认区消失 **且** 数量正确。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1765,9 +1799,11 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 **收口三件**（授权模型定稿 DESIGN §21.5 / Hub 配置随包分发：`env > 随包 hub.json > 未配置` /
 `pnpm e2e:hub` 32 项从零发布）。顺带修了两个真问题：付费组件能被下载到本机、Agent 装付费组件说"找不到"。
 
-649 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + shot:settings 5 + shot:plugins 12 + e2e:fullstack
-+ spike:chord 10 + 桌面包全绿。
+652 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
++ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 14 + shot:settings 5 + shot:plugins 12
++ e2e:fullstack + spike:chord 10 + 桌面包全绿。
+**顺手补的**：应用删除入口（§4.36）—— `app.delete` 的后端从 M1 就在，但界面上没有入口，
+`deleteApp` 是一段没人调用的死代码。现在能删了，连备份裸库一起清。
 **欠账**：① M2 的 Docker compose 产物（阻塞：本机无容器运行时，没有验证就不写 Dockerfile）；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；

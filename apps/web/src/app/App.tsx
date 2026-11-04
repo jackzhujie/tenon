@@ -84,6 +84,7 @@ export function App() {
         onSetBudget={workspace.setBudget}
         onSelectApp={workspace.selectApp}
         onCreate={() => setCreating(true)}
+        onDeleteApp={workspace.deleteApp}
         onRelease={() => setReleaseOpen(true)}
       />
 

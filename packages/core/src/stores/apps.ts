@@ -179,6 +179,19 @@ export class AppStore {
       throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.dir}`)
     }
     await rm(paths.dir, { recursive: true, force: true })
+    /*
+     * 发布用的备份裸库也跟着删（`<home>/backups/<appId>.git`）。
+     *
+     * 不删的话它会永远留在那里：应用已经不存在，界面上没有任何入口能 clone 它 ——
+     * 一个没人能访问、但占着这个应用完整历史的孤儿裸库。删了几个试验应用之后
+     * `backups/` 会变成一堆看不懂名字的目录。
+     *
+     * 这与"删除不可恢复"是同一件事，UI 的确认文案里已经写清楚了。
+     */
+    if (!paths.backupRepo.startsWith(`${this.home.backupsDir}/`)) {
+      throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.backupRepo}`)
+    }
+    await rm(paths.backupRepo, { recursive: true, force: true })
   }
 
   touch(id: string): void {

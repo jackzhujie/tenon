@@ -75,6 +75,20 @@ export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+/** 删除：垃圾桶。用"删掉一件东西"而不是一个 ×（× 在这里更像"关闭这个面板"） */
+export function TrashIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <path d="M4 7h16" />
+      <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      <path d="M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </Base>
+  )
+}
+
+
 /** 改动：两条长短不一的横线 + 一个增删标记，比"文件"更贴近"diff" */
 export function DiffIcon(props: SVGProps<SVGSVGElement>) {
   return (
