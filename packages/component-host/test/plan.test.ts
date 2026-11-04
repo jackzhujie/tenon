@@ -155,6 +155,9 @@ describe('正常装配', () => {
         version: '1.0.0',
         dir: pluginDir,
         facets: { server: 'server.js', web: 'web.js', worker: null },
+        // 清单里的权限要跟着一起交出来：宿主据此决定给组件什么能力
+        // （夹具的清单声明了 fs:app，所以这里必须是它，不是空数组）
+        permissions: ['fs:app'],
       },
     ])
   })

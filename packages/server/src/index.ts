@@ -170,6 +170,8 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     home: core.home,
     agent,
     roots: resolvedRoots,
+    // 组件的键值存储（M6 第 4 步）：命名空间由宿主按 (appId, 组件 id) 绑定
+    store: core.components,
     tenonVersion: options.version ?? '0.0.0',
   })
   componentsRef = components

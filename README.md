@@ -35,15 +35,16 @@
 |---|---|
 | [**当前状态与下一步**](docs/STATUS.md) | **新会话/新成员从这里开始**：现状、进度表、下一步拆解、已知陷阱 |
 | [**五个 spike 实测**](docs/SPIKES.md) | PGlite+TypeORM 压测、pi-durable 崩溃续跑、网关 HMR 代理、源码定位精度、chord 宿主接入的真实数字 |
-| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.25）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
+| [详细方案设计](docs/DESIGN.md) | **唯一事实来源**（v1.2.26）：架构、技术栈、Agent 体系、数据层、组件生态、契约、UX、路线图 |
 | [架构速览](docs/ARCHITECTURE.md) | 一分钟版本 + 不可动摇的四条原则 |
 | [行为规格](docs/PROTOCOL.md) | 逆向产出的妙搭行为规格（clean-room，仅协议形状与交互范式） |
 | [逆向工作手册](docs/REVERSE_ENGINEERING.md) | 内部研究用（不随开源发布） |
 
 ## 状态
 
-M0 逆向研究完成；方案 **v1.2.25**；五个技术 spike 全部跑通。**M1 / M2 / M3 全部完成，M4 七步完成，M5 走到第 3 步**：
-八个包（`protocol` / `component-host` / `core` / `agent` / `generator` / `gateway` / `db-provisioner` / `server`）+ 两个 app
+M0 逆向研究完成；方案 **v1.2.26**；五个技术 spike 全部跑通。**M1–M5 全部完成（M5 八步收口），
+M5.5 真模型验收 12/12，M6 走到第 4 步**：
+九个包（`protocol` / `component-host` / `core` / `agent` / `generator` / `gateway` / `db-provisioner` / `runtime-sdk` / `server`）+ 两个 app
 （渲染器 `apps/web`，浏览器与窗口共用一套代码；壳 `apps/desktop`，只做生命周期）。
 
 能力边界（都已实测）：
@@ -125,7 +126,7 @@ typescript」「测试红了」「超时了」必拦 —— 混成一个"不通�
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 618 项单测 / 集成测试（约 295s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 631 项单测 / 集成测试（约 295s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
@@ -140,12 +141,13 @@ pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后�
 
 接真模型：`TENON_FAUX=0 pnpm dev:web`（或 `dev:desktop`），再去设置里加一个 OpenAI 兼容的提供商。
 
-**真模型验收已通过**（DeepSeek V4.1 Flash，`pnpm e2e:real` 12/12：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问，46s / 13.3k token）。见 STATUS §4.27。**设置页与模型热切换已落地**（顶栏「未配置模型」点开就能填 key，保存即生效、不用重启）。**依赖安装时机也修了**（建应用就装、第一轮前就绪），**模型价格表也有**（填了价才算得出钱，没填显示「未定价」而不是 $0.00）。**M6 第 1–3 步完成**：Hub 客户端（Ed25519 验签 + 原子落盘 + 来源改写）、打包签名脚本 `pnpm pack:plugin`
-（同一次产出**签名索引**）、**更新检查**，以及**组件商店** —— 插件页分成「已装」与「商店」两个页签，
-能装没装过的组件（本机没有就从 Hub 下载）、能移除、能看来源与付费标记。
+**真模型验收已通过**（DeepSeek V4.1 Flash，`pnpm e2e:real` 12/12：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问，46s / 13.3k token）。见 STATUS §4.27。**设置页与模型热切换已落地**（顶栏「未配置模型」点开就能填 key，保存即生效、不用重启）。**依赖安装时机也修了**（建应用就装、第一轮前就绪），**模型价格表也有**（填了价才算得出钱，没填显示「未定价」而不是 $0.00）。**M6 第 1–4 步完成**：Hub 客户端（Ed25519 验签 + 原子落盘）、打包签名脚本 `pnpm pack:plugin`
+（同一次产出**签名索引**）、**更新检查**、**组件商店**（两个页签，装/卸 + 来源 + 付费标记），
+以及**组件持久化** —— `manifest.permissions` 第一次真的生效：`db:read` / `db:write`
+换到一个按 `(应用, 组件)` 命名的键值空间（配额 500 键 / 单值 64KB），审批流的数据现在活过重启。
 「检查更新 → 更新」与「商店 → 装到此应用」都在真 Chromium 里跑通（12/12）。
 界面会明确说"装了也用不上"：应用声明的版本区间不接受新版时点名是哪个应用挡住了。
-**下一步**：M6 第 4 步 —— 组件的持久化能力（`db:*` 权限 + 命名空间隔离）。旧文：M5 第 3 步（b）—— 第一个真组件的界面半边（web facet + 网关 WS 链路 + `app.shell.overlay` 渲染）。
+**下一步**：M6 第 5 步 —— M6 收口（订阅/授权模型定稿 + 桌面打包带 Hub 配置 + 发布一个组件的走通记录）。旧文：M5 第 3 步（b）—— 第一个真组件的界面半边（web facet + 网关 WS 链路 + `app.shell.overlay` 渲染）。
 服务端半边已经落地：契约 + server facet + 插件构建（`pnpm build:plugins`，410KB 单文件）+ 宿主装载。
 M3 已收口，欠账与「发布还差什么」见 [STATUS.md §4.8](docs/STATUS.md)，
 M4 验收见 §4.9–§4.15；M5 第 1 步（chord spike）见 §4.17、第 2 步（组件加载器）见 §4.18、第 3 步 a（真组件）见 §4.19。

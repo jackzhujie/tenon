@@ -32,12 +32,18 @@ afterEach(async () => {
   for (const host of hosts.splice(0)) await host.close()
 })
 
-/** 起一个服务端 host + 一条 memory link，返回"浏览器那半边" */
-function connect(activate: (input: {
+/**
+ * 起一个服务端 host + 一条 memory link，返回"浏览器那半边"。
+ *
+ * **必须 await activate**：组件的 activate 可以是 async 的（审批流要先从存储恢复数据，
+ * 再 `host.serve`）。不等它就去连接，会撞上"这个 contract 还没人 serve" —— 而生产代码
+ * 里 `activateComponents` 是 await 的，所以是测试要跟上，不是组件写错。
+ */
+async function connect(activate: (input: {
   host: Host<Principal>
   appId: string
   brain: typeof brain
-}) => void): Host<Principal> {
+}) => void | Promise<void>): Promise<Host<Principal>> {
   const appId = 'app-1'
   const server = createHost<Principal>({
     name: 'server',
@@ -46,7 +52,7 @@ function connect(activate: (input: {
     dev: true,
     onError: (error) => console.log('server host:', error instanceof Error ? error.message : error),
   })
-  activate({ host: server, appId, brain })
+  await activate({ host: server, appId, brain })
   hosts.push(server)
 
   const [serverSide, clientSide] = memoryLinkPair()
@@ -84,7 +90,7 @@ describe('导出 CSV', () => {
   })
 
   it('端到端：调 export 拿到 csv，state 记下文件名与行数', async () => {
-    const ui = connect(activateCsv)
+    const ui = await connect(activateCsv)
     const result = await ui.root(async (ctx) => {
       const ref = await ctx.get(ExportTable, { appId: 'app-1' })
       const exported = await ref.export(
@@ -102,7 +108,7 @@ describe('导出 CSV', () => {
   })
 
   it('列数对不上就拒绝，而不是导出一份错位的表', async () => {
-    const ui = connect(activateCsv)
+    const ui = await connect(activateCsv)
     const outcome = await ui.root(async (ctx) => {
       const ref = await ctx.get(ExportTable, { appId: 'app-1' })
       return ref
@@ -116,7 +122,7 @@ describe('导出 CSV', () => {
 
 describe('审批流', () => {
   it('提交 → 通过；待审数量跟着走', async () => {
-    const ui = connect(activateApproval)
+    const ui = await connect(activateApproval)
     const result = await ui.root(async (ctx) => {
       const ref = await ctx.get(Approval, { appId: 'app-1' })
       const first = await ref.submit({ title: '报销 120 元' }, ctx)
@@ -137,7 +143,7 @@ describe('审批流', () => {
   })
 
   it('空标题被拒；已决的单子不能再审一次', async () => {
-    const ui = connect(activateApproval)
+    const ui = await connect(activateApproval)
     const outcome = await ui.root(async (ctx) => {
       const ref = await ctx.get(Approval, { appId: 'app-1' })
       const empty = await ref
@@ -156,7 +162,7 @@ describe('审批流', () => {
   })
 
   it('状态跨 root 还在（linger）', async () => {
-    const ui = connect(activateApproval)
+    const ui = await connect(activateApproval)
     await ui.root(async (ctx) => {
       const ref = await ctx.get(Approval, { appId: 'app-1' })
       await ref.submit({ title: '刷新之后还要在' }, ctx)

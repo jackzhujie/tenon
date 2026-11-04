@@ -9,6 +9,7 @@ import { resolveHome, type TenonHome } from './paths.js'
 import { SecretBox } from './secrets.js'
 import type { AppScaffoldHook } from './stores/apps.js'
 import { AppStore } from './stores/apps.js'
+import { ComponentStore } from './stores/components.js'
 import { PriceStore } from './stores/prices.js'
 import { ProviderStore } from './stores/providers.js'
 import { ReleaseStore } from './stores/releases.js'
@@ -33,6 +34,11 @@ export * from './stores/releases.js'
 export * from './stores/settings.js'
 export { SETTING_KEYS, budgetKey, readBudget, NO_BUDGET } from './setting-keys.js'
 export { PriceStore, type UpsertPriceInput } from './stores/prices.js'
+export {
+  ComponentStore,
+  ComponentStorageLimitError,
+  STORAGE_LIMITS,
+} from './stores/components.js'
 export type { SettingKey } from './setting-keys.js'
 
 export interface CoreServices {
@@ -44,6 +50,8 @@ export interface CoreServices {
   readonly settings: SettingsStore
   readonly providers: ProviderStore
   readonly prices: PriceStore
+  /** 组件的键值存储（M6 第 4 步） */
+  readonly components: ComponentStore
   close(): void
 }
 
@@ -69,6 +77,7 @@ export function openCore(options: OpenCoreOptions = {}): CoreServices {
     settings: new SettingsStore(db),
     providers: new ProviderStore(db, box),
     prices: new PriceStore(db),
+    components: new ComponentStore(db),
     close() {
       db.close()
     },

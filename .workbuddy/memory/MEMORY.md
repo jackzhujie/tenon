@@ -3,8 +3,8 @@
 本地优先、可自托管的**对话式 AI 全栈应用搭建平台**（桌面 + Web 同构）。作用域 `@tenon/*`。
 隐喻：应用靠标准组件咬合，Agent 只做设计。⚠️ `LM Studio` 是第三方名，改名须保护。
 
-**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 166 条，细节都在那里**）；
-方案 `docs/DESIGN.md`（v1.2.25）。这里只留「不知道就会走错方向」的。
+**开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 168 条，细节都在那里**）；
+方案 `docs/DESIGN.md`（v1.2.26）。这里只留「不知道就会走错方向」的。
 
 ## 三条铁律
 1. **Electron 只做壳**，业务全在本地 HTTP Server（否则 Web 模式 / Agent 自调试 / SaaS 化全废）
@@ -14,9 +14,9 @@
 ## 状态（2026-11-03）
 M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 七步 + **M5 八步全部收口**
 （DoD ①②③④ 满足）→ DESIGN v1.2.25。九个包 + `apps/web` + `apps/desktop`。
-**M6 第 1–3 步完成**（Hub 客户端验签/落盘 + 签名索引 + `hub.check` + **组件商店**：两个页签、
-装/卸、付费门禁；`pnpm shot:plugins` 12/12）。
-全绿基线：typecheck 18 project / test **618** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+**M6 第 1–4 步完成**（Hub 客户端验签/落盘 + 签名索引 + `hub.check` + **组件商店** +
+**组件持久化**：`db:*` 权限 → `(appId, componentId)` 键值空间，配额 500 键/64KB）。
+全绿基线：typecheck 18 project / test **631** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
 e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / spike:chord 10 /
 smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
@@ -54,6 +54,9 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 - **"装到本机"≠"装进应用"**：前者写 `<home>/plugins`，后者写装配声明 + `AGENTS.md` + reload。
   共用入口 `installComponentWithHub`（缺包就去 Hub 拿），三处（RPC / 工具 / 商店）都走它
 - **付费门禁只拦"安装"，且明说不是 DRM**：组件文件明文落盘，加载层再拦是自我安慰
+- **组件的 `activate` 可以是 async**（先恢复数据再 `serve`）：宿主必须 await；测试夹具里最容易漏
+- **恢复数据时"计数类状态"初值不能写死 0**（审批流重启后徽标 0 而清单有 2 张待审单 → 用户重复提交）
+- **没权限时给 `undefined`，不给"一调就抛的对象"**：否则组件作者只会 try/catch 静默降级
 - **组件覆盖层按"根"选版本**（hub > bundled，不是全局最高）；装配逐条独立判定；
   装不上返回 problem 不抛 500；facet 是构建产物不进 git（忘建的表现是 Cannot find module）；
   `TENON_PLUGINS_DIR` 与 `TENON_TEMPLATES_DIR` 同坑（错的表现是"插件页空空如也"且无报错）

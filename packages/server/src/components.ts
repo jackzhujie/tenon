@@ -18,8 +18,14 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHost, type Host } from '@earendil-works/chord'
-import { buildPlan, type PlanResult, type PluginRoot } from '@tenon/component-host'
-import { appPaths, type TenonHome } from '@tenon/core'
+import {
+  buildPlan,
+  createComponentStorage,
+  type ComponentStorage,
+  type PlanResult,
+  type PluginRoot,
+} from '@tenon/component-host'
+import { appPaths, type ComponentStore, type TenonHome } from '@tenon/core'
 import { TenonError, type ComponentProblem } from '@tenon/protocol'
 import { createAssistant, type AgentRuntime, type AssistantCapability } from '@tenon/agent'
 
@@ -51,6 +57,15 @@ export interface FacetActivation {
   readonly host: Host<Principal>
   readonly appId: string
   readonly brain: BrainCapability
+  /**
+   * 组件自己的键值存储（M6 第 4 步）。
+   *
+   * **清单里没声明 `db:read` / `db:write` 时这里是 undefined** —— 组件连"试一试"的
+   * 机会都没有，于是它必须在类型层面处理这种情况（而不是写个 try/catch 静默降级）。
+   *
+   * 命名空间由宿主绑定成 `(appId, componentId)`：组件看不见也改不了这个边界。
+   */
+  readonly storage?: ComponentStorage
   readonly log: (line: string) => void
 }
 
@@ -64,6 +79,12 @@ export interface ActivateOptions {
   readonly roots: readonly PluginRoot[]
   readonly tenonVersion: string
   readonly brain: BrainCapability
+  /**
+   * 按 (组件, 权限) 造存储门面。**由调用方给**，因为"数据库在哪"是 server 的事，
+   * 而"要不要给"是清单的事 —— 两件事在宿主这里汇合。
+   * 不给 = 所有组件都拿不到 storage（纯 RPC 测试不需要数据库）。
+   */
+  readonly storage?: (componentId: string, permissions: readonly string[]) => ComponentStorage | undefined
   readonly log?: (line: string) => void
 }
 
@@ -144,7 +165,15 @@ export async function activateComponents(options: ActivateOptions): Promise<Acti
         )
         continue
       }
-      await module.activate({ host, appId: options.appId, brain: options.brain, log })
+      const storage = options.storage?.(target.id, target.permissions)
+      await module.activate({
+        host,
+        appId: options.appId,
+        brain: options.brain,
+        // 没权限时**不传这个字段**，而不是传 undefined：组件拿到的是"没有这个属性"
+        ...(storage === undefined ? {} : { storage }),
+        log,
+      })
       loaded.push(target.id)
     } catch (error) {
       const message = describe(error)
@@ -167,6 +196,8 @@ export interface ComponentRuntimeOptions {
   readonly agent: AgentRuntime
   readonly roots: readonly PluginRoot[]
   readonly tenonVersion: string
+  /** 组件的键值存储。不给 = 组件拿不到 storage（纯逻辑测试用） */
+  readonly store?: ComponentStore
   readonly log?: (line: string) => void
 }
 
@@ -198,6 +229,17 @@ export class ComponentRuntime {
           createAssistant({ pool: agent.pool, model: agent.model, home: options.home })
   }
 
+  /**
+   * 组件能不能持久化。
+   *
+   * 单独暴露出来，是因为"没给 store"时的表现**完全静默**：组件照常加载、照常工作，
+   * 只是数据一重启就没（审批流会退化成内存版）。这种"少传一个参数就悄悄降级"的错
+   * 光看日志发现不了 —— 而它恰好是最容易在重构里丢掉的一行。
+   */
+  get storageReady(): boolean {
+    return this.options.store !== undefined
+  }
+
   /** 幂等：同一个应用只激活一次 */
   async ensure(appId: string): Promise<ActivatedComponents> {
     const existing = this.apps.get(appId)
@@ -208,6 +250,24 @@ export class ComponentRuntime {
       roots: this.options.roots,
       tenonVersion: this.options.tenonVersion,
       brain: this.brain,
+      /*
+       * 命名空间在这里绑定：组件 id 从加载计划来，appId 从这次激活来。
+       * 组件拿到的 storage 上没有 appId / componentId 可用 —— 边界在闭包里。
+       */
+      storage: (componentId, permissions) => {
+        const store = this.options.store
+        if (store === undefined) return undefined
+        return createComponentStorage({
+          backend: {
+            read: (key) => store.get(appId, componentId, key),
+            write: (key, value) => store.set(appId, componentId, key, value),
+            remove: (key) => store.delete(appId, componentId, key),
+            keys: (prefix) => store.keys(appId, componentId, prefix),
+          },
+          permissions,
+          componentId,
+        })
+      },
       ...(this.options.log === undefined ? {} : { log: this.options.log }),
     })
     this.apps.set(appId, activating)

@@ -122,6 +122,33 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idx_prices_profile ON provider_prices(profile_id);
     `,
   },
+  {
+    version: 4,
+    name: 'component-kv',
+    /*
+     * 组件的存储（M6 第 4 步）。
+     *
+     * 三个决定都写在这里，因为它们是这张表的**全部**含义：
+     * 1. **按 (app_id, component_id) 命名空间**。同一个组件装进两个应用，各自的单据
+     *    互不可见；两个组件装进同一个应用，也互不可见。没有这一条，"组件能存东西"
+     *    就变成了"组件能看别人的东西"。
+     * 2. **值就是一段文本**（JSON 由组件自己管）。不上 TYPED 列、不做 schema：
+     *    宿主不认识组件的数据形状，硬要认识就得跟着每个组件改产品库。
+     * 3. **id 是 TEXT 不是外键到 apps**：产品库的 apps 表在 core 里，但组件数据不该
+     *    因为"应用表的一行被换掉"而失效；删应用的清理走显式调用（`removeApp`）。
+     */
+    sql: `
+      CREATE TABLE component_kv (
+        app_id TEXT NOT NULL,
+        component_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (app_id, component_id, key)
+      );
+      CREATE INDEX idx_component_kv_app ON component_kv(app_id);
+    `,
+  },
 ]
 
 type Row = Record<string, unknown>

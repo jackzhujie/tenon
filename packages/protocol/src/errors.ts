@@ -64,6 +64,15 @@ export const ErrorCode = z.enum([
   'HUB_BAD_BUNDLE',
   'HUB_BAD_SIGNATURE',
   'HUB_INSTALL_FAILED',
+
+  /**
+   * 组件碰了它没声明的能力（M6 第 4 步）。
+   *
+   * 这个错**不经过 HTTP**：它在组件自己的调用里抛，用户看到的是那个组件的报错。
+   * 之所以仍然登记在这里，是因为"权限被拒"是一个需要统一措辞的概念 ——
+   * 将来做第三方上架审查时，靠它就能统计"哪些组件在越权"。
+   */
+  'COMPONENT_PERMISSION_DENIED',
 ])
 export type ErrorCode = z.infer<typeof ErrorCode>
 
@@ -116,6 +125,7 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['HUB_BAD_BUNDLE', 422],
   ['HUB_BAD_SIGNATURE', 422],
   ['HUB_INSTALL_FAILED', 500],
+  ['COMPONENT_PERMISSION_DENIED', 403],
   ['RELEASE_NO_COMMITS', 409],
   ['RELEASE_FAILED', 500],
   // 409 而不是 500：检查没过不是系统故障，是「当前状态不允许」，用户改代码就能过

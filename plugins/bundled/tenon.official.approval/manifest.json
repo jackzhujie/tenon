@@ -6,9 +6,20 @@
   "source": "bundled",
   "minTenonVersion": "0.0.0",
   "signature": null,
-  "permissions": [],
-  "agentHints": "这个应用已经装了「审批流」（tenon.official.approval）：右下角徽标里有待审清单，提交/通过/驳回都在那里。**不要自己写审批状态机**；要把某条业务记录接进审批，调用它的 submit 方法即可。注意：v1 的审批数据只存在于服务端内存（进程重启即失），不要把它当成持久化的业务数据。",
-  "pricing": { "type": "free" },
-  "facets": { "server": "server.js", "web": "web.js" },
-  "slots": ["app.shell.overlay", "app.api"]
+  "permissions": [
+    "db:read",
+    "db:write"
+  ],
+  "agentHints": "这个应用已经装了「审批流」（tenon.official.approval）：右下角徽标里有待审清单，提交/通过/驳回都在那里。**不要自己写审批状态机**；要把某条业务记录接进审批，调用它的 submit 方法即可。数据存在组件自己的键值空间里（按应用与组件隔离），重启不会丢；要清空用它的 reset 方法。",
+  "pricing": {
+    "type": "free"
+  },
+  "facets": {
+    "server": "server.js",
+    "web": "web.js"
+  },
+  "slots": [
+    "app.shell.overlay",
+    "app.api"
+  ]
 }

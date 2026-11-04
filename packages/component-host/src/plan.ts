@@ -103,6 +103,12 @@ export interface LoadTarget {
     readonly web: string | null
     readonly worker: string | null
   }
+  /**
+   * 清单里声明的权限。**宿主据此决定交给组件什么能力** ——
+   * 所以它必须和"要加载谁"一起交出来，而不是让激活阶段再去读一遍清单
+   * （读第二遍就有第二个真相）。
+   */
+  readonly permissions: readonly string[]
 }
 
 export interface PlanResult {
@@ -473,6 +479,7 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
         version: item.component.version,
         dir: item.dir,
         facets: item.component.facets,
+        permissions: item.manifest.permissions,
       }
     }),
     problems,

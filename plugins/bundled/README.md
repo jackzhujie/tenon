@@ -28,7 +28,7 @@ M5 第 3 步放第一个组件（AI 小助手）；在那之前这里是空的�
 |---|---|---|---|
 | `tenon.official.ai-assistant` | 悬浮球 + 对话（宿主注入模型能力，组件自己没有工具） | `app.shell.overlay` | 是 |
 | `tenon.official.csv-export` | 抓页面上的 `<table>` 导成 CSV（Excel 直接打开） | `app.page.header` | 否 |
-| `tenon.official.approval` | 提交 → 通过/驳回（v1 数据在服务端内存，重启即失） | `app.shell.overlay` | 否 |
+| `tenon.official.approval` | 提交 → 通过/驳回（数据存在组件自己的键值空间，**活过重启**） | `app.shell.overlay` | 否 |
 
 三份契约形状完全一样（`remote()` + `variants.user.state/methods` + `export function activate({host, appId, brain, log})`），
 第二个和第三个基本是照抄第一个 —— 这就是"组件规范能不能低成本复制"的证据。
