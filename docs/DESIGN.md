@@ -1767,7 +1767,7 @@ HMR 连接断开、预览归零，看完 diff 切回去等于重启一次。逐�
 | 类型 | 内容 | 用途 | 状态 |
 |---|---|---|---|
 | **静态包** | `dist/` + `dist-server/` + `node_modules`（prod）+ `serve.mjs` + `start.sh` + `.env.example` + `README.md` | 无 Docker 环境、拷走就跑 | ✅ 已落地（`export.static`） |
-| **Docker 上下文** | 从静态包派生：`Dockerfile` + `docker-compose.yml` + `.dockerignore` | 自托管上线（主推） | ⏳ 派生品，代码不需要重写 |
+| **Docker 上下文** | 同一份构建 + `Dockerfile` + `docker-compose.yml` + `.dockerignore`（**不带宿主依赖**） | 自托管上线（主推） | ✅ 已落地（`export.docker`） |
 | Git push | 代码推到用户远端（GitHub/GitLab/Gitea） | 团队接管、CI/CD | ⏳ 本地备份库已落地（§13.3） |
 
 **先做静态包，Docker 从它派生** —— 这是一个顺序决定，不是取舍。原因：
@@ -1792,32 +1792,56 @@ pnpm + devDeps + 模板工具链 —— 那会让"两台机器上构建结果不
 而它正是导出这档要消灭的东西。
 
 ```dockerfile
-# 假定 build context 就是 export.static 的产物目录（Dockerfile 由导出时生成）
+# 由 Tenon 导出时生成。build context 就是导出的产物目录。
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production PORT=3000
-COPY . .
+
+# 三个可选的网络适配（不传 = 官方默认行为）
+ARG NPM_REGISTRY
+ARG BUILD_HTTP_PROXY
+ARG BUILD_HTTPS_PROXY
+
+COPY package.json pnpm-lock.yaml ./
+# ★ 必须锁 pnpm 9：corepack 默认装最新版（12），而 lockfile 是 pnpm 9 生成的，
+#   12 的供应链策略会拒绝它（报 "relax the policy that flagged them"，看着像依赖坏了）
+RUN if [ -n "$NPM_REGISTRY" ]; then export COREPACK_NPM_REGISTRY="$NPM_REGISTRY"; fi \
+ && corepack enable \
+ && corepack prepare pnpm@9 --activate \
+ && pnpm install --prod --frozen-lockfile${NPM_REGISTRY:+ --registry=$NPM_REGISTRY}
+
+COPY dist ./dist
+COPY dist-server ./dist-server        # 有后端时才有这一行
+COPY serve.mjs ./
+
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 CMD ["node", "serve.mjs"]
 ```
 
 ```yaml
-# docker-compose.yml（导出时生成）—— 默认即含 PostgreSQL
+# docker-compose.yml（导出时生成）—— 有后端就默认带 PostgreSQL
 services:
   db:
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: app
       POSTGRES_USER: app
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?自己设一个}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?自己设一个}   # 没有默认值：弱密码摆公网是常事
     volumes: [db:/var/lib/postgresql/data]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U app']
       interval: 5s
       retries: 10
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # 不直接读 HTTP_PROXY：那是宿主视角的地址，容器里的 127.0.0.1 指向容器自己
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
     environment:
       DATABASE_URL: postgres://app:${DB_PASSWORD}@db:5432/app
       DATABASE_POOL_MAX: 10          # 真 PG 上就是普通连接池上限

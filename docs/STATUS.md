@@ -12,7 +12,7 @@
 > + **M5 第 4–8 步**（install / remove 工具、插件页开关、另两个官方组件、组件端到端 5/5）
 > + **M5.5**（真模型验收 12/12、模型设置页与热切换、依赖安装时机、模型价格表）
 > + **M6 第 1–5 步（M6 收口）**（Hub 客户端：验签 + 原子落盘；签名索引 + 更新检查；组件商店：装/卸 + 付费门禁；
-> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**678 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**687 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -1589,6 +1589,46 @@ timeoutMs: options.timeoutMs ?? this.timeoutMs     // 脚本给的值优先
 **这一档还没有的**：Docker 上下文（从静态包派生，验证要容器运行时 → 留给 CI）、
 Git push（要凭据）、`lint` 进闸门。
 
+### 4.39 Docker 产物：那一档从七月底挂到今天，终于落了
+
+M2 第 8 步（Docker compose 产物）的阻塞原因一直写着"本机无容器运行时"。这次把运行时装上了，
+所以它不再是欠账 —— 但装的过程本身有四个坑，记在下面，换台机器还会撞。
+
+**产物**（`export.docker`，与静态包共用同一份构建）：
+
+| 文件 | 说明 |
+|---|---|
+| `Dockerfile` | `FROM node:22-alpine` + 装 prod 依赖 + `CMD ["node","serve.mjs"]` |
+| `docker-compose.yml` | 有后端时自带 `postgres:18-alpine`（`condition: service_healthy`），只映射一个端口 |
+| `.dockerignore` | 第一行就是 `node_modules` |
+
+三个决定：
+
+1. **不做多阶段构建**。静态包已经在 Tenon 那侧 `pnpm run build` 过了；在镜像里再跑一遍
+   就是两套构建环境，而"两台机器构建结果不一致"正是导出要消灭的东西。
+2. **但依赖必须在镜像里装**。产物里的 `node_modules`（如果有）来自 macOS，镜像是 linux ——
+   只要有一个原生模块，容器起来就崩，而报错看起来像应用代码的问题。所以 Docker 导出
+   **不带宿主依赖**（`target: 'docker'` 时跳过 `pnpm install --prod`）。
+3. **三个 build-arg 都是可选网络适配，不传就是官方行为**：`NPM_REGISTRY`（国内/内网装依赖）、
+   `BUILD_HTTP_PROXY` / `BUILD_HTTPS_PROXY`（企业网络出网）。
+
+**踩的四个坑**（都是"看起来像代码坏了"的那种）：
+
+| 坑 | 症状 | 原因与修法 |
+|---|---|---|
+| `corepack enable` 装的是**最新** pnpm | `pnpm install` 报 "relax the policy that flagged them"，像依赖有问题 | 模板 package.json 没有 `packageManager` 字段 → corepack 装 pnpm 12，而 lockfile 是 pnpm 9 生成的，12 的供应链策略直接拒绝。Dockerfile 里 `corepack prepare pnpm@9 --activate` |
+| compose 的 `${HTTP_PROXY:-}` | 容器里 `pnpm install` 报 `tunnel error` | 它自动读到了**宿主**的 `127.0.0.1:PORT`，而容器里的 127.0.0.1 指向容器自己。改成不读宿主变量，只认显式的 `BUILD_HTTP_PROXY` |
+| 容器直连 registry | `UND_ERR_CONNECT_TIMEOUT` | 这个网络下直连 4.3MB 要 2 分钟（35KB/s），pnpm 一定超时。国内镜像源 0.3 秒 |
+| 模板字符串里的反引号 | `TS1005: ';' expected`，看着像别处坏了 | 注释里写 `` `corepack enable` `` 会提前结束模板。**这个坑我踩了第三次** |
+
+**验证**（`pnpm e2e:docker`，12 项）：建应用 → 导出 → 断言产物形状（没有 `node_modules`、
+compose 只映射一个端口、纯前端不生成 db 服务）→ `docker compose up -d --build` →
+容器起来 → 首页返回 HTML → `down -v --rmi local` 干净拆掉。
+
+**它会在缺 postgres 镜像时降级**并明说：`postgres:18-alpine` 有 250MB，某些网络下拉不动；
+那种情况下跑纯前端应用（构建 → 镜像 → 容器 → 静态服务），并打印"数据库那条没验，
+先 `docker pull postgres:18-alpine`"。**跑能跑的那部分并说清缺什么，比一个笼统的失败有用。**
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1892,16 +1932,18 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 **收口三件**（授权模型定稿 DESIGN §21.5 / Hub 配置随包分发：`env > 随包 hub.json > 未配置` /
 `pnpm e2e:hub` 32 项从零发布）。顺带修了两个真问题：付费组件能被下载到本机、Agent 装付费组件说"找不到"。
 
-678 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 18 + e2e:export 22 + shot:settings 5 + shot:plugins 12 + shot:export
+687 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
++ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 18 + e2e:export 22 + e2e:docker 12 + shot:settings 5 + shot:plugins 12 + shot:export
 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **收口后补的一批**（盘点"还剩什么没完善"时做的）：
 §4.36 界面缺口三连 —— **应用能删了**（`app.delete` 的后端从 M1 就在，界面上一直没有入口，
 `deleteApp` 是一段没人调用的死代码）、**能改名了**、**顶栏看得见未发布版本数**；
 §4.37 脚本的 `@options` 曾被用来放大超时上限（"60 秒"其实不是 60 秒），现在在工具入口夹住；
 §4.38 **导出静态包**（`export.static`）—— 产物拷走就能跑，`e2e:export` 22 项验到"真起 PG、真跑
-`./start.sh`、`/api` 真分流"。这也是 Docker 那一档的上游（Dockerfile = `COPY 产物`）。
-**欠账**：① ~~静态包导出~~ → **已落地（§4.38）**；Docker 上下文是它的派生品，验证留给 CI（runner 自带 Docker）；
+`./start.sh`、`/api` 真分流"；
+§4.39 **Docker 构建上下文**（`export.docker`）—— M2 第 8 步从七月底挂到这里，`e2e:docker` 12 项
+在真容器里跑通（compose up → 容器 → 首页 HTML → 拆干净）。
+**欠账**：① ~~静态包导出 / Docker 上下文~~ → **两档都已落地（§4.38 / §4.39）**；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；
 ④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了“哪个角色花了多少”（聚合层看不见归属）；

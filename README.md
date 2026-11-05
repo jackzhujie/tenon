@@ -126,7 +126,7 @@ typescript」「测试红了」「超时了」必拦 —— 混成一个"不通�
 pnpm install
 pnpm dev:web                # ★ server + 前端一起起，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop            # ★ 或者直接起桌面版
-pnpm test                   # 678 项单测 / 集成测试（约 210s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 687 项单测 / 集成测试（约 210s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                  # 9 项端到端（spawn 真进程，走 HTTP + SSE）
 pnpm e2e:preview            # 16 项真机全链路（要联网装依赖）：建应用 → 起预览 → 经网关打开 → 改文件 → HMR
 pnpm e2e:inspector          # 13 项精调链路：Electron 真 Chromium 里模拟 Alt+Click（要联网）
@@ -138,6 +138,7 @@ pnpm spike:chord            # 10 项：chord 宿主（契约 / 变体 / 跨 host
 pnpm e2e:hub                # 32 项：从零发布一个组件（现场生成密钥 → 真打包 → 静态 Hub → 真 server 装进应用）
 pnpm e2e:apps               # 18 项：应用菜单（真 Chromium 里点：改名 → 删除 → 取消 → 确认 → 徽标 → 磁盘同步）
 pnpm e2e:export             # 22 项：导出静态包并**真的跑起来**（起 PGlite 顶替用户自备的 PG → ./start.sh → /api/health）
+pnpm e2e:docker             # 12 项：导出 Docker 上下文并真跑 compose（没有 docker 就 skip；缺 postgres 镜像则降级验前端）
 pnpm pack:desktop           # 打成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged # 8 项：真的起 .app、加载界面、退出后不留孤儿进程
 ```
