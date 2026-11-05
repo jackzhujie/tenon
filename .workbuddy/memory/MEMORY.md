@@ -20,9 +20,10 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 `pnpm e2e:hub` 32 项从零发布）。
 **收口后补的一批**（盘点"还剩什么没完善"）：应用能删（原来是死代码）、能改名、顶栏有
 未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
-**导出静态包**（`export.static`，产物拷走就能跑；Docker 是它的派生品）。
-全绿基线：typecheck 18 project / test **678** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
-e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** /
+**导出静态包**（`export.static`，产物拷走就能跑）+ **Docker 上下文**（`export.docker`，
+M2 第 8 步落地；compose 自带 PG，`e2e:docker` 全栈 21 项真跑 compose）。
+全绿基线：typecheck 18 project / test **688** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
@@ -80,10 +81,23 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
   装不上返回 problem 不抛 500；facet 是构建产物不进 git（忘建的表现是 Cannot find module）；
   `TENON_PLUGINS_DIR` 与 `TENON_TEMPLATES_DIR` 同坑（错的表现是"插件页空空如也"且无报错）
 - **模块脚本加载失败是静默的** → 网关插了错误捕手 `window.__tenonComponentErrors`，端到端读它
+- **`postgres:18` 的卷必须挂 `/var/lib/postgresql`**（不是 `.../data`）：18 起 PGDATA 在
+  `/var/lib/postgresql/18/docker`。挂错不报"挂载点不对"，而是入口脚本说"数据在 unused mount/volume 里"
+  拒绝启动 → db `unhealthy`、`app`（`depends_on: service_healthy`）连启动都没有
+- **colima 虚拟机里没有 DNS**：`/etc/resolv.conf` 是悬空的 systemd-resolved 链接，而 systemd-resolved
+  在这个镜像里**没装**。**坏得极隐蔽**：配了 HTTP 代理时 pull 照样成功（域名由代理解析），
+  代理一停（WorkBuddy 的代理每会话换端口）才同时报 `proxyconnect ... connection refused` 与
+  `could not resolve host`。修要先 `rm` 掉那个链接再建真文件
+- **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** → 手工加的 `registry-mirrors` 活不过重启，
+  它还会把宿主代理写进去。持久做法挂 `docker.service` 的 `ExecStartPre`（本机 `/usr/local/bin/tenon-vm-fix.sh`）
 
 ## 本机环境
 Node v22.22.2 / pnpm 9.15.9。**所有命令都要** `env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE`
-（node-language-shim 让 PGlite 慢 10 倍；Electron 被误当 node）。无 docker / `pg_dump`。
+（node-language-shim 让 PGlite 慢 10 倍；Electron 被误当 node）。无 `pg_dump`。
+**docker 现在可用**：colima（vz）+ 官方二进制，daemon 29.5.2 / compose v5.7 / buildx。
+**不要把 `/usr/local/bin` 放到 PATH 前面**（那里有 brew 的 Node 20，会顶掉项目的 Node 22，
+症状是 `No such built-in module: node:sqlite`）→ 用 `/usr/local/bin/docker` 绝对路径。
+colima 不自启，重启后先 `colima start`。
 Electron 需 `--no-sandbox`（否则 ERR_FAILED）；`npx electron` 是断链 → 用 `.pnpm/electron@<ver>/.../MacOS/Electron`。
 **本机 bash 的 `grep` 常返回空** → 查文件用 Grep 工具。`docs/PI-CHEATSHEET.md` 写代码前必查。
 `docs/reverse/`、`*.har` 仅研究，**clean-room 红线：不得搬代码/文案/提示词**。
