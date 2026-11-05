@@ -155,39 +155,56 @@ export function ReleaseDialog({
    * 导出：发布是**给自己留底**（备份库 + tag），导出是**拿出去用**。两件事在同一刻决定，
    * 所以放在同一个对话框里 —— 但导出不走 hook 的状态：产物路径只在这次对话里有意义。
    */
-  const [exporting, setExporting] = useState(false)
+  const [exporting, setExporting] = useState<false | 'static' | 'docker'>(false)
   const [exportElapsed, setExportElapsed] = useState(0)
   const [exported, setExported] = useState<{
     dir: string
     bytes: number
     files: number
     hasApi: boolean
+    target: 'static' | 'docker'
   } | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!exporting) return
+    if (exporting === false) return
     const started = Date.now()
     // 构建 + 装生产依赖，几十秒到两分钟；不给秒数用户会以为界面卡死了
     const timer = setInterval(() => setExportElapsed(Math.round((Date.now() - started) / 1000)), 500)
     return () => clearInterval(timer)
   }, [exporting])
 
-  const runExport = useCallback(async (): Promise<void> => {
-    if (appId === null) return
-    setExporting(true)
-    setExportElapsed(0)
-    setExportError(null)
-    setExported(null)
-    try {
-      const done = await rpc('export.static', { appId, installDeps: true })
-      setExported({ dir: done.dir, bytes: done.bytes, files: done.files, hasApi: done.hasApi })
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setExporting(false)
-    }
-  }, [appId])
+  const runExport = useCallback(
+    async (target: 'static' | 'docker'): Promise<void> => {
+      if (appId === null) return
+      setExporting(target)
+      setExportElapsed(0)
+      setExportError(null)
+      setExported(null)
+      try {
+        /*
+         * 两个产物共用一份静态包，区别只有两处：Docker 多三个容器文件，
+         * 且**不装宿主依赖**（镜像里装 —— 宿主 macOS、镜像 linux，架构不匹配会起来即崩）。
+         */
+        const done =
+          target === 'docker'
+            ? await rpc('export.docker', { appId })
+            : await rpc('export.static', { appId, installDeps: true })
+        setExported({
+          dir: done.dir,
+          bytes: done.bytes,
+          files: done.files,
+          hasApi: done.hasApi,
+          target: done.target,
+        })
+      } catch (err) {
+        setExportError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setExporting(false)
+      }
+    },
+    [appId],
+  )
 
   const runCheck = useCallback(async (): Promise<void> => {
     setChecking(true)
@@ -532,21 +549,31 @@ export function ReleaseDialog({
             产物路径只在这次对话里有意义，所以状态留在本组件，不进 hook。
           */}
           <div className="space-y-1.5 rounded-lg border border-line bg-panel-2 px-3 py-2.5">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11.5px] text-muted">拿去部署</span>
               <Button
                 variant="outline"
                 size="sm"
-                disabled={exporting || appId === null}
+                disabled={exporting !== false || appId === null}
                 data-tenon-action="export-static"
-                onClick={() => void runExport()}
+                onClick={() => void runExport('static')}
               >
-                {exporting ? `导出中… ${exportElapsed}s` : '导出静态包'}
+                {exporting === 'static' ? `导出中… ${exportElapsed}s` : '导出静态包'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={exporting !== false || appId === null}
+                data-tenon-action="export-docker"
+                onClick={() => void runExport('docker')}
+              >
+                {exporting === 'docker' ? `导出中… ${exportElapsed}s` : '导出 Docker'}
               </Button>
             </div>
             <p className="text-[10.5px] leading-relaxed text-faint">
-              产出一个能拷走就跑的目录：前端 + 后端 + 生产依赖，只认一个 DATABASE_URL。
-              导出会真跑一次构建（几十秒到两分钟），进度在左下角的日志里。
+              静态包：拷到有 Node 的机器上跑 start.sh（自带生产依赖）。Docker：同一份产物 +
+              Dockerfile/compose，docker compose up -d 即起，数据库也一起带。
+              两者都只认一个 DATABASE_URL。导出会真跑一次构建（几十秒到两分钟），进度在左下角日志里。
             </p>
             {exportError !== null && (
               <p className="rounded border border-bad/30 bg-[#241413] px-2 py-1.5 text-[11px] leading-relaxed text-bad">
@@ -563,7 +590,11 @@ export function ReleaseDialog({
                 </div>
                 <p className="text-[10.5px] text-faint">
                   {Math.round(exported.bytes / 1024 / 1024)}MB · {exported.files} 个文件 ·{' '}
-                  {exported.hasApi ? '含后端（迁移会自动跑）' : '纯前端'}
+                  {exported.target === 'docker'
+                    ? 'Docker 上下文（cd 进去 docker compose up -d）'
+                    : exported.hasApi
+                      ? '静态包 · 含后端（迁移会自动跑）'
+                      : '静态包 · 纯前端'}
                   。产物里的 README 写了怎么起。
                 </p>
               </div>

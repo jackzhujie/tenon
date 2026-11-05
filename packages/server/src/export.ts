@@ -54,6 +54,13 @@ export interface StaticExportOptions {
   readonly appId: string
   /** 设成 false 就只产出代码与 lock，不装依赖（测试用，也方便"我自己装"的人） */
   readonly installDeps?: boolean
+  /**
+   * `docker` = 额外生成 `Dockerfile` / `docker-compose.yml` / `.dockerignore`，
+   * 并且**不装宿主的 node_modules**（镜像是 linux，宿主是 macOS，依赖要在镜像里装）。
+   */
+  readonly target?: 'static' | 'docker'
+  /** compose 里对外映射的端口（默认 3000） */
+  readonly port?: number
   /** 每读一行输出回调一次（进度展示；也给 e2e 当观测点） */
   readonly onLog?: (line: string) => void
   /** 注入 pnpm（默认 `resolvePnpm(process.env)`）。测试里换成一个假的 */
@@ -62,6 +69,8 @@ export interface StaticExportOptions {
 
 export interface StaticExportResult {
   readonly dir: string
+  /** 这份产物是给谁用的（`static` = 拷走直接跑；`docker` = 构建上下文） */
+  readonly target: 'static' | 'docker'
   /** 产物的文件数（不含 node_modules —— 那个数没意义，几万） */
   readonly files: number
   /** 产物字节数（含 node_modules，用户关心的是"要传多大"） */
@@ -316,6 +325,8 @@ export async function exportStatic(options: StaticExportOptions): Promise<Static
   }
 
   /* 3) 生成四个文件：启动器、启动脚本、环境变量示例、部署说明 */
+  const target = options.target ?? 'static'
+  const hasLock = existsSync(join(options.repoDir, 'pnpm-lock.yaml'))
   await writeFile(join(options.outDir, 'serve.mjs'), renderServe({ hasApi }), 'utf8')
   await writeFile(join(options.outDir, 'start.sh'), renderStart({ hasApi }), { encoding: 'utf8', mode: 0o755 })
   await writeFile(join(options.outDir, '.env.example'), renderEnvExample({ hasApi }), 'utf8')
@@ -325,13 +336,28 @@ export async function exportStatic(options: StaticExportOptions): Promise<Static
       appName: options.appName,
       appId: options.appId,
       hasApi,
-      hasLock: existsSync(join(options.repoDir, 'pnpm-lock.yaml')),
+      hasLock,
     }),
     'utf8',
   )
 
-  /* 4) prod 依赖：让产物真的能"拷到服务器就跑" */
-  if (options.installDeps !== false) {
+  /*
+   * 3b) Docker 产物：三个文本文件。**依赖仍然不在宿主上装** ——
+   * 镜像是 linux、宿主是 macOS，只要有一个原生模块就会"起来即崩"，
+   * 而那种错看起来像"代码有问题"。所以 `pnpm install --prod` 写在 Dockerfile 里。
+   */
+  if (target === 'docker') {
+    await writeFile(join(options.outDir, 'Dockerfile'), renderDockerfile({ hasApi, hasLock }), 'utf8')
+    await writeFile(
+      join(options.outDir, 'docker-compose.yml'),
+      renderCompose({ appName: options.appName, hasApi, port: options.port ?? 3000 }),
+      'utf8',
+    )
+    await writeFile(join(options.outDir, '.dockerignore'), renderDockerignore(), 'utf8')
+  }
+
+  /* 4) prod 依赖：让静态包真的能"拷到服务器就跑"（Docker 产物不需要，镜像里装） */
+  if (target === 'static' && options.installDeps !== false) {
     const pnpm = resolvePnpm(env)
     const args = ['install', '--prod', '--prefer-offline', '--reporter=append-only']
     if (existsSync(join(options.outDir, 'pnpm-lock.yaml'))) args.push('--frozen-lockfile')
@@ -355,6 +381,7 @@ export async function exportStatic(options: StaticExportOptions): Promise<Static
   const measured = await measure(options.outDir, ['node_modules'])
   return {
     dir: options.outDir,
+    target,
     files: measured.files,
     bytes: measured.bytes,
     hasApi,
@@ -594,5 +621,147 @@ location / {
 
 迁移在启动时自动跑（\`migrationsRun: true\`），表结构只由 \`dist-server/api/migrations/\`
 决定 —— 不要手改库。备份就是备份那个 PostgreSQL。
+`
+}
+
+/**
+ * Dockerfile —— **从静态包派生**，不做多阶段构建。
+ *
+ * 两个容易搞反的点：
+ * 1. **构建不在镜像里做**。静态包已经在 Tenon 那侧 `pnpm run build` 过了；在镜像里再跑
+ *    一遍就是两套构建环境，而那正是「导出」要消灭的不确定性。
+ * 2. **但依赖必须在镜像里装**。产物里的 `node_modules`（如果有）来自 macOS，镜像是
+ *    linux —— 只要有一个原生模块，容器起来就崩，而报错看起来像应用代码的问题。
+ */
+export function renderDockerfile(input: { hasApi: boolean; hasLock: boolean }): string {
+  const frozen = input.hasLock ? ' --frozen-lockfile' : ''
+  const apiLayer = input.hasApi ? 'COPY dist-server ./dist-server\n' : ''
+  const healthPath = input.hasApi ? '/api/health' : '/'
+  return `# 由 Tenon 导出时生成（不是应用的源码）。
+#
+# 不做多阶段构建：静态包已经在 Tenon 那侧构建过了。
+# 依赖必须在这里装：源产物来自 macOS、镜像是 linux，只要有原生模块，拷过去的
+# node_modules 就会「起来即崩」，而那种报错看起来像应用代码坏了。
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production PORT=3000
+
+# 三个 build-arg 都是**可选的网络适配**，不传就是官方的默认行为：
+#   NPM_REGISTRY   国内/内网装依赖慢或不通时指过去（corepack 与 pnpm 各读一个变量）
+#   HTTP(S)_PROXY  企业网络出网要走代理
+ARG NPM_REGISTRY
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+
+COPY package.json ${input.hasLock ? 'pnpm-lock.yaml ' : ''}./
+# 锁 pnpm 9：corepack enable 默认装最新 pnpm（12），而 lockfile 是 pnpm 9 生成的 ——
+# pnpm 12 的供应链策略会拒绝这份 lock（报 "relax the policy that flagged them"，
+# 看起来像依赖有问题，其实是版本不匹配）。
+RUN if [ -n "$NPM_REGISTRY" ]; then export COREPACK_NPM_REGISTRY="$NPM_REGISTRY"; fi \\
+ && corepack enable \\
+ && corepack prepare pnpm@9 --activate \\
+ && pnpm install --prod${frozen}\${NPM_REGISTRY:+ --registry=$NPM_REGISTRY}
+
+COPY dist ./dist
+${apiLayer}COPY serve.mjs ./
+
+EXPOSE 3000
+# start-period 留给首次启动跑迁移：表没建好之前 ${healthPath} 连不上
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \\
+  CMD wget -qO- http://127.0.0.1:3000${healthPath} || exit 1
+CMD ["node", "serve.mjs"]
+`
+}
+
+/**
+ * docker-compose.yml —— 有后端就自带一个 PostgreSQL。
+ *
+ * `DB_PASSWORD` 用 `${DB_PASSWORD:?...}`：**必须显式给**。给一个默认值（比如 changeme）
+ * 等于把一个弱密码的数据库摆在公网上，而这恰好是最容易被跳过的一步。
+ */
+export function renderCompose(input: { appName: string; hasApi: boolean; port: number }): string {
+  /*
+   * 抬头按 hasApi 分支：纯前端应用的用户照着"先给 DB_PASSWORD"去设一个变量，
+   * 结果是给一个不存在的数据库配密码 —— 那比不写更糟。
+   */
+  const header = input.hasApi
+    ? `# 由 Tenon 导出时生成。起法（要先给数据库密码）：
+#   DB_PASSWORD=换成你的密码 docker compose up -d
+# 看是否活着：
+#   curl -s localhost:${input.port}/api/health
+`
+    : `# 由 Tenon 导出时生成。起法：
+#   docker compose up -d
+# 看是否活着：
+#   curl -s localhost:${input.port}/
+`
+  if (!input.hasApi) {
+    return `${header}services:
+  app:
+    build:
+      context: .
+      # 宿主的 HTTP(S)_PROXY 透传给构建（空值不影响；容器里 127.0.0.1 要换成宿主名）
+      args:
+        # 不直接读 HTTP_PROXY：那是**宿主**视角的地址，容器里的 127.0.0.1 指向容器自己，
+        # 一传就变成"容器连自己"。要传就显式给 BUILD_HTTP_PROXY（宿主的可达地址）。
+        NPM_REGISTRY: \${NPM_REGISTRY:-}
+        HTTP_PROXY: \${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: \${BUILD_HTTPS_PROXY:-}
+    ports: ['${input.port}:3000']
+    restart: unless-stopped
+`
+  }
+  return `${header}services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: \${DB_PASSWORD:?先设一个，例如 export DB_PASSWORD=...}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      args:
+        # 不直接读 HTTP_PROXY：那是**宿主**视角的地址，容器里的 127.0.0.1 指向容器自己，
+        # 一传就变成"容器连自己"。要传就显式给 BUILD_HTTP_PROXY（宿主的可达地址）。
+        NPM_REGISTRY: \${NPM_REGISTRY:-}
+        HTTP_PROXY: \${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: \${BUILD_HTTPS_PROXY:-}
+    environment:
+      DATABASE_URL: postgres://app:\${DB_PASSWORD}@db:5432/app
+      # 真 PG 上这就是普通的连接池上限（它不是环境判断，别用它区分部署形态）
+      DATABASE_POOL_MAX: 10
+    ports: ['${input.port}:3000']
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db:
+`
+}
+
+/** 构建上下文里不该出现的东西。`node_modules` 排第一位：那是架构不匹配的源头 */
+export function renderDockerignore(): string {
+  return `# 依赖在镜像里装（宿主 macOS / 镜像 linux，拷过去会起来即崩）
+node_modules
+# 本机的东西不进镜像
+.env
+*.log
+# 构建不需要，但要留在目录里给 compose 读
+Dockerfile
+docker-compose.yml
+.dockerignore
+README.md
 `
 }

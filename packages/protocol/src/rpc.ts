@@ -93,6 +93,28 @@ export const ChatSubmitInput = z.object({
 export type ChatSubmitInput = z.infer<typeof ChatSubmitInput>
 
 /**
+ * 导出产物的形状（`export.static` 与 `export.docker` 共用）。
+ *
+ * 两个方法产出的是**同一份静态包**，区别只在有没有那几个容器文件、以及依赖装在哪 ——
+ * 所以返回形状必须一致，否则界面要写两套展示逻辑。
+ */
+const EXPORT_ARTIFACT = z.object({
+  /** 产物目录（绝对路径） */
+  dir: z.string(),
+  /** 这份产物给谁用：`static` = 拷走直接跑；`docker` = 构建上下文 */
+  target: z.enum(['static', 'docker']),
+  /** 文件数（不含 `node_modules` —— 那个数没意义） */
+  files: z.number().int().nonnegative(),
+  /** 产物字节数（用户关心的是"要传多大"） */
+  bytes: z.number().int().nonnegative(),
+  /** 这个应用有后端吗（决定 `start.sh` 起几个进程、compose 要不要带 db） */
+  hasApi: z.boolean(),
+  version: z.string().nullable(),
+  /** 导出时对应的提交。产物与哪一版代码对应，这件事必须能查 */
+  headSha: z.string().nullable(),
+})
+
+/**
  * "保存之后模型到底换没换" —— 每个会动模型的设置项都回这个。
  *
  * 为什么把它放进返回值：用户最常问的是"我填完了，现在能用了吗"。
@@ -451,19 +473,27 @@ export const rpcMethods = {
        */
       installDeps: z.boolean().default(true),
     }),
-    output: z.object({
-      /** 产物目录（绝对路径） */
-      dir: z.string(),
-      /** 文件数（不含 `node_modules` —— 那个数没意义） */
-      files: z.number().int().nonnegative(),
-      /** 产物字节数（含 `node_modules`，用户关心的是"要传多大"） */
-      bytes: z.number().int().nonnegative(),
-      /** 这个应用有后端吗（决定 `start.sh` 起几个进程） */
-      hasApi: z.boolean(),
-      version: z.string().nullable(),
-      /** 导出时对应的提交。产物与哪一版代码对应，这件事必须能查 */
-      headSha: z.string().nullable(),
+    output: EXPORT_ARTIFACT,
+  },
+
+  /**
+   * 导出 **Docker 构建上下文**：静态包 + `Dockerfile` + `docker-compose.yml` + `.dockerignore`。
+   *
+   * 与 `export.static` 的区别只有两处，但都是本质的：
+   * 1. **不带宿主依赖**。产物来自 macOS，镜像是 linux —— 只要有一个原生模块，
+   *    拷过去的 `node_modules` 就会"起来就崩"。依赖在 Dockerfile 里装。
+   * 2. **compose 自带 PostgreSQL**（有后端时），`DB_PASSWORD` 必须显式给。
+   *
+   * 构建与运行都发生在用户自己的机器上（`docker compose up -d`），Tenon 不代跑
+   * `docker build` —— 那要求 Tenon 知道用户有没有 Docker、且要把构建日志搬回界面。
+   */
+  'export.docker': {
+    input: z.object({
+      appId: Id,
+      /** compose 里对外映射的端口（默认 3000） */
+      port: z.number().int().min(1).max(65535).default(3000),
     }),
+    output: EXPORT_ARTIFACT,
   },
 
   /**

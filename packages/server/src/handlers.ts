@@ -559,6 +559,21 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       })
     },
 
+    /* Docker 构建上下文：同一份静态包 + 三个容器文件，依赖留给镜像里装 */
+    'export.docker': async (input) => {
+      const app = core.apps.require(input.appId)
+      const paths = appPaths(core.home, app.id)
+      return exportStatic({
+        repoDir: paths.repoDir,
+        outDir: join(paths.exportsDir, `${exportStamp()}-docker`),
+        appName: app.name,
+        appId: app.id,
+        target: 'docker',
+        port: input.port,
+        onLog: (line) => pushTenonLog(bus, app.id, 'info', '导出', line),
+      })
+    },
+
     'component.list': async (input) => {
       const app = core.apps.require(input.appId)
       const plan = await buildPlan({

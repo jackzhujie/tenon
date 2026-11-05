@@ -13,7 +13,15 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { renderEnvExample, renderReadme, renderServe, renderStart } from '../src/export.js'
+import {
+  renderCompose,
+  renderDockerfile,
+  renderDockerignore,
+  renderEnvExample,
+  renderReadme,
+  renderServe,
+  renderStart,
+} from '../src/export.js'
 
 /** 把生成的文本写盘再让 node 自己检查语法（比任何正则断言都可靠） */
 async function checkJs(source: string): Promise<{ ok: boolean; stderr: string }> {
@@ -100,5 +108,78 @@ describe('.env.example / README.md', () => {
     const source = renderReadme({ appName: 'x', appId: 'app_x', hasApi: false, hasLock: false })
     expect(source).toContain('版本可能浮动')
     expect(source).not.toContain('--frozen-lockfile`')
+  })
+})
+
+/*
+ * Docker 产物三个文件。这里守的是两条最容易搞反的：
+ * 1. **依赖在镜像里装**，不拷宿主的 node_modules（macOS → linux 的架构错会"起来即崩"）
+ * 2. **数据库密码没有默认值**（给个 changeme 等于把弱密码的库摆在公网上）
+ */
+describe('Dockerfile（从静态包派生）', () => {
+  it('有后端：COPY dist-server、健康检查打 /api/health', () => {
+    const source = renderDockerfile({ hasApi: true, hasLock: true })
+    expect(source).toContain('COPY dist-server ./dist-server')
+    expect(source).toContain('3000/api/health')
+    // 迁移要时间，start-period 不能省
+    expect(source).toContain('--start-period=60s')
+  })
+
+  it('纯前端：没有 dist-server，健康检查打 /', () => {
+    const source = renderDockerfile({ hasApi: false, hasLock: true })
+    expect(source).not.toContain('COPY dist-server')
+    expect(source).toContain('http://127.0.0.1:3000/')
+  })
+
+  it('依赖在镜像里装，而不是 COPY 宿主 node_modules', () => {
+    const source = renderDockerfile({ hasApi: true, hasLock: true })
+    expect(source).toContain('pnpm install --prod --frozen-lockfile')
+    // 关键反例：不该出现 COPY node_modules
+    expect(source).not.toContain('COPY node_modules')
+  })
+
+  it('没有 lock 文件时不写 --frozen-lockfile（那会直接失败）', () => {
+    expect(renderDockerfile({ hasApi: true, hasLock: false })).not.toContain('--frozen-lockfile')
+  })
+
+  it('单端口：只 EXPOSE 3000，启动 serve.mjs', () => {
+    const source = renderDockerfile({ hasApi: true, hasLock: true })
+    expect(source).toContain('EXPOSE 3000')
+    expect(source).toContain('CMD ["node", "serve.mjs"]')
+  })
+})
+
+describe('docker-compose.yml', () => {
+  it('有后端：自带 postgres、等 db 健康再起 app、只映射一个端口', () => {
+    const source = renderCompose({ appName: 'x', hasApi: true, port: 3100 })
+    expect(source).toContain('postgres:18-alpine')
+    expect(source).toContain('condition: service_healthy')
+    expect(source).toContain("'3100:3000'")
+    // DATABASE_URL 指向 compose 内部的服务名，不是 127.0.0.1
+    expect(source).toContain('@db:5432/app')
+  })
+
+  it('密码必须显式给（有 :? 而不是 : 默认值）', () => {
+    const source = renderCompose({ appName: 'x', hasApi: true, port: 3000 })
+    expect(source).toContain('${DB_PASSWORD:?')
+    // 反例：不该出现 ${DB_PASSWORD:-...}（那是有默认值）
+    expect(source).not.toContain('${DB_PASSWORD:-')
+  })
+
+  it('纯前端：没有 db 服务，也不需要密码', () => {
+    const source = renderCompose({ appName: 'x', hasApi: false, port: 3000 })
+    expect(source).not.toContain('postgres')
+    expect(source).not.toContain('DB_PASSWORD')
+    expect(source).toContain("'3000:3000'")
+  })
+})
+
+describe('.dockerignore', () => {
+  it('排除 node_modules（架构不匹配的源头）与 .env', () => {
+    const source = renderDockerignore()
+    expect(source.split('\n')).toContain('node_modules')
+    expect(source.split('\n')).toContain('.env')
+    // Dockerfile / compose 留在目录里给 compose 读，但不进构建上下文
+    expect(source.split('\n')).toContain('Dockerfile')
   })
 })
