@@ -1829,7 +1829,8 @@ services:
       POSTGRES_DB: app
       POSTGRES_USER: app
       POSTGRES_PASSWORD: ${DB_PASSWORD:?自己设一个}   # 没有默认值：弱密码摆公网是常事
-    volumes: [db:/var/lib/postgresql/data]
+    # 18+ 的官方镜像只认这个挂载点（PGDATA 在 /var/lib/postgresql/18/docker 下面）
+    volumes: [db:/var/lib/postgresql]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U app']
       interval: 5s

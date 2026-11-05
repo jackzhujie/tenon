@@ -159,6 +159,18 @@ describe('docker-compose.yml', () => {
     expect(source).toContain('@db:5432/app')
   })
 
+  /*
+   * postgres 18 的破坏性变更：PGDATA 从 /var/lib/postgresql/data 挪到了
+   * /var/lib/postgresql/18/docker，`VOLUME` 也改成了 /var/lib/postgresql。
+   * 挂错位置不会报"挂载点不对"，而是入口脚本发现数据在"unused mount/volume"里
+   * 然后拒绝启动 —— 容器状态是 unhealthy，看起来像数据库起不来。
+   */
+  it('卷挂在 /var/lib/postgresql（18+ 的布局，不是 .../data）', () => {
+    const source = renderCompose({ appName: 'x', hasApi: true, port: 3000 })
+    expect(source).toContain('db:/var/lib/postgresql')
+    expect(source).not.toContain('/var/lib/postgresql/data')
+  })
+
   it('密码必须显式给（有 :? 而不是 : 默认值）', () => {
     const source = renderCompose({ appName: 'x', hasApi: true, port: 3000 })
     expect(source).toContain('${DB_PASSWORD:?')

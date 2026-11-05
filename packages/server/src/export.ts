@@ -719,7 +719,10 @@ export function renderCompose(input: { appName: string; hasApi: boolean; port: n
       POSTGRES_USER: app
       POSTGRES_PASSWORD: \${DB_PASSWORD:?先设一个，例如 export DB_PASSWORD=...}
     volumes:
-      - db:/var/lib/postgresql/data
+      # 18+ 的官方镜像把 PGDATA 挪到了 /var/lib/postgresql/18/docker，
+      # 并**只认** /var/lib/postgresql 这一个挂载点。挂成 .../data 会让入口脚本判定
+      # "数据在错误的挂载点上" 然后拒绝启动（容器状态 unhealthy，日志里说得很绕）。
+      - db:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U app']
       interval: 5s

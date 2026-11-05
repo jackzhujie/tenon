@@ -12,7 +12,7 @@
 > + **M5 第 4–8 步**（install / remove 工具、插件页开关、另两个官方组件、组件端到端 5/5）
 > + **M5.5**（真模型验收 12/12、模型设置页与热切换、依赖安装时机、模型价格表）
 > + **M6 第 1–5 步（M6 收口）**（Hub 客户端：验签 + 原子落盘；签名索引 + 更新检查；组件商店：装/卸 + 付费门禁；
-> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**687 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**688 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -1620,14 +1620,23 @@ M2 第 8 步（Docker compose 产物）的阻塞原因一直写着"本机无容�
 | compose 的 `${HTTP_PROXY:-}` | 容器里 `pnpm install` 报 `tunnel error` | 它自动读到了**宿主**的 `127.0.0.1:PORT`，而容器里的 127.0.0.1 指向容器自己。改成不读宿主变量，只认显式的 `BUILD_HTTP_PROXY` |
 | 容器直连 registry | `UND_ERR_CONNECT_TIMEOUT` | 这个网络下直连 4.3MB 要 2 分钟（35KB/s），pnpm 一定超时。国内镜像源 0.3 秒 |
 | 模板字符串里的反引号 | `TS1005: ';' expected`，看着像别处坏了 | 注释里写 `` `corepack enable` `` 会提前结束模板。**这个坑我踩了第三次** |
+| `postgres:18` 的卷挂载点 | db 容器 `unhealthy`，`app` 根本没启动，`compose up` 报 `dependency failed to start` | 18 起 `PGDATA` 挪到了 `/var/lib/postgresql/18/docker`，卷必须挂 `/var/lib/postgresql`（不是 `.../data`）。第一版按 17 的写法生成，只有真跑起来才会发现 |
 
-**验证**（`pnpm e2e:docker`，12 项）：建应用 → 导出 → 断言产物形状（没有 `node_modules`、
-compose 只映射一个端口、纯前端不生成 db 服务）→ `docker compose up -d --build` →
-容器起来 → 首页返回 HTML → `down -v --rmi local` 干净拆掉。
+**验证**（`pnpm e2e:docker`，**全栈 21 项 / 只有前端 12 项**）：建应用 → 导出 → 断言产物形状
+（没有 `node_modules`、`dist-server` 在、compose 只映射一个端口、密码没有默认值）→
+`docker compose up -d --build` → db 变 healthy → app 起来 → 首页返回 HTML →
+`/api/health` 200（**迁移在容器里跑完了**）→ `/api` 真转到后端 → `down -v --rmi local` 干净拆掉。
 
-**它会在缺 postgres 镜像时降级**并明说：`postgres:18-alpine` 有 250MB，某些网络下拉不动；
-那种情况下跑纯前端应用（构建 → 镜像 → 容器 → 静态服务），并打印"数据库那条没验，
-先 `docker pull postgres:18-alpine`"。**跑能跑的那部分并说清缺什么，比一个笼统的失败有用。**
+**它按能力自动降级**：`postgres:18-alpine` 有 433MB，某些网络下拉不动；那种情况下跑纯前端应用
+（构建 → 镜像 → 容器 → 静态服务），并打印"数据库那条没验，先 `docker pull postgres:18-alpine`"。
+**跑能跑的那部分并说清缺什么，比一个笼统的失败有用。**
+
+**本机 docker 环境的两个持久坑**（都在 §5，已经做成自愈）：虚拟机里 `/etc/resolv.conf` 是悬空的
+systemd-resolved 链接，导致**根本没有 DNS**（之前 pull 能成是因为走代理，域名由代理解析 —— 所以这个
+坏点被藏了很久）；colima 每次 `start` 都会重写 `/etc/docker/daemon.json`，把 `registry-mirrors`
+吃掉。两件都挂在 `docker.service` 的 `ExecStartPre` 上（`/usr/local/bin/tenon-vm-fix.sh`），
+所以**重启虚拟机之后仍然有效**（已实测：stop → start → `docker info` 仍有镜像加速、`resolv.conf`
+仍是真文件、镜像都在）。修好之后 `postgres:18-alpine` 从"16 分钟拉不动"变成 **51 秒**。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
@@ -1811,6 +1820,9 @@ compose 只映射一个端口、纯前端不生成 db 服务）→ `docker compo
 | **链路要在 socket 建出来那一刻挂上，不能等 `open`** | `webSocketLink(socket)` 才挂 `message` 监听。等 `open` 再挂，那几十毫秒里服务端已经在发帧 —— 帧丢了、序号错位，报 `ack 2 outside 0..2`，之后调用**永不返回**（Spike 6 就是这么被咬的） |
 | **链路两端的 `principal` 形状必须一致** | 组件契约的 principal 是 `{appId}`，宿主的 `accept({principal})` 与客户端的 `upstream.principal` 都必须是这个形状；给错不会报类型错，而是组件 factory 里抛 `invalid/principal`（消息里两个 appId 还长得一样，很容易看漏）|
 | **`TENON_PLUGINS_DIR` 和 `TENON_TEMPLATES_DIR` 是同一个坑** | 加载器打进 `server.mjs` 后按 `import.meta.url` 找 `plugins/bundled` 必然找错，而表现是"插件页空空如也"、**没有任何报错**。壳必须显式指到 `<Resources>/plugins` |
+| **`postgres:18` 的卷必须挂 `/var/lib/postgresql`** | 18 起 `PGDATA` 挪到 `/var/lib/postgresql/18/docker`，`VOLUME` 也改成 `/var/lib/postgresql`。挂成 17 及以前的 `.../data` 不会报"挂载点不对"，而是入口脚本认定"数据在 unused mount/volume 里"然后拒绝启动 → db 容器 `unhealthy`，而 `app` 因为 `depends_on: service_healthy` **连启动都没有**，看着像整个 compose 坏了 |
+| **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
+| **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
 
 
 ---
@@ -1932,8 +1944,8 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 **收口三件**（授权模型定稿 DESIGN §21.5 / Hub 配置随包分发：`env > 随包 hub.json > 未配置` /
 `pnpm e2e:hub` 32 项从零发布）。顺带修了两个真问题：付费组件能被下载到本机、Agent 装付费组件说"找不到"。
 
-687 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 18 + e2e:export 22 + e2e:docker 12 + shot:settings 5 + shot:plugins 12 + shot:export
+688 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
++ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 18 + e2e:export 22 + e2e:docker 21 + shot:settings 5 + shot:plugins 12 + shot:export
 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **收口后补的一批**（盘点"还剩什么没完善"时做的）：
 §4.36 界面缺口三连 —— **应用能删了**（`app.delete` 的后端从 M1 就在，界面上一直没有入口，
@@ -1941,7 +1953,7 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 §4.37 脚本的 `@options` 曾被用来放大超时上限（"60 秒"其实不是 60 秒），现在在工具入口夹住；
 §4.38 **导出静态包**（`export.static`）—— 产物拷走就能跑，`e2e:export` 22 项验到"真起 PG、真跑
 `./start.sh`、`/api` 真分流"；
-§4.39 **Docker 构建上下文**（`export.docker`）—— M2 第 8 步从七月底挂到这里，`e2e:docker` 12 项
+§4.39 **Docker 构建上下文**（`export.docker`）—— M2 第 8 步从七月底挂到这里，`e2e:docker` 21 项
 在真容器里跑通（compose up → 容器 → 首页 HTML → 拆干净）。
 **欠账**：① ~~静态包导出 / Docker 上下文~~ → **两档都已落地（§4.38 / §4.39）**；
 ② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
