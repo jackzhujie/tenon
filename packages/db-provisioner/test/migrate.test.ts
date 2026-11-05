@@ -175,6 +175,28 @@ describe('migrateDatabase：pglite → pglite（与 pglite → postgres 同一�
     expect(count).toBe(5)
   })
 
+  it('目标库已有"迁移之后新写的数据"时，重跑仍然成立', async () => {
+    /*
+     * 旧校验是「源行数 == 目标行数」，这种情况下会把一次**正确**的重跑判成
+     * "行数不一致"，并提示"先清空目标表再迁" —— 那是在建议用户删数据。
+     * 现在按「目标(后) == 目标(前) + 实写」，并且把 on conflict 跳过的行数
+     * 如实放进报告的 `skipped`。
+     */
+    const source = await bootDb()
+    const target = await bootDb()
+    await seedSource(source)
+    await emptyTarget(target)
+    await migrateDatabase({ from: source, to: target })
+
+    await withClient(target, async (client) => {
+      await client.query(`insert into items (parent_id, title, done) values (1, '迁移之后新建的', false)`)
+    })
+
+    const again = await migrateDatabase({ from: source, to: target })
+    expect(again.totalRows).toBe(0)
+    expect(again.totalSkipped).toBe(7) // parents 2 + items 5，全都撞主键
+  })
+
   it('进度回调能画出"第几张表 / 共几张"', async () => {
     const source = await bootDb()
     const target = await bootDb()
@@ -280,7 +302,8 @@ describe('TypeORM 建出来的表也能迁（nest-api 的真实形态）', () =>
     await dataSource(target, true)
 
     const report = await migrateDatabase({ from: source, to: target })
-    expect(report.tables).toEqual([{ table: 'public.notes', rows: 2 }])
+    // `skipped` 是"目标已有同主键所以没写"的行数；第一次迁应该是 0
+    expect(report.tables).toEqual([{ table: 'public.notes', rows: 2, skipped: 0 }])
 
     // 迁完继续用 TypeORM 写（序列要对齐，否则这里会主键冲突）
     const tgtDs = await dataSource(target, false)

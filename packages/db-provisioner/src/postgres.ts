@@ -10,16 +10,23 @@
  * 3. **并发上限由连接串背后的库说话**，默认 10（原生 PG 的常规值）。
  *    这里**没有** `pool.max=1` 那个约束 —— 那是 PGlite 单会话的产物。
  *
- * 备份走 `pg_dump --format=custom`：它是 PG 官方的逻辑导出，跨版本、跨档都能导回，
- * 也是「本地 PGlite → 云 PG」迁移的落点。没装 `pg_dump` 时明确报 `DB_UNSUPPORTED`，
- * 不要静默降级成一个"看起来成功了"的假备份。
+ * 备份**不再走 `pg_dump`**（v1.2.16 改）：那个二进制在用户机器上通常不存在，
+ * 而"打了快照"只在装了 postgresql-client 的机器上成立，等于在最需要的时候（回滚）
+ * 大概率不成立。现在是与跨档迁移同一套做法的纯 JS 逻辑快照（`rows-snapshot.ts`）：
+ * 结构与代码同源（migrations 两档都跑），只搬数据。
+ * 代价写在 `rows-snapshot.ts` 文件头：目标库缺表 / 缺列时会跳过并如实汇报。
  */
-import { execFile } from 'node:child_process'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { promisify } from 'node:util'
 import { Client } from 'pg'
 import { TenonError } from '@tenon/protocol'
+import { redact } from './introspect.js'
+import {
+  decodeRowsSnapshot,
+  dumpRowsSnapshot,
+  encodeRowsSnapshot,
+  restoreRowsSnapshot,
+} from './rows-snapshot.js'
 import type {
   DatabaseProvider,
   DbSnapshot,
@@ -28,24 +35,14 @@ import type {
   PostgresProviderOptions,
 } from './types.js'
 
-const run = promisify(execFile)
 const PROBE_TIMEOUT_MS = 8_000
-const DUMP_TIMEOUT_MS = 5 * 60 * 1000
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
 /** 连接串进日志前必须洗掉密码，否则一条 preview 日志就能泄一个云库 */
-export function redactUrl(url: string): string {
-  try {
-    const parsed = new URL(url)
-    if (parsed.password !== '') parsed.password = '***'
-    return parsed.toString()
-  } catch {
-    return '<无法解析的连接串>'
-  }
-}
+export const redactUrl = redact
 
 export class PostgresProvider implements DatabaseProvider {
   readonly mode = 'postgres' as const
@@ -96,11 +93,11 @@ export class PostgresProvider implements DatabaseProvider {
       await client.connect()
       const result = await client.query<{ version: string }>('select version() as version')
       this.state = 'ready'
-      this.log(`[tenon] 应用库就绪（${redactUrl(this.options.connectionString)}：${result.rows[0]?.version.split(',')[0] ?? 'PG'}）`)
+      this.log(`[tenon] 应用库就绪（${redact(this.options.connectionString)}：${result.rows[0]?.version.split(',')[0] ?? 'PG'}）`)
     } catch (err) {
       this.state = 'failed'
       // 用户看到的那句话必须是完整的：只说 "connect ECONNREFUSED" 等于让人猜是哪个库
-      const message = `连不上这个 PostgreSQL（${redactUrl(this.options.connectionString)}）：${messageOf(err)}`
+      const message = `连不上这个 PostgreSQL（${redact(this.options.connectionString)}）：${messageOf(err)}`
       this.error = message
       throw new TenonError('DB_START_FAILED', message, { mode: this.mode })
     } finally {
@@ -117,27 +114,29 @@ export class PostgresProvider implements DatabaseProvider {
     if (this.state !== 'ready') {
       throw new TenonError('DB_NOT_READY', '数据库没探活成功，不能打快照', { mode: this.mode })
     }
-    const target = file ?? join(this.snapshotsDir(), `${Date.now()}.dump`)
-    await mkdir(dirname(target), { recursive: true })
+    const target = file ?? join(this.snapshotsDir(), `${Date.now()}.rows.json.gz`)
+    const client = await this.connect()
     try {
-      await run('pg_dump', ['--format=custom', `--file=${target}`, `--dbname=${this.options.connectionString}`], {
-        timeout: DUMP_TIMEOUT_MS,
+      const snapshot = await dumpRowsSnapshot(client, {
+        source: redact(this.options.connectionString),
       })
+      const bytes = await encodeRowsSnapshot(snapshot)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, bytes)
       const info = await stat(target)
+      this.log(
+        `[tenon] 应用库快照 ${target}（${snapshot.tableCount} 张表 / ${snapshot.rowCount} 行 / ` +
+          `${(info.size / 1024).toFixed(1)}KB）`,
+      )
       return { mode: this.mode, file: target, bytes: info.size, createdAt: Date.now() }
     } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') {
-        throw new TenonError(
-          'DB_UNSUPPORTED',
-          '这台机器上没有 pg_dump，打不了原生 PG 的快照。装 postgresql-client 后重试，或改用 pglite 档。',
-          { mode: this.mode },
-        )
-      }
-      throw new TenonError('DB_DUMP_FAILED', `pg_dump 失败：${messageOf(err)}`, {
+      if (err instanceof TenonError) throw err
+      throw new TenonError('DB_DUMP_FAILED', `快照失败：${messageOf(err)}`, {
         mode: this.mode,
         file: target,
       })
+    } finally {
+      await client.end().catch(() => undefined)
     }
   }
 
@@ -145,25 +144,35 @@ export class PostgresProvider implements DatabaseProvider {
     if (this.state !== 'ready') {
       throw new TenonError('DB_NOT_READY', '数据库没探活成功，不能还原', { mode: this.mode })
     }
+    const bytes = await readFile(snapshot.file)
+    const file = await decodeRowsSnapshot(bytes)
+    const client = await this.connect()
     try {
-      await run(
-        'pg_restore',
-        ['--clean', '--if-exists', '--no-owner', `--dbname=${this.options.connectionString}`, snapshot.file],
-        { timeout: DUMP_TIMEOUT_MS },
-      )
-      this.log(`[tenon] 应用库已还原到 ${snapshot.file}`)
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') {
-        throw new TenonError('DB_UNSUPPORTED', '这台机器上没有 pg_restore，还原不了原生 PG 的快照', {
-          mode: this.mode,
-        })
+      const report = await restoreRowsSnapshot(client, file, this.log)
+      // 跳过的东西必须出现在日志里：「还原成功」但少了一张表，用户得能看见
+      if (report.skippedTables.length > 0) {
+        this.log(
+          `[tenon] 快照里有 ${report.skippedTables.length} 张表在当前库不存在，已跳过：${report.skippedTables.join(', ')}`,
+        )
       }
-      throw new TenonError('DB_RESTORE_FAILED', `pg_restore 失败：${messageOf(err)}`, {
+      for (const dropped of report.droppedColumns) {
+        this.log(`[tenon] ${dropped.table} 的列 ${dropped.columns.join(', ')} 已不在当前库里，跳过`)
+      }
+      this.log(`[tenon] 应用库已还原到 ${snapshot.file}（${report.totalRows} 行）`)
+    } catch (err) {
+      if (err instanceof TenonError) throw err
+      throw new TenonError('DB_RESTORE_FAILED', `还原快照失败：${messageOf(err)}`, {
         mode: this.mode,
         file: snapshot.file,
       })
+    } finally {
+      await client.end().catch(() => undefined)
     }
+  }
+
+  private connect(): Promise<Client> {
+    const client = new Client({ connectionString: this.options.connectionString })
+    return client.connect().then(() => client)
   }
 
   private snapshotsDir(): string {

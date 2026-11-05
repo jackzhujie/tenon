@@ -36,7 +36,7 @@ export interface DbStatus {
   readonly error: string | null
 }
 
-/** 一次整库快照。`pglite` 是数据目录归档，`postgres` 是 `pg_dump --format=custom` */
+/** 一次整库快照。`pglite` 是数据目录归档（tar.gz），`postgres` 是纯 JS 行快照（rows.json.gz） */
 export interface DbSnapshot {
   readonly mode: DbMode
   /** 绝对路径 */

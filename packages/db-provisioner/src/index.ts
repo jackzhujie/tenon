@@ -18,9 +18,19 @@ export type {
   PostgresProviderOptions,
   ProviderOptions,
 } from './types.js'
+export { probePostgres, withPostgres, type PgClient } from './client.js'
 export { createPgliteProvider, PgliteProvider } from './pglite.js'
 export { createPostgresProvider, PostgresProvider, redactUrl } from './postgres.js'
 export { DatabaseManager, type DatabaseManagerOptions } from './manager.js'
+export {
+  decodeRowsSnapshot,
+  dumpRowsSnapshot,
+  encodeRowsSnapshot,
+  restoreRowsSnapshot,
+  type RowsRestoreReport,
+  type RowsSnapshotFile,
+  type SnapshotTable,
+} from './rows-snapshot.js'
 export {
   migrateDatabase,
   orderTables,

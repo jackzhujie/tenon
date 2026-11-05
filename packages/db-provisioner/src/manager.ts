@@ -167,8 +167,14 @@ export class DatabaseManager {
     const running = wasReady ? provider : await this.acquire(appId)
     try {
       await mkdir(dir, { recursive: true })
-      const ext = this.dbMode === 'postgres' ? 'dump' : 'tar.gz'
-      const snapshot = await running.dump(join(dir, `db.${ext}`))
+      /*
+       * 扩展名带出档位信息：`.tar.gz` 是 pglite 的数据目录归档，
+       * `.rows.json.gz` 是 postgres 档的纯 JS 行快照（`findSnapshot` 靠它判档位）。
+       * 旧版用 `.dump`（`pg_dump --format=custom`），还原时会明确报"格式不认识"，
+       * 不会把两种格式混着读。
+       */
+      const name = this.dbMode === 'postgres' ? 'db.rows.json.gz' : 'db.tar.gz'
+      const snapshot = await running.dump(join(dir, name))
       this.options.log?.(`[tenon] 库快照 ${sha.slice(0, 7)}（${(snapshot.bytes / 1024 / 1024).toFixed(1)}MB）`)
       return snapshot
     } finally {
@@ -192,7 +198,8 @@ export class DatabaseManager {
     try {
       const info = await stat(file)
       return {
-        mode: name.endsWith('.dump') ? 'postgres' : 'pglite',
+        // 只有 pglite 的归档叫 db.tar.gz；其余（含旧的 db.dump）一律按 postgres 档算
+        mode: name.endsWith('.tar.gz') ? 'pglite' : 'postgres',
         file,
         bytes: info.size,
         createdAt: info.mtimeMs,
@@ -209,8 +216,8 @@ export class DatabaseManager {
    * 1. **调用方负责先把预览停掉。** `pglite` 的 `restore()` 会销毁实例重建，
    *    这时候 Nest 进程还连着的话，它会看到连接被掐断并开始刷错误日志 ——
    *    数据本身不会坏，但日志面板会红一片，用户以为出了大事。
-   * 2. **档位不匹配直接拒绝。** 拿一个 `pglite` 的 tar.gz 去 `pg_restore` 只会得到
-   *    一句看不懂的 "input file appears to be a text format dump"，不如在这里说清楚。
+   * 2. **档位不匹配直接拒绝。** 拿一个 `pglite` 的 tar.gz 去当行快照解，只会得到
+   *    一句"这不是一份 Tenon 的库快照（gzip 解不开）"，不如在这里说清楚。
    */
   async restoreSnapshot(appId: string, snapshot: DbSnapshot): Promise<void> {
     if (snapshot.mode !== this.dbMode) {

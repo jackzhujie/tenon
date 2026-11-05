@@ -196,6 +196,7 @@ describe('postgres 档', () => {
     expect(redactUrl('postgres://app:s3cret@db:5432/app?sslmode=disable')).toBe(
       'postgres://app:***@db:5432/app?sslmode=disable',
     )
-    expect(redactUrl('不是 URL')).toBe('<无法解析的连接串>')
+    // 与迁移那边的 redact 合并成一个函数之后，这里的文案也跟着统一（原来是 `<>`）
+    expect(redactUrl('不是 URL')).toBe('(无法解析的连接串)')
   })
 })
