@@ -12,7 +12,7 @@
 > + **M5 第 4–8 步**（install / remove 工具、插件页开关、另两个官方组件、组件端到端 5/5）
 > + **M5.5**（真模型验收 12/12、模型设置页与热切换、依赖安装时机、模型价格表）
 > + **M6 第 1–5 步（M6 收口）**（Hub 客户端：验签 + 原子落盘；签名索引 + 更新检查；组件商店：装/卸 + 付费门禁；
-> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**688 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
+> 组件持久化；**授权模型定稿 + Hub 配置随包分发 + `pnpm e2e:hub` 从零发布 32 项**）：**695 个测试** + 9 项端到端冒烟 + 16 项预览 e2e + 13 项精调 e2e（真 Chromium 里模拟 Alt+Click）+
 > 44 项改动/回滚与发布 e2e（发布那条用系统 git 当裁判：`fsck --strict` + `clone`）+ 9 项自验收 e2e（真 Electron 里点页面）
 > + 全栈 e2e + 8 项桌面冒烟全绿；`pnpm dev:web`、`pnpm e2e:fullstack` 与打包后的 `Tenon.app` 都实测走通。**M2 / M3 已收口**）
 
@@ -257,8 +257,8 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 5 | 桌面版自带包管理器（不再依赖系统 `pnpm`） | ✅ | `packages/gateway/src/deps.ts` + `apps/desktop/{build.mjs,electron-builder.yml}` |
 | 6a | **日志/错误面板**：LogStore + 三来源汇流 + `app.log` SSE + 模板侧零依赖上报 | ✅ | `packages/gateway/src/logs.ts`、`apps/web/src/features/logs/LogPanel.tsx`、模板 `src/tenon-{log,boundary}` |
 | 6b | **runtime SDK**：`@tenon/runtime` 源码分发（异常上报 / 错误边界 / Nest 过滤器）+ 漂移测试 | ✅ | `packages/runtime-sdk/`（`src/browser`、`src/nest`、`scripts/sync-templates.mjs`） |
-| 7 | **跨档迁移**：`pglite → postgres` 纯 JS 逻辑拷贝（v1.2.9 变更，原 `pg_dump` 方案因用户机器无二进制而废弃） | ✅ 逻辑已验；真 PG 未实测 | `packages/db-provisioner/src/migrate.ts` |
-| 8 | Docker compose 产物（多阶段 + `postgres:18-alpine`） | ⏸ **用户决定先跳过**（本机无容器运行时，不产出未验证文件） | 模板 `Dockerfile` / `compose.yml`（欠账） |
+| 7 | **跨档迁移**：`pglite → postgres` 纯 JS 逻辑拷贝（原 `pg_dump` 方案因用户机器无二进制而废弃） | ✅ 逻辑 + **真 PG** 都已实测（§4.40，`e2e:postgres`） | `packages/db-provisioner/src/migrate.ts` |
+| 8 | **Docker 构建上下文**（不做多阶段：静态包已构建过 + `postgres:18-alpine`） | ✅ §4.39（`e2e:docker` 21 项真跑 compose） | `packages/server/src/export.ts` 的 `renderDockerfile` / `renderCompose` |
 
 **M3 精调与版本**
 
@@ -437,12 +437,13 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 - **Docker 产物 / 静态包导出**：前者阻塞在"本机无容器运行时"，后者要跑 `vite build` 再打包产物
 - **质量门禁**（lint / typecheck / 测试）：现在只查"有提交"与"工作区干净"
 
-> 备份库会累积：一个应用一个裸库，每次发布写增量对象。**暂未做清理** —— 生成应用是几十个文本文件，
-> 历史几十轮的体积也只有几 MB。`app.delete` 时备份库**不会**一起删（那是用户可能还想留的交付物），
-> 需要时手动删 `~/.tenon/backups/<appId>.git`。
+> 备份库会累积：一个应用一个裸库，每次发布写增量对象。**单个应用内的历史没做清理** —— 生成应用是
+> 几十个文本文件，几十轮也就几 MB，不值得为它写一套 GC。但**应用删除时备份库会一起删**（§4.36）：
+> 应用不存在之后界面上没有任何入口能 clone 它，留着就是一个没人能访问、却占着完整历史的孤儿目录。
 
-> 已知欠账（有环境就能补）：Docker compose 产物（M2 第 8 步）；
-> `pglite → 真 PG` 的迁移端到端；`pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）；
+> 已知欠账（有环境就能补）：~~Docker compose 产物（M2 第 8 步）~~ → 已落地（§4.39）；
+> `pglite → 真 PG` 的**迁移**端到端（逻辑已验，真 PG 没实测 —— 现在有 docker 了可以补）；
+> `pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）；
 > `SelectionContext.screenshot` 字段留了没填（Electron `capturePage` 或 iframe 里 canvas）。
 >
 > **7b 的覆盖缺口（如实记）**：三条路径各自都验了 —— 库快照与还原用真 PGlite（`snapshot.test.ts`）,
@@ -1638,6 +1639,51 @@ systemd-resolved 链接，导致**根本没有 DNS**（之前 pull 能成是因�
 所以**重启虚拟机之后仍然有效**（已实测：stop → start → `docker info` 仍有镜像加速、`resolv.conf`
 仍是真文件、镜像都在）。修好之后 `postgres:18-alpine` 从"16 分钟拉不动"变成 **51 秒**。
 
+### 4.40 真 PostgreSQL：迁移搬得过去，快照也退得回来
+
+这一档以前一直写着"本机没有 Docker / 没有 PG，所以没实测"。装好 Docker 之后补上，
+顺便把 `postgres` 档快照里那个 `pg_dump` 依赖彻底去掉 —— 因为一验就发现它不是"待补"，
+而是"在用户机器上基本不会成立"。
+
+**先说清楚原来缺什么**（不是缺测试，是缺两件事）：
+
+| | 原来的状态 | 为什么不行 |
+|---|---|---|
+| 跨档迁移 | `pglite → pglite` 验过（真协议、真 SQL，但同一个引擎） | `information_schema.columns` 的 `is_identity` / `identity_generation`、`pg_get_serial_sequence()`、`setval()` 对 identity 序列的效果，三处都可能与真 PG 有差异；只要有一处不同，就是"迁移全绿、用户点新建 500" |
+| 发布档快照 | `pg_dump --format=custom` + `pg_restore` | 用户有 PG **服务器**不等于本机装了 `pg_dump` **客户端**；而这个功能只在回滚那一刻才被用上 —— 那时报 `DB_UNSUPPORTED` 等于它不存在 |
+
+**改法**：
+
+1. `rows-snapshot.ts`（纯 JS）：逐表读出 → 自描述 gzip JSON（`format` / `version` / `tables[columns,rows]`）；
+   还原 = **一个事务**里按外键逆序 `delete`、正序 `insert`、`setval` 对齐序列。
+   不做 `TRUNCATE ... CASCADE`：那会连**不在快照里**的引用表一起清空，等于替用户删数据。
+2. 迁移的校验语义改了：**`目标(后) == 目标(前) + 实写`**。原来是「源 == 目标」，
+   在"目标库已有迁移之后新写的数据"时会把一次**正确**的重跑判成失败，
+   提示还是"先清空目标表再迁"—— 那是在建议用户删数据。现在 `on conflict` 跳过的行数
+   如实进报告的 `skipped`（`totalSkipped` 汇总）。
+3. 内省（表 / 列 / 外键 / 行数）抽成 `introspect.ts` 一份，迁移与快照共用 ——
+   否则迟早出现"迁移认得生成列、快照不认得"这种只修一半的偏差。
+
+**验证**（`pnpm e2e:postgres`，31 项，真 `postgres:18-alpine` 容器）：
+起真 PG → PGlite 建 4 张表（identity ALWAYS / 生成列 / serial / FK 父子 / 自引用树 /
+jsonb / `text[]` / bytea / 中文与 emoji / NULL）→ 真 PG 建同构表 → 迁移 →
+在**真库上**验生成列由库算、numeric 精度、数组与 jsonb 原样、bytea 十六进制一致、
+timestamptz 是 Date、NULL 仍是 NULL、树搬得过去 → 新建记录 id 续号（serial 4 / identity 3）→
+重跑幂等（写 0 行、跳过 11 行、行数不变）→ 缺表时明确报错并指名 →
+快照 dump → 清空并重写 → restore → 值逐列一致、序列继续往后。
+
+单测 7 项（PGlite 顶替真 PG，12s）：快照形状（生成列不进快照、bytea 打了标）、
+还原后 jsonb/数组/bytea/时间戳逐列一致、序列对齐、缺表跳过、格式不认识时明确报错、
+删了一列时**值不错位**。
+
+**这轮抓到的一个真 bug**（最危险的那种，写在 §5）：删掉一列后，插入按"行数组前 N 个值"
+取值，于是整行数值往前错一位 —— 类型相容就是**静默写进错误的列**，类型不容才报
+`malformed array literal`。修法是按**列名取下标**（`indexes = columns.map(name => table.columns.indexOf(name))`）。
+
+**还没覆盖的**：快照对超大库（百万行级）会把整库读进内存，没有流式 / 分片；
+`bytea` 走 base64 会比原体积大 33%；这些在"生成应用"的量级（几十张表、几万行）不是问题，
+但换到数据导入场景要重做。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1823,6 +1869,8 @@ systemd-resolved 链接，导致**根本没有 DNS**（之前 pull 能成是因�
 | **`postgres:18` 的卷必须挂 `/var/lib/postgresql`** | 18 起 `PGDATA` 挪到 `/var/lib/postgresql/18/docker`，`VOLUME` 也改成 `/var/lib/postgresql`。挂成 17 及以前的 `.../data` 不会报"挂载点不对"，而是入口脚本认定"数据在 unused mount/volume 里"然后拒绝启动 → db 容器 `unhealthy`，而 `app` 因为 `depends_on: service_healthy` **连启动都没有**，看着像整个 compose 坏了 |
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
+| **快照还原不能"按行数组前 N 个值"取值** | 快照之后如果 `drop column` 过，保留的列不再是行数组的前 N 个 —— 按位置取会让整行**往前错一位**。类型相容时是**静默写进错误的列**，类型不容才报 `malformed array literal: "12.50"`（score 被写进了 labels）。必须按**列名取下标** |
+| **迁移的校验不能是"源行数 == 目标行数"** | 目标库里有迁移之后新写的数据时（或只是重跑），这个比较会把一次**正确**的迁移判成失败，提示还是"先清空目标表再迁" —— 等于建议用户删数据。正确判据是「目标(后) == 目标(前) + 实写」，`on conflict` 跳过的行数如实进报告 |
 
 
 ---
@@ -1944,8 +1992,8 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 **收口三件**（授权模型定稿 DESIGN §21.5 / Hub 配置随包分发：`env > 随包 hub.json > 未配置` /
 `pnpm e2e:hub` 32 项从零发布）。顺带修了两个真问题：付费组件能被下载到本机、Agent 装付费组件说"找不到"。
 
-688 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
-+ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 18 + e2e:export 22 + e2e:docker 21 + shot:settings 5 + shot:plugins 12 + shot:export
+695 个测试 + smoke 9 + e2e:preview 16 + e2e:inspector 13 + e2e:diff 36 + e2e:release 44 + e2e:e2e 9
++ e2e:component 5 + e2e:provider 7 + e2e:real 12 + e2e:hub 32 + e2e:apps 18 + e2e:export 22 + e2e:docker 21 + e2e:postgres 31 + shot:settings 5 + shot:plugins 12 + shot:export
 + e2e:fullstack + spike:chord 10 + 桌面包全绿。
 **收口后补的一批**（盘点"还剩什么没完善"时做的）：
 §4.36 界面缺口三连 —— **应用能删了**（`app.delete` 的后端从 M1 就在，界面上一直没有入口，
@@ -1956,7 +2004,7 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 §4.39 **Docker 构建上下文**（`export.docker`）—— M2 第 8 步从七月底挂到这里，`e2e:docker` 21 项
 在真容器里跑通（compose up → 容器 → 首页 HTML → 拆干净）。
 **欠账**：① ~~静态包导出 / Docker 上下文~~ → **两档都已落地（§4.38 / §4.39）**；
-② `postgres` 档的库快照仍依赖 `pg_dump`（缺二进制报 `DB_UNSUPPORTED`，发布档应走云厂商 PITR）；
+② ~~`postgres` 档的库快照依赖 `pg_dump`~~ → **已改成纯 JS 行快照（§4.40）**，不再需要任何二进制；
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；
 ④ 额度按应用存，没有跨应用总闸；⑤ 用量答不了“哪个角色花了多少”（聚合层看不见归属）；
 ⑥ Reviewer 的 `lint` 未接（模板没有 eslint 配置），清单也只有文本、没有结构化事件/面板；

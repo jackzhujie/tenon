@@ -1100,11 +1100,13 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 
 1. **方言一致性是本次选型的第一约束。** PGlite 不是"SQLite 的替代品"，它就是 **PostgreSQL 编译到 WASM** —— 同一份 PG 解析器、同一套类型系统、同一套 SQL 语义。所以「本地 PGlite → 发布到真 PG」**不需要改一行应用代码、不需要重写 migration**，只换连接串。这是纯 SQLite 方案给不了的（见下方"为什么不用纯 SQLite"）。
 2. **端口与生命周期归 App Gateway 管**（见 §9）。Gateway 在应用启动时按 manifest 拉起 DB（PGlite 进程内进程 / PG 用 `pg_isready` 探活）→ 注入连接串 → 起 Nest。DB 崩溃由 Gateway 重启并上报状态，前端能在 readiness 面板看到 `db: down`。
-3. **迁移与快照。** TypeORM migration 是唯一 schema 事实来源。快照分两级：PGlite 用 `dumpDataDir()` 做整库归档（对应 `exports/<releaseId>/db.tar.gz`）；发布档用 `pg_dump --format=custom`（回滚时 `pg_restore`，对应妙搭 `resetArtifactVersion` 的 `dbRestore` 开关）。**跨档迁移**（PGlite → 真 PG）走**纯 JS 逻辑拷贝**（v1.2.9 变更，见下），不走 `pg_dump` 管道。
+3. **迁移与快照。** TypeORM migration 是唯一 schema 事实来源。快照分两级：PGlite 用 `dumpDataDir()` 做整库归档（`db.tar.gz`）；发布档用**纯 JS 行快照**（`db.rows.json.gz`，v1.2.16 变更：结构与代码同源，只搬数据）。**跨档迁移**（PGlite → 真 PG）同样走**纯 JS 逻辑拷贝**（v1.2.9 变更，见下）。三处都不用 `pg_dump` 管道。
 
    > **v1.2.9 方案变更（实测驱动）**：原方案是 `pg_dump --format=custom` → `pg_restore`。落地时发现两个问题：① 本机（2026-11-01）`pg_dump not found`、`docker not found` —— 用户机器上同样不会有；一个「双击装完零安装」的产品让用户先 `brew install postgresql` 才能发布，等于把最难的一步留到最后。② 跨档迁移只需要**数据**，结构由 migrations 在目标库生成（同一份 migration 两档同跑，见 M2 第 1 步），`pg_dump` 连 DDL 一起搬反而要处理 `--no-owner`/`--no-acl`/扩展等一堆无关项。
    > 现方案 `packages/db-provisioner/src/migrate.ts`：两端都通过 PG 协议连接（PGlite 侧是 pg-gateway 暴露的真协议端），`information_schema` 拿表/列，`pg_constraint` 拿外键做拓扑排序，分批 `insert ... on conflict do nothing`，最后 `setval` 对齐序列并逐表比对 `count(*)`。**零二进制依赖，两档通用。**
-   > `pg_dump` 仍保留在 `PostgresProvider.dump()` 里用于**发布档的整库快照**（那里目标是真 PG，用户本来就有 PG 环境）。
+   > **v1.2.16 变更：发布档快照也不再依赖 `pg_dump`。** 原设计里 `PostgresProvider.dump()` 保留 `pg_dump --format=custom`，理由是"那里目标是真 PG，用户本来就有 PG 环境"。这个理由站不住：用户有 PG **服务器**不等于他的**本机**装了 `pg_dump` 客户端（云托管 PG 更是如此），而快照恰恰只在回滚那一刻才被用上 —— 那时候报 `DB_UNSUPPORTED` 等于这个功能不存在。
+   > 现方案 `rows-snapshot.ts`：用 PG 协议逐表读出来，写成一个自描述的 gzip JSON（`format` / `version` / `tables[columns,rows]`），还原时在**一个事务**里按外键逆序 `delete`、正序 `insert`，再 `setval` 对齐序列。三个已知边界都如实汇报而不是静默：目标库缺表 → 跳过并列出；快照里有、目标库没有的列 → 丢弃并列出；`bytea` 打 base64 标记（JSON 化会把 `Buffer` 变成 `{type,data}` 就写不回去了）。
+   > **迁移的校验语义也在 v1.2.16 改了**：原来是「源行数 == 目标行数」，在"目标库已有迁移之后新写的数据"时会把一次正确的重跑判成失败，还提示"先清空目标表再迁"（等于建议用户删数据）。现在按「目标(后) == 目标(前) + 实写」，`on conflict` 跳过的行数如实进报告的 `skipped`。
 4. **Docker 导出产物自带 PostgreSQL。** `docker-compose.yml` 里 `db`（postgres:18-alpine + 健康检查 + 命名卷）+ `app`（NestJS 单容器，`depends_on: service_healthy`）。用户 `docker compose up -d` 即上线，不需要外部数据库。
 
 #### 落地形态（v1.2.7，M2 第 1 步实测）
@@ -1117,7 +1119,7 @@ CREATE TABLE error_groups (                     -- 错误聚合（指纹去重�
 | `stop()` | 关实例，**保留数据目录** | 空操作（库不归我们管） |
 | `connectionString()` | `postgres://postgres:postgres@127.0.0.1:<port>/postgres` | 用户/平台给的那条 |
 | `poolMax()` | **恒为 1** | 默认 10 |
-| `dump()` / `restore()` | `dumpDataDir('gzip')` → `.tar.gz`；还原走 PGlite 自己的 `loadDataDir`（它内部解包） | `pg_dump --format=custom` / `pg_restore` |
+| `dump()` / `restore()` | `dumpDataDir('gzip')` → `.tar.gz`；还原走 PGlite 自己的 `loadDataDir`（它内部解包） | 纯 JS 行快照 → `.rows.json.gz`；还原 = 事务内按外键顺序 delete/insert + `setval`（`rows-snapshot.ts`） |
 
 四条必须记住的事：
 
@@ -2121,7 +2123,7 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 > （三来源汇流：子进程 stdout/stderr、页面经 `/__tenon/log` 同源上报、平台关键节点）+
 > `app.log` SSE 事件 + `logs.list`/`logs.clear` RPC + 模板侧零依赖上报（`tenon-log.ts` / `tenon-boundary.tsx`）+
 > `apps/web` 的 `LogPanel`（折叠底栏 / 来源筛选 / 错误高亮）。
-> **③ 已落地（v1.2.9）**：`migrateDatabase()` 纯 JS 逻辑拷贝（外键拓扑排序 / 生成列排除 / `OVERRIDING SYSTEM VALUE` / 序列 `setval` / 逐表 `count(*)` 校验），`pglite → pglite` 全链路实测 10 项（含 TypeORM 生成的表与序列）；**`pglite → 真 PG` 尚未实测（本机无 Docker/无 PG）**。
+> **③ 已落地（v1.2.9）**：`migrateDatabase()` 纯 JS 逻辑拷贝（外键拓扑排序 / 生成列排除 / `OVERRIDING SYSTEM VALUE` / 序列 `setval` / 行数校验），`pglite → pglite` 全链路实测 11 项（含 TypeORM 生成的表与序列）。**`pglite → 真 PG` 于 v1.2.16 补测（`pnpm e2e:postgres` 31 项）**：真 `postgres:18-alpine` 容器里验了生成列由库计算、numeric 精度、`text[]` / `jsonb` / `bytea` / `timestamptz`、identity 序列续号、重跑幂等，以及回退方向（纯 JS 快照 dump → 破坏 → restore）。
 > **⑤ 的 runtime SDK 半边已落地（v1.2.9）**：`packages/runtime-sdk`（`@tenon/runtime`）作为源码事实来源，`sync-templates.mjs` + 漂移测试把 `tenon-log` / `tenon-boundary` / `tenon-logger`（Nest 全局异常过滤器）拷进两个模板。
 > **仍欠：④ Docker compose 产物 —— 2026-11-01 用户决定先跳过**（本机无 `docker`/`podman`/`colima`，
 > 无法实测就不产出未验证的 Dockerfile；`templates/nest-api` 的 `Dockerfile` 与 `compose.yml` 记为已知欠账，
@@ -2610,7 +2612,7 @@ L3 必须有真实隔离：**不能给社区插件 `host.serve` 级别的能力*
 1. **pi-durable 最小闭环** ✅ 10/10：`Harness.open` + `submit` + `viewState` 流式 + `requestId` 幂等 + 自定义文档 + `taskGraph`；**流式中途 SIGKILL 后 `resume()` 把同一提交从 `placed` 跑到 `done`**（DoD 第 4 条兑现）
 2. **App Gateway 代理 HMR** ✅ 8/8：HMR update 134ms；上游换端口网关 URL 不变
 3. **源码定位插件** ✅ 7/7：改为 `data-tenon-loc`（原生）+ `data-tenon-callsite`（组合组件）双属性，9/9 定位可回溯
-4. **★ PG 两档供给互通** ⚠️ **有条件通过**：PGlite 侧全部跑通（迁移/事务/jsonb/窗口函数/递归 CTE 等 8 项方言特性），但**发现 `pool.max>1` 会导致并发事务互相回滚** → `pool.max` 定为 **1**。`pglite → 真 PG` 的数据迁移（`pg_dump` 逻辑导出）尚未实测，列入 M2。
+4. **★ PG 两档供给互通** ⚠️ **有条件通过**：PGlite 侧全部跑通（迁移/事务/jsonb/窗口函数/递归 CTE 等 8 项方言特性），但**发现 `pool.max>1` 会导致并发事务互相回滚** → `pool.max` 定为 **1**。`pglite → 真 PG` 的数据迁移已于 v1.2.16 用真容器补测（`pnpm e2e:postgres`），不再是 `pg_dump` 逻辑导出而是纯 JS 拷贝。
 
 
 > 已完成的前置验证（2026-10-31）：

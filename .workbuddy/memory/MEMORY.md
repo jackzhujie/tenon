@@ -22,8 +22,8 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
 **导出静态包**（`export.static`，产物拷走就能跑）+ **Docker 上下文**（`export.docker`，
 M2 第 8 步落地；compose 自带 PG，`e2e:docker` 全栈 21 项真跑 compose）。
-全绿基线：typecheck 18 project / test **688** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
-e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** /
+全绿基线：typecheck 18 project / test **695** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
@@ -34,7 +34,8 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 ## 已定的架构选择（推翻要重做很多）
 - server 与生成应用后端都 Fastify 5 / NestJS 11 + TS ESM；应用库 `pglite`（默认）/ `postgres`，产品库 `node:sqlite`
 - Git 一等公民（isomorphic-git 纯 JS 打进 `server.mjs`）：一轮一 commit，回滚用 `revert`，看单条用 `git.show`
-- 跨档迁移纯 JS 逻辑拷贝（不用 `pg_dump`）；`@tenon/runtime` 源码分发 + 逐字节漂移测试
+- 跨档迁移与**发布档快照**都是纯 JS（不用 `pg_dump`/`pg_restore`，用户机器没有那两个二进制）；
+  `@tenon/runtime` 源码分发 + 逐字节漂移测试
 - 发布不走 `git.push`（只走 HTTP 传输）；日志走应用自报不走 CDP；只读检索 `ls/glob/grep` 自己实现
 - 组件是**注入式**（网关注入 + 宿主 activate），应用代码零参与 → 不生成 `components.generated.ts`
 
@@ -84,6 +85,12 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 - **`postgres:18` 的卷必须挂 `/var/lib/postgresql`**（不是 `.../data`）：18 起 PGDATA 在
   `/var/lib/postgresql/18/docker`。挂错不报"挂载点不对"，而是入口脚本说"数据在 unused mount/volume 里"
   拒绝启动 → db `unhealthy`、`app`（`depends_on: service_healthy`）连启动都没有
+- **快照还原不能"按行数组前 N 个值"取值**：快照之后 `drop column` 过的话，保留的列不再是前 N 个 ——
+  按位置取会让整行往前错一位。类型相容就是**静默写进错误的列**，类型不容才报
+  `malformed array literal`。必须按列名取坐标（`columns.map(n => table.columns.indexOf(n))`）
+- **迁移的校验不能是"源行数 == 目标行数"**：目标库有迁移之后新写的数据时（或只是重跑），
+  会把一次正确迁移判成失败，还提示"先清空目标表再迁"（= 建议用户删数据）。
+  正确判据是「目标(后) == 目标(前) + 实写」，`on conflict` 跳过的行数进报告的 `skipped`
 - **colima 虚拟机里没有 DNS**：`/etc/resolv.conf` 是悬空的 systemd-resolved 链接，而 systemd-resolved
   在这个镜像里**没装**。**坏得极隐蔽**：配了 HTTP 代理时 pull 照样成功（域名由代理解析），
   代理一停（WorkBuddy 的代理每会话换端口）才同时报 `proxyconnect ... connection refused` 与
