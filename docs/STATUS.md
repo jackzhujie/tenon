@@ -2362,6 +2362,60 @@ zip 那一半已经成功（125MB），所以镜像、asar、extraResources 全�
 **Hub 与安装包都不是"技术债"**：Hub 是分发渠道（本地 bundled 组件已经能用，商店在未配置时
 明确显示"未配置"而不是坏掉）；安装包现在**能出**，卡的是签名（钱）与跨平台验证（机器）。
 
+### 4.52 安装包交给 GitHub Actions：四个产物，第一次跑抓到两个配置 bug
+
+§4.51 的结论是"安装包能出，卡的是签名（钱）与跨平台验证（机器）"。有人接着问了一句
+**"为啥不用 GitHub Actions 打包"** —— 问得对。`ci.yml` 里那句"不做三平台打包"
+说的是**可信分发**（不签名会被 Gatekeeper 拦），而**构建**是另一件事：
+Windows 的 nsis 只能在 Windows 上打（mac 上要 wine），Linux 的 AppImage 只能在 Linux 上打。
+没有这条流水线，那两个平台的安装包**永远只能停在"没产出"**，而我们手上没有那两台机器。
+
+#### 为什么单开一条 workflow，不塞进门禁
+
+- **重**：每台机器都要下一个 ~100MB 的 Electron 再打 130MB 的包。门禁的价值是
+  "最新这一次绿不绿"，不该被它拖到十几分钟。
+- **不需要每次推**：packaging 的输入是 tag / 手点，不是每行代码。
+- 触发：`push tags: v*` 或 `workflow_dispatch`；`fail-fast: false`（一份产物失败不该让
+  另外几份跟着丢）；Electron 与 electron-builder 的二进制走 cache（不缓存每次重下 ~200MB）。
+
+#### 四个产物（都验过存在与大小）
+
+| artifact | 内容 | 大小 |
+|---|---|---|
+| `tenon-mac-arm64` | `Tenon-0.0.0-arm64.dmg` + `-arm64-mac.zip` | 242MB |
+| `tenon-mac-x64` | `Tenon-0.0.0.dmg` + `-mac.zip` | 252MB |
+| `tenon-win-x64` | `Tenon Setup 0.0.0.exe`（NSIS） | 111MB |
+| `tenon-linux-x64` | `Tenon-0.0.0.AppImage` | 124MB |
+
+macOS 出两份是因为 **runner 现在是 Apple Silicon**（默认只出 arm64），而开发机与不少用户是
+Intel —— `--x64` 只是换一个 Electron 二进制（我们没有要重编的原生模块）。
+**冒烟只对宿主架构那一份做**：交叉产物在 runner 上要 Rosetta 才能跑，那是环境问题。
+
+#### 第一次跑：Windows 成功，Linux 与 macOS 各红一条 —— 都是真问题
+
+**① Linux：`executableName contains characters that cannot be safely used in file
+paths: @tenondesktop`**
+`package.json` 的 name 是 `@tenon/desktop`，electron-builder 去掉斜杠拼成可执行名，
+而 **AppImage 不允许路径里出现 `@`**。mac / win 用的是 productName，所以只有 Linux 炸。
+修法：`electron-builder.yml` 的 `linux:` 下显式 `executableName: tenon`。
+
+**② macOS：冒烟报"没有打包产物"，而包其实打出来了**
+`smoke-desktop.ts` 写死 `release/mac/Tenon.app`。electron-builder 的目录名**带架构后缀**：
+Intel 是 `mac`、Apple Silicon 是 `mac-arm64`、交叉编译是 `mac-x64`。本地一直是 Intel，
+所以这个假设从没被验证过 —— CI 上产物在 `mac-arm64/`，冒烟找不到。
+**失败的是测量工具，不是产物。** 改成按候选列表找，都没有时报错并列出找过的路径。
+
+#### 仍然没做的（如实记）
+
+- **未签名**：mac 上 Gatekeeper 会拦、Windows 上 SmartScreen 提示"未知发布者"。
+  只影响信任，不影响能不能装上试用。要做成"双击就装"需要 Apple $99/年 + Windows 代码签名证书。
+- **Windows / Linux 的产物没被启动过**：CI 上没有 GUI 会话，只有 macOS 那份跑了
+  `smoke:desktop:packaged`（真启动、有 token、退出不留孤儿）。
+- **产物只到 artifact，不进 Release**：14 天后过期。要长期归档得在 tag 上建 Release
+  （需要 `contents: write`）—— 那属于"决定发一版"的动作，等真发版时再做。
+- **这台机器下载 111MB 的 artifact 会 EOF**（和 §4.51 那个 GitHub 资产慢是同一个链路问题），
+  所以"下载下来的文件是不是有效 PE / AppImage"没有在这里验过。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -2548,6 +2602,8 @@ zip 那一半已经成功（125MB），所以镜像、asar、extraResources 全�
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
 | **"打开就自动跑"的对话框里，"上次结论"永远没机会显示** | 想加"预检结论常驻"时第一版是"在旁边多显示一块"，结果对话框一打开就真跑预检（`checking` 立刻为真），那块 UI 永远不渲染。正确的做法是**能复用就不跑**（判据：存档在 + HEAD 没变 + 工作区干净），而不是多显示一块 |
+| **Linux AppImage 的可执行名不能带 `@`** | `package.json` 的 name 是 `@tenon/desktop` 时，electron-builder 拼出 `@tenondesktop`，AppImage 直接报 `executableName contains characters that cannot be safely used in file paths`。mac/win 用 productName 所以看不出来。在 `linux:` 下显式 `executableName` |
+| **打包产物的目录名带架构后缀** | Intel 是 `release/mac`、Apple Silicon 是 `release/mac-arm64`、交叉编译是 `mac-x64`。写死 `release/mac` 在本地永远绿，到 arm64 runner 上报"没有打包产物"（而包其实在）。用候选列表 + `existsSync` |
 | **`electron-builder` 的 dmg 步骤会下载 23MB 构建工具，慢网下 600 秒超时** | 报错是 `Timeout awaiting 'request' for 600000ms`，看着像配置坏，其实 zip 那一半已经成功了。设 `ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/` 即可（GitHub 资产在这台机器上 2KB 要 10.7 秒，镜像 0.43 秒） |
 | **`--dir` 不是打包，`dist` 才是** | `electron-builder --dir` 只解包（产出 `.app`，给冒烟用）；安装包要去掉 `--dir`。两个档位分别叫 `pack:desktop` 与 `dist:desktop` |
 | **用字符串拼 `file://` 去和 `import.meta.url` 比，在 Windows 上永远为假** | macOS 是 `file:///Users/…`，Windows 是 `file:///D:/…` 而拼出来是 `file://D:\…`（盘符、反斜杠、少一个斜杠）。后果是**静默什么都不做**：脚本不干活、不打印、退出码 0。一律用 `pathToFileURL(argv[1]).href` |

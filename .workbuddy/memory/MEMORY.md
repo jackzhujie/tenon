@@ -35,7 +35,7 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
 `install_component`/`remove_component`/插件页 → 真 Chromium 端到端。
 **欠账**（M1–M6 计划内已清）：真远端 push、**真 Hub 未上线**（静态托管/域名/缓存）、
-额度无跨应用总闸、**无签名/公证**（`.dmg` 能出了，见 §4.51）、Windows 安装包未产出、
+额度无跨应用总闸、**无签名/公证**（四个平台的安装包在 GH Actions 上能出，见 §4.52；未签名）、Windows/Linux 产物未被真启动过、
 DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§4.49）。
 
 ## 已定的架构选择（推翻要重做很多）
@@ -114,6 +114,13 @@ DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§
   盘体积先跑 `esbuild --metafile` 看 `bytesInOutput`
 - **`build:plugins` 用 `minify + keepNames`**：3.4MB→1.6MB（−53%）。全 minify 只多省 40KB
   但抹掉函数名 → 组件异常堆栈没法看。不做 sourcemap（.map 会打进 Hub 包）
+- **Linux AppImage 的可执行名不能带 `@`**：package name 是 `@tenon/desktop` 时拼出
+  `@tenondesktop` → `executableName contains characters that cannot be safely used in
+  file paths`。mac/win 用 productName 所以看不出来 → `linux.executableName: tenon`
+- **打包产物目录带架构后缀**：Intel `release/mac`、Apple Silicon `mac-arm64`、交叉 `mac-x64`。
+  写死 `release/mac` 在本地永远绿、到 arm64 runner 上报"没有打包产物"
+- **安装包走单独一条 workflow**（`desktop.yml`，tag 或手点）：打包慢且重（每台下 100MB
+  Electron），不该塞进每次 push 的门禁。macOS runner 是 arm64 → 用 `--x64` 交叉再出一份
 - **`electron-builder --dir` 不是打包**：它只解包出 `.app`（给冒烟用）。安装包要去掉 `--dir`
   （目标在 `electron-builder.yml` 里早配好：dmg/zip/nsis/AppImage）。两个档位：
   `pack:desktop`（--dir）与 `dist:desktop`

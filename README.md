@@ -94,7 +94,9 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 
 **还差什么**（完整清单与理由见 [STATUS.md](docs/STATUS.md) 的欠账段）：
 真 Hub 未上线（静态托管 / 域名 / CDN 缓存）、真远端 push 要凭据、
-三平台打包与公证要 Apple 账号（$99/年）、
+**签名与公证**（安装包能打出来了，但未签名：mac 会被 Gatekeeper 拦、Windows 会弹
+"未知发布者"，要 Apple $99/年 + Windows 代码签名证书）、
+Windows / Linux 的产物还没被真启动过（CI 上没有 GUI）、
 跨应用用量有汇总但**没有**全局上限（看得见 ≠ 拦得住）。
 
 ## 开发与验证
@@ -146,6 +148,19 @@ pnpm dist:desktop   # 同上 + dmg / zip（要分发给别人时用；macOS 上�
 **不需要任何外部运行环境**：Node 不用装（用 Electron 二进制 + `ELECTRON_RUN_AS_NODE` 跑
 `server.mjs`）、pnpm 随包（`Resources/server/node_modules/pnpm`）、数据库是 PGlite 的 WASM
 （`pglite.wasm` 也在包里）。`pack:desktop` 会审计并按平台列出包内的 `.node` 文件。
+
+**三个平台的安装包在 CI 上打**（[`.github/workflows/desktop.yml`](.github/workflows/desktop.yml)）：
+推 `v*` tag 或手动 `workflow_dispatch`，产出四个 artifact ——
+
+| artifact | 内容 |
+|---|---|
+| `tenon-mac-arm64` | `Tenon-<ver>-arm64.dmg` + `.zip` |
+| `tenon-mac-x64` | `Tenon-<ver>.dmg` + `.zip`（交叉编译，给 Intel 机器） |
+| `tenon-win-x64` | `Tenon Setup <ver>.exe`（NSIS） |
+| `tenon-linux-x64` | `Tenon-<ver>.AppImage` |
+
+macOS 那份会在 CI 里**真启动一次**（`smoke:desktop:packaged`）；Windows / Linux 的
+runner 没有 GUI 会话，那边只验"打得出来"。产物保留 14 天，不进 Release。
 
 实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 
