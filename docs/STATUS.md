@@ -204,7 +204,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | `docs/ARCHITECTURE.md` | 一分钟速览 + 四条原则 | 给别人介绍时 |
 | `docs/PI-CHEATSHEET.md` | pi 全生态真实 API（读源码所得）| **写任何 pi 相关代码前必查**（比官方文档全）|
 | `docs/PROTOCOL.md` | 妙搭行为规格（clean-room）| 不确定某个交互该怎么做时 |
-| `docs/REVERSE_ENGINEERING.md` | 内部研究方法 | 仅内部，不随开源发布 |
+| `docs/REVERSE_ENGINEERING.md` | 内部研究方法 | **已移出版本库**（本地保留，`.gitignore` 挡住）—— 之前"声明不随开源发布"但文件实际在公开仓库里，见 §4.45 |
 
 `docs/reverse/`、`*.har` 已 gitignore，**不得提交**，也**不得把其中的代码/文案/提示词搬进产品**（clean-room 红线）。
 
@@ -1826,6 +1826,57 @@ subagent 派活结束 → harness.snapshot(UsageDoc, child.id) 读子会话账�
 details 里的 `spend.totalTokens > 0`（账本真读到）、`chat.history` 的工具 part 上也带着它
 （界面能看到的那一层）、**别的工具不会凭空带这个字段**。
 
+### 4.45 公开仓库的门面：README 说「规划中」、以及一份本该不在仓库里的文件
+
+仓库接上远端之后做了一次"还剩什么"的盘点。**代码缺口之外，门面（第一个访客看到的东西）
+的问题其实更急** —— 因为它影响的是"别人要不要往下看"，而代码缺口只影响"用起来顺不顺"。
+
+#### 一、README 的顺序是反的
+
+改动前的阅读顺序：`核心特性（**规划**）` → 平台 → 文档 → 状态（**120 行里程碑流水账**）
+→ 第 125 行才出现 `pnpm install`。三处硬伤：
+
+| 问题 | 事实 |
+|---|---|
+| 标题写「核心特性（**规划**）」 | 列的 11 条**全部已实现**，还多出静态导出、Docker 上下文、组件商店 |
+| 「状态」段 120 行 | 写着「M1–M5 完成，M6 走到第 4 步」——实际 M6 全收口，之后又做了 §4.36–§4.44 |
+| 「怎么跑」被埋在第 125 行 | 要先翻过一整段里程碑才能看到三条命令 |
+
+改法：新增 **「快速开始」放第 3 节**（Node/pnpm 版本、三条命令、怎么接真模型、数据在哪）；
+「状态」从 120 行压成**一张 10 行能力表**，细节全部指向 STATUS ——
+**README 讲"能做什么"，STATUS 讲"怎么做的、坑在哪"，两边不再各抄一份**（正是这种双写
+造成了"518 个测试" / "界面半边是下一步"这类过期句子）。
+新增的「开发与验证」把 22 个脚本整理成表格（项数 + 验什么 + ★ 标真机全链路）。
+
+**验证方式是真跑，不是读一遍**：`git clone` 到 `/tmp`（那里没有 `~/node_modules` 兜底，
+是真实新访客环境）→ `pnpm install`（6.2s，store 命中）→ `TENON_HOME=/tmp/… pnpm dev:web`。
+结果：server 起在随机端口 `50647`、**模型是 `faux · faux-mini`（确认"不需要 API Key"这句话成立）**、
+Vite 在 **5173**（与 README 写的一致）、首页 `HTTP 200 / 570 字节`真的是页面、
+全新建的 `TENON_HOME` 自动长出 `secret.key` + `tenon.db`（"删掉等于重装"成立）。
+
+#### 二、`docs/REVERSE_ENGINEERING.md` 在公开仓库里
+
+README 的文档表写着「内部研究用（**不随开源发布**）」，STATUS 的仓库清单写着「仅内部」——
+**而文件一直是 tracked 的，GitHub 上直接能打开**。内容是妙搭的逆向操作手册
+（采集路线、HAR 采集清单、rea 工具调用序、分析目标），54 行。
+
+性质判断：它是**我方方法论**，不含被分析方的代码 / 文案 / 提示词（clean-room 红线没破），
+所以不需要按侵权处理。但"声明与事实相反"本身必须修 —— 而且这份文件对开源用户没有任何价值
+（里面的工具是本地 rea MCP，路径是本机 `~/project/miaoda/docs/reverse/`）。
+
+做法：`git rm --cached`（**本地文件保留**，你还看得到）+ `.gitignore` 挡住，
+README 删掉那一行（外部读者看不到它，列出来只会困惑），STATUS 改成"已移出版本库"。
+
+**没做的（如实记）**：历史里仍然有。要彻底清除得重写历史（`git filter-repo`），
+而那会让 STATUS / 记忆里引用的一堆真实 sha 全部失效 —— 代价高于收益，
+因为内容本身不是侵权材料。这个取舍留给仓库主决定。
+
+#### 顺手删掉的一条假欠账
+
+`SelectionContext.screenshot` —— 协议里**根本没有这个字段**（只有 `kind` / `route` / `loc` /
+`selector` / `rect` / `text` / `styles` / `elements` / `viewport`）。当初想过"截图给 Agent 看"，
+落地时选了**结构化描述**而不是像素，更省 token 也更准。留着这句会让下一个人去找一个不存在的缺口。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -2011,6 +2062,7 @@ details 里的 `spend.totalTokens > 0`（账本真读到）、`chat.history` 的
 | **`postgres:18` 的卷必须挂 `/var/lib/postgresql`** | 18 起 `PGDATA` 挪到 `/var/lib/postgresql/18/docker`，`VOLUME` 也改成 `/var/lib/postgresql`。挂成 17 及以前的 `.../data` 不会报"挂载点不对"，而是入口脚本认定"数据在 unused mount/volume 里"然后拒绝启动 → db 容器 `unhealthy`，而 `app` 因为 `depends_on: service_healthy` **连启动都没有**，看着像整个 compose 坏了 |
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
+| **"不随开源发布"写成注释不等于不在仓库里** | `docs/REVERSE_ENGINEERING.md` 被 README 与 STATUS 两处声明为"仅内部"，但它一直是 tracked 的，公开仓库上直接能打开。判定要看 `git ls-files`，不是看文档怎么写。用 `git rm --cached` + `.gitignore` 移出（本地文件保留），注意**历史里仍在**，彻底清除要重写历史 |
 | **GitHub 建仓时选的 license 会直接变成 `LICENSE` 文件** | 它不会去读你的 README 或设计文档。于是很容易出现"文档写 AGPL、仓库实际是 MIT"，而真正有法律效力的是那份文件。建仓时就该按设计选，或者建完立刻核对一遍 |
 | **本地通过、CI 失败：`~/node_modules` 在替仓库兜底** | 家目录里一份 `node_modules`（160 个包）会被 Node 一路往上解析到。未声明的依赖因此本地永远"能跑"，到干净的 runner 上才炸。判据不是"看 package.json 有没有声明"，而是**逐个 import 真解析、看结果落在哪**。本机解决了 `isomorphic-git`、`@babel/types` 两处 |
 | **快照还原不能"按行数组前 N 个值"取值** | 快照之后如果 `drop column` 过，保留的列不再是行数组的前 N 个 —— 按位置取会让整行**往前错一位**。类型相容时是**静默写进错误的列**，类型不容才报 `malformed array literal: "12.50"`（score 被写进了 labels）。必须按**列名取下标** |

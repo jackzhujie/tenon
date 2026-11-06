@@ -45,3 +45,8 @@ spikes/*/work/
 .idea/
 .vscode/
 !.vscode/extensions.json
+
+# 内部研究材料，不进公开仓库（DESIGN §16 / README 的「不随开源发布」）
+docs/reverse/
+*.har
+docs/REVERSE_ENGINEERING.md
