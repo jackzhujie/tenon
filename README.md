@@ -67,7 +67,7 @@ GLM / Kimi / Ollama…），保存即生效，不用重启。Key 本地加密存
 
 ## 状态
 
-**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**700 项单测 + 22 个端到端/验收脚本**绿。
+**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**718 项单测 + 23 个端到端/验收脚本**绿。
 九个包（`protocol` / `component-host` / `core` / `agent` / `generator` / `gateway` /
 `db-provisioner` / `runtime-sdk` / `server`）+ 两个 app（渲染器 `apps/web`，浏览器与窗口共用一套代码；
 壳 `apps/desktop`，只做生命周期）。
@@ -97,12 +97,12 @@ GLM / Kimi / Ollama…），保存即生效，不用重启。Key 本地加密存
 ```bash
 pnpm lint                   # eslint（约 3 秒）：0 error / 10 warning（那 10 条是 effect 里 setState 的性能建议）
 pnpm typecheck              # 18 个 tsconfig（含 scripts 与 spikes）
-pnpm test                   # 713 项单测/集成，约 210s（含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 718 项单测/集成，约 210s（含 PGlite 冷启动与真 QuickJS）
 pnpm build:web              # 前端产物（server 启动时把它读进内存）
 ```
 
 端到端脚本按链路分组。**多数要联网装依赖**；标 ★ 的是真机全链路（真进程 / 真 Chromium / 真容器）。
-下表 19 条；另有三个**人眼截图验收**脚本不在表内：`pnpm shot:settings` / `shot:export` / `shot:plugins`。
+下表 20 条；另有三个**人眼截图验收**脚本不在表内：`pnpm shot:settings` / `shot:export` / `shot:plugins`。
 
 | 命令 | 项数 | 验什么 |
 |---|---|---|
