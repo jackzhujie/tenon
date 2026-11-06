@@ -1028,8 +1028,11 @@ DoD ② 的"清理"在这里被拆成**三条可验证的事实**，一条都不
    当时的判断是对的：先把这个缺口写进清单与 AGENTS.md，而不是假装存下了。
 2. **web facet 只能自己决定位置**（`position:fixed`）。真正的插槽渲染（`app.page.header` 跟着页面标题走）
    需要应用配合，属于第 8 步/后续 React 内嵌。现在三个组件都"浮在页面上"。
-3. **三个 web bundle 各 ~735KB**（都打包了一份 chord）。三个组件同时装 = 2.2MB。
-   M6 应该改成共享一份运行时（或者由网关提供 chord 的共享 chunk）。
+3. ~~**三个 web bundle 各 ~735KB**（都打包了一份 chord）。三个组件同时装 = 2.2MB。
+   M6 应该改成共享一份运行时（或者由网关提供 chord 的共享 chunk）。~~
+   → **压缩已做（§4.49：3.4MB → 1.6MB），但"共享一份运行时"这条被推翻了**：
+   真凶不是 chord 重复，是 `typebox`；而 Hub 分发的组件**必须单文件自包含**，
+   跨包共享依赖与这个前提冲突。详见 §4.49。
 
 测 7 项（都用 `memoryLinkPair`，只验组件自己）：CSV 转义/行对齐/文件名清洗、审批状态机/非法转移/跨 root 存活。
 
@@ -1966,7 +1969,7 @@ CI 抓到这一条，也说明**这类跨平台判断只有 CI 能验**。
 | 配置 | 报出来的问题 | 多出来的来自哪 |
 |---|---|---|
 | 不 ignore `docs/reverse/` | **67590** | 逆向导出的几百个**压缩过的** `.js`（已进 `.gitignore`，但磁盘上还在） |
-| 排除研究材料，但没排产物 | **794** | `plugins/bundled/*/web.js`（3.4MB 单文件 bundle）里 732 条 |
+| 排除研究材料，但没排产物 | **794** | `plugins/bundled/*/web.js`（当时 3.4MB 单文件 bundle，压缩后 1.6MB）里 732 条 |
 | **合理配置** | **27**（16 error + 11 warn） | ← 真的 |
 | 修完 | **0 error / 10 warn** | |
 
@@ -2086,6 +2089,99 @@ CI 加了 lint 步骤（放在类型检查**之前** —— 它只要 3 秒，�
 **没有"结论变了就通知"**。存档只在打开对话框时读一次；如果后台跑了一轮把代码改了，
 对话框开着也不会自己更新（用户会手动点「重新检查」）。做实时推送要挂 WS 事件，
 而这个场景下"点一下"比"自动刷新一个可能正在看的结论"更可控。
+
+### 4.49 组件产物体积：3.4MB → 1.6MB，以及"共享运行时"这条为什么被推翻
+
+盘点时这条一直被描述成"三个组件各打一份 **React**，应该共享运行时"。**实测拆开之后发现
+描述是错的**，而且错的那个前提会把方案带偏。
+
+#### 一、735KB 里没有 React
+
+对 `web.js` 做模块标记统计（esbuild 会为每个输入文件留一行 `// node_modules/.pnpm/<包>@<版本>` 注释）：
+
+```
+532 个模块标记，全部是 typebox@1.3.27，没有一个 React 模块
+```
+
+按输出字节排前几名的输入：
+
+| 输入 | 占输出 |
+|---|---|
+| `chord/dist/delta/tracker.js` | 68.9KB |
+| `chord/dist/object.js` | 52.8KB |
+| `typebox/build/type/script/parser.mjs` | 35.7KB |
+| `chord/dist/host.js` | 39.1KB |
+| `typebox/build/type/script/mapping.mjs` | 15.7KB |
+
+也就是说：体积是 **chord 本体 + typebox 的 schema 构建器**，跟 UI 框架无关（这三个组件
+根本不用 React —— web facet 是命令式 DOM）。
+
+#### 二、想从我们这一侧省掉 typebox？省不掉
+
+第一反应是把 `contract.ts` 的 `import { Type } from 'typebox'` 收窄成 `typebox/type`
+（v1 有子路径导出）。查了一下没用：
+
+```
+chord/dist/*.js 里的 import：2 处 "typebox"（根入口）、5 处 "typebox/value"
+```
+
+**chord 自己就引根入口。** 我们的契约省下的那点，它又会带回来。而 chord 是实验性 API
+（见"三条铁律"第 3 条，`save-exact` 锁版本），改不了。
+
+#### 三、"共享一份运行时"与 Hub 分发的前提冲突
+
+原计划是"由网关提供 chord 的共享 chunk"。这条**在 Hub 分发模型下不成立**：
+
+组件包是**单文件自包含**的（`build-plugins.ts` 文件头：「插件目录是随包发布的只读内容，
+也不该指望用户机器上有 `@earendil-works/chord`」）。第三方从 Hub 装下来的组件，
+机器上没有任何东西可以给它 `import` 共享 chunk —— 一旦共享，装上的包就是缺依赖的坏包。
+
+真要共享，只能对 **bundled（随包）的那三个**走一条特殊的加载路径，第三方组件走另一条。
+两条加载路径、两套构建模式、两套验证 —— 为了 1MB 的本地磁盘，不值得。**这条从欠账里划掉。**
+
+#### 四、能做的那件事：压缩。四档实测
+
+| 打法 | 单个 web 产物 | 相对现在 | 代价 |
+|---|---|---|---|
+| 现在（不压） | 751,889 | — | — |
+| 只压空白+语法 | 533,643 | −29% | 标识符全保留 |
+| **minify + `keepNames`** ← 选了这档 | **351,280** | **−53%** | 变量名丢失，**函数名保留** |
+| 全 minify | 311,663 | −59% | 函数名也没了 |
+
+没选全 minify：差的 40KB 换的是**异常堆栈可读性**。组件出错时堆栈会进运行时日志面板，
+函数名被抹掉之后用户报上来的东西没法看。实测（加载 minified 产物时它自己抛的）：
+
+```
+[csv-export] 没挂上： Error: 组件脚本缺少 appId 参数
+    at appIdOf (…/web.js:7:284745)      ← 名字还在
+```
+
+**刻意不做 sourcemap**：`.map` 会跟着产物被打进 Hub 包（等于双倍体积），而丢掉的只是
+变量名 —— 有函数名和行内逻辑已经够定位。
+
+#### 五、结果与验证
+
+| | 压缩前 | 压缩后 |
+|---|---|---|
+| 三个 `web.js` | 735 / 734 / 737 KB | 344 / 343 / 344 KB |
+| 三个 `server.js` | 410 / 412 / 410 KB | 187 / 188 / 187 KB |
+| 合计 | **3.4MB** | **1.6MB** |
+
+**六个产物逐个验过**（不是"构建成功"就算）：
+
+- `server.js`：`import()` 之后必须有 `activate` 函数 —— 三个都有（`csv-export` 另导出 `csvField` / `toCsv`）
+- `web.js`：**自注册模块，导出为空是对的**（我第一版断言写成"也要有 activate"，错了；
+  它的契约是靠 URL 里的 `appId` 自己挂载）。判据是"能被解析并执行、不抛"
+
+- 单测 **718 项全过**（含 4 个直接 `import()` 真实 `server.js` 的组件测试：25 项）
+- `pnpm e2e:component` 5/5（真 Chromium 里加载压缩后的 web.js、挂上、点开、对话、HMR）
+- `pnpm e2e:hub` 32/32（现场生成密钥 → 打包压缩产物 → 静态 Hub → 真 server 装进应用 → 篡改/付费两种拒绝）
+
+#### 六、记一笔方法论
+
+这条欠账在清单上躺了两个里程碑，描述一直是错的（"各打一份 React"），所以方案也一直是错的
+（"共享运行时"）。**盘体积要先拆开看构成**：`--metafile` 一行命令就能回答"到底谁占的"，
+比照着常识猜省事得多。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
@@ -2273,7 +2369,9 @@ CI 加了 lint 步骤（放在类型检查**之前** —— 它只要 3 秒，�
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
 | **"打开就自动跑"的对话框里，"上次结论"永远没机会显示** | 想加"预检结论常驻"时第一版是"在旁边多显示一块"，结果对话框一打开就真跑预检（`checking` 立刻为真），那块 UI 永远不渲染。正确的做法是**能复用就不跑**（判据：存档在 + HEAD 没变 + 工作区干净），而不是多显示一块 |
-| **"lint 报了几万个问题"先问 ignore 配对了没** | 本仓不 ignore `docs/reverse/`（几百个压缩 `.js`）时报 **67590** 个；不 ignore `plugins/bundled/*/web.js`（3.4MB bundle）时报 **794** 个；都排掉只剩 **27** 个。隔着两个数量级的差距，都是配置问题 |
+| **"单文件自包含"是 Hub 分发的硬约束，所以跨组件共享依赖做不到** | 曾计划"网关提供 chord 共享 chunk"把三个 web bundle 的重复消掉。但第三方从 Hub 装的组件包里没有 `node_modules`，共享 = 缺依赖的坏包。**体积只能靠压缩或减少依赖**；共享只对随包的那几个可能，而两条加载路径的复杂度不值那 1MB |
+| **组件产物的体积不是 React 占的** | 735KB 的 `web.js` 里 532 个模块标记**全是 typebox**（`chord` 引它的根入口 + `typebox/value`），改 `contract.ts` 的 import 收窄没用。判断体积先跑 `esbuild --metafile` 看 `bytesInOutput`，别凭常识猜 |
+| **"lint 报了几万个问题"先问 ignore 配对了没** | 本仓不 ignore `docs/reverse/`（几百个压缩 `.js`）时报 **67590** 个；不 ignore `plugins/bundled/*/web.js`（当时 3.4MB，压缩后 1.6MB）时报 **794** 个；都排掉只剩 **27** 个。隔着两个数量级的差距，都是配置问题 |
 | **spawn 出来的 pnpm 被杀掉 ≠ 它的子进程死了** | `child.kill('SIGKILL')` 只杀直接子进程。我们 spawn 的是 `pnpm`，它再 spawn `eslint`/`vitest`，**孙进程握着 stdout** → 管道不关 → `close` 事件永远不来 → `await` 挂着，界面显示"检查中…"永不结束。修法：`detached: true` 进自己的进程组 + 负 pid 杀整组 + **超时立刻 resolve 不等 close** |
 | **不能拿 `ELIFECYCLE` / `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` 判断"命令没装"** | 这两行在**任何** pnpm 失败里都会出现（包括"lint 查到 3 个错误"）。拿它当判据会把所有真失败报成"没装依赖"，用户会去改一段本来没问题的代码。只看 shell 的 `: command not found` / `is not recognized as an internal or external command` |
 | **"不随开源发布"写成注释不等于不在仓库里** | `docs/REVERSE_ENGINEERING.md` 被 README 与 STATUS 两处声明为"仅内部"，但它一直是 tracked 的，公开仓库上直接能打开。判定要看 `git ls-files`，不是看文档怎么写。用 `git rm --cached` + `.gitignore` 移出（本地文件保留），注意**历史里仍在**，彻底清除要重写历史 |

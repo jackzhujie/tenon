@@ -79,6 +79,27 @@ export async function buildPlugins(options: { only?: readonly string[] } = {}): 
         target: platform === 'browser' ? 'es2022' : 'node22',
         outfile: join(dir, outfile),
         logLevel: 'warning',
+        /*
+         * **压缩，但保留函数名。**
+         *
+         * 这些产物是**单文件自包含**的（见文件头），所以同一套 `chord` + `typebox`
+         * 会在每个组件里各打一份：三个 web 各 735K、三个 server 各 410K，合计 3.4MB。
+         * 压缩是唯一不改变分发模型就能拿到的收益：
+         *
+         * - 不压：751,889（`typebox` 占大头，`chord` 自己也引它的根入口，改不动）
+         * - 只压空白与语法：533,643（−29%，标识符全留）
+         * - **minify + keepNames：351,280（−53%）** ← 选了这档
+         * - 全 minify：311,663（−59%）
+         *
+         * 没选全 minify 是因为差的那 40KB 换的是**异常堆栈可读性**：组件出错时
+         * 堆栈会出现在运行时日志面板里，函数名被抹掉之后用户报上来的东西没法看。
+         * `keepNames` 只保留函数/类名，体积代价约 40KB，值。
+         *
+         * 刻意**不做 sourcemap**：`.map` 会跟着产物一起被打进 Hub 包（那是双倍体积），
+         * 而这里丢掉的只是变量名 —— 排查时看函数名与行内逻辑已经够定位。
+         */
+        minify: true,
+        keepNames: true,
         // 浏览器那一侧：某些依赖会摸 `process.env`，不定义就是运行时 ReferenceError
         ...(platform === 'browser' ? { define: { 'process.env.NODE_ENV': '"production"' } } : {}),
       })

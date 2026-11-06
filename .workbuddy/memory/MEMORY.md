@@ -34,8 +34,9 @@ spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
 `install_component`/`remove_component`/插件页 → 真 Chromium 端到端。
-**欠账**：Docker compose 产物、真远端 push、**真 Hub 未上线**（静态托管/域名/缓存）、`lint` 未接、
-额度无跨应用总闸、用量答不了"哪个角色花了多少"、三个 web bundle 各 735KB 未共享运行时。
+**欠账**（M1–M6 计划内已清）：真远端 push、**真 Hub 未上线**（静态托管/域名/缓存）、
+额度无跨应用总闸、没出过 `.dmg`（只有 `--dir` 的 unpacked）、Windows/macOS 没进 CI、
+DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§4.49）。
 
 ## 已定的架构选择（推翻要重做很多）
 - server 与生成应用后端都 Fastify 5 / NestJS 11 + TS ESM；应用库 `pglite`（默认）/ `postgres`，产品库 `node:sqlite`
@@ -105,6 +106,14 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
   "超过一天"的显示：会话问"多新"，提交问"哪一天"
 - **JSX 文本里的 `**xx**` 不会变成加粗**，会显示字面星号。类型检查和单测都不会管，
   只能看图
+- **"单文件自包含"是 Hub 分发的硬约束 → 跨组件共享依赖做不到**：曾计划"网关提供 chord
+  共享 chunk"，但第三方从 Hub 装的包里没有 `node_modules`，共享 = 缺依赖的坏包。
+  体积只能靠压缩或减少依赖
+- **组件产物体积不是 React 占的**：735KB `web.js` 里 532 个模块标记**全是 typebox**
+  （chord 自己引根入口 + `typebox/value`），改 `contract.ts` 的 import 收窄没用。
+  盘体积先跑 `esbuild --metafile` 看 `bytesInOutput`
+- **`build:plugins` 用 `minify + keepNames`**：3.4MB→1.6MB（−53%）。全 minify 只多省 40KB
+  但抹掉函数名 → 组件异常堆栈没法看。不做 sourcemap（.map 会打进 Hub 包）
 - **杀 pnpm 不等于杀掉它的子进程**：`child.kill('SIGKILL')` 只杀直接子进程，而它再 spawn
   `eslint`/`vitest`，**孙进程握着 stdout** → 管道不关 → `close` 永远不来 → `await` 挂着，
   界面"检查中…"永不结束。要 `detached: true` 进自己的进程组 + 负 pid 杀整组，
