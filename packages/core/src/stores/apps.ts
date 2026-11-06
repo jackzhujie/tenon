@@ -31,6 +31,32 @@ function isInside(base: string, target: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
 }
 
+/**
+ * 删一棵目录，**带退避重试**。
+ *
+ * Windows 上 rmdir 会因为"还有句柄没释放"拿到 `EBUSY` / `EPERM`，而占用的往往不是我们：
+ * 杀软正在扫刚写出来的几百个文件、搜索索引器、或者某个刚退出的子进程还挂着。
+ * 这类占用通常在**几秒内**消失，所以退避重试（150/300/600/1200/2400ms，合计约 4.6s）
+ * 比"立即失败"和"立刻重试 5 次"都更接近现实。
+ *
+ * `fs.rm` 自带的 `maxRetries` 只做固定间隔的立即重试（对杀软扫描太短），所以这里自己写。
+ * 重试用尽仍然抛 —— 那时该看到的是错误，而不是"删了一半还说成功"。
+ * 对 POSIX 无副作用（那几个错误码在那边基本不会出现）。
+ */
+async function removeTree(dir: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(dir, { recursive: true, force: true })
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      const transient = code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY' || code === 'EMFILE'
+      if (!transient || attempt >= 5) throw error
+      await new Promise((resolve) => setTimeout(resolve, 150 * 2 ** attempt))
+    }
+  }
+}
+
 interface AppRow {
   id: string
   name: string
@@ -215,13 +241,7 @@ export class AppStore {
     if (!isInside(this.home.appsDir, paths.dir)) {
       throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.dir}`)
     }
-    /*
-     * `maxRetries` 是给 Windows 的：那边删目录时如果**还有句柄没释放**（子进程刚退出、
-     * 索引器/杀软正在扫），会拿到 EBUSY/EPERM，而且往往是几百毫秒内就没了。
-     * Node 的 `rm` 自带这套重试就是为这几种错误码准备的（对 POSIX 无副作用）。
-     * 真被长期占用时仍然会失败 —— 那时该看到的是错误，而不是"删了一半"。
-     */
-    await rm(paths.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 })
+    await removeTree(paths.dir)
     /*
      * 发布用的备份裸库也跟着删（`<home>/backups/<appId>.git`）。
      *
@@ -234,7 +254,7 @@ export class AppStore {
     if (!isInside(this.home.backupsDir, paths.backupRepo)) {
       throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.backupRepo}`)
     }
-    await rm(paths.backupRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 })
+    await removeTree(paths.backupRepo)
   }
 
   touch(id: string): void {

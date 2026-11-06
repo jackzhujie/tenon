@@ -15,9 +15,17 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from 'pg'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EntitySchema } from 'typeorm'
 import { DataSource as TypeOrmDataSource } from 'typeorm'
+
+/*
+ * 这个文件里的用例**要起两个 PGlite**（WASM 版的 PG）再跑一次真 SQL 迁移。
+ * 本机冷启动 2–4 秒，Windows runner 上十几秒 —— 两个加起来就会顶到默认的 30 秒，
+ * 表现是 "Test timed out in 30000ms"，看着像逻辑挂了，其实只是慢。
+ * 超时不是判据，所以给足预算（真挂住时仍然会失败，只是晚 60 秒）。
+ */
+vi.setConfig({ testTimeout: 90_000 })
 import {
   createPgliteProvider,
   migrateDatabase,
