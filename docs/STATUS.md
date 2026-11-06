@@ -441,10 +441,15 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 > 几十个文本文件，几十轮也就几 MB，不值得为它写一套 GC。但**应用删除时备份库会一起删**（§4.36）：
 > 应用不存在之后界面上没有任何入口能 clone 它，留着就是一个没人能访问、却占着完整历史的孤儿目录。
 
-> 已知欠账（有环境就能补）：~~Docker compose 产物（M2 第 8 步）~~ → 已落地（§4.39）；
-> `pglite → 真 PG` 的**迁移**端到端（逻辑已验，真 PG 没实测 —— 现在有 docker 了可以补）；
-> `pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）；
-> `SelectionContext.screenshot` 字段留了没填（Electron `capturePage` 或 iframe 里 canvas）。
+> 已知欠账：~~Docker compose 产物（M2 第 8 步）~~ → 已落地（§4.39）；
+> ~~`pglite → 真 PG` 的迁移端到端~~ → 已落地（§4.40，`e2e:postgres` 31 项）；
+> `pnpm e2e:fullstack` 未进 CI（要联网装 NestJS）。
+>
+> ~~`SelectionContext.screenshot` 字段留了没填~~ —— **这条是错的，已删**：协议里
+> `SelectionContext` 根本没有 `screenshot` 字段（`kind` / `route` / `loc` / `selector` /
+> `rect` / `text` / `styles` / `elements` / `viewport`）。当初大概是想过"截图给 Agent 看"，
+> 但落地时选了**结构化描述**（定位 + 文本 + 差异样式）而不是像素 —— 这更省 token，也更准。
+> 留着这句会让人去找一个不存在的缺口。
 >
 > **7b 的覆盖缺口（如实记）**：三条路径各自都验了 —— 库快照与还原用真 PGlite（`snapshot.test.ts`）,
 > preflight 失败时"什么都不动"用真 HTTP（`e2e:diff` 第 10 节）,`skippedCommits` 的偏移用纯函数单测。
