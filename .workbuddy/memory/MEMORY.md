@@ -94,6 +94,12 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
   `priced`（没配价格时 $0 是"没算"）。三格全是"看起来像数字其实是假的"
 - **`formatTokens` 10k 以上取整会让汇总对不上**（6.3k+4.2k=10k）→ 改成 10k~99.9k 保留一位小数
 - **模块脚本加载失败是静默的** → 网关插了错误捕手 `window.__tenonComponentErrors`，端到端读它
+- **子会话的花费不进父会话的 `pi.usage`**（"嵌套调用不进父会话事件流"的另一面）→ 要知道
+  "这次派活花了多少"必须按子会话 id 读 `harness.snapshot(UsageDoc, child.id)`；
+  它是公开 API（`UsageDoc` 从包入口导出），会话列表则要 `commit(tx => tx.scanConversations())`
+- **按角色累计刻意没做**：会被历史稀释、旧数据缺归属、且不影响控制逻辑。
+  做的是**单次派活成本**（`subagent` → `details.spend` → `MessagePart.spend` → 工具行显示）。
+  触发条件写在 STATUS §4.44（按角色计费 / 多人按人出账单 / 真出过事故）
 - **GitHub 建仓选的 license 会直接变成 `LICENSE` 文件**：它不读 README / 设计文档。本仓出现过
   "README 写 AGPL、LICENSE 却是建仓默认的 MIT"，而后者才有法律效力。MIT 是永久授权、发出去
   收不回来 —— 这次是在 `forks=0` 时换掉的（有时间窗）
