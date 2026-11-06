@@ -28,7 +28,7 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
 **导出静态包**（`export.static`，产物拷走就能跑）+ **Docker 上下文**（`export.docker`，
 M2 第 8 步落地；compose 自带 PG，`e2e:docker` 全栈 21 项真跑 compose）。
-全绿基线：typecheck 18 project / test **700** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+全绿基线：typecheck 18 project / test **712** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
 e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** / **shot:usage** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
@@ -93,6 +93,18 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 - **用量汇总缺一格就会骗人**：`known`（还没账本 ≠ 花了 0）、`failed`（读不到的不加进合计）、
   `priced`（没配价格时 $0 是"没算"）。三格全是"看起来像数字其实是假的"
 - **`formatTokens` 10k 以上取整会让汇总对不上**（6.3k+4.2k=10k）→ 改成 10k~99.9k 保留一位小数
+- **杀 pnpm 不等于杀掉它的子进程**：`child.kill('SIGKILL')` 只杀直接子进程，而它再 spawn
+  `eslint`/`vitest`，**孙进程握着 stdout** → 管道不关 → `close` 永远不来 → `await` 挂着，
+  界面"检查中…"永不结束。要 `detached: true` 进自己的进程组 + 负 pid 杀整组，
+  并且**超时立刻 resolve，不等 close**
+- **不能拿 `ELIFECYCLE` / `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` 判断"命令没装"**：这两行在
+  **任何** pnpm 失败里都有。拿它当判据会把"查到 3 个错误"报成"没装依赖"，
+  用户会去改一段本来没问题的代码。只看 shell 的 `: command not found`
+- **"命令没装"与"代码有问题"必须两句话**：前者 `pnpm install`，后者改代码。
+  门禁里混成一句，等于给用户指错方向
+- **模板的 lint 规则只留三条是设计不是没配完**：开 `recommended` 全家桶会让 Agent 生成
+  一次红一次，而**被关掉的检查等于不存在**。`exhaustive-deps` 设 warn（误报太多，
+  设 error 会成最常见拦路石）
 - **模块脚本加载失败是静默的** → 网关插了错误捕手 `window.__tenonComponentErrors`，端到端读它
 - **子会话的花费不进父会话的 `pi.usage`**（"嵌套调用不进父会话事件流"的另一面）→ 要知道
   "这次派活花了多少"必须按子会话 id 读 `harness.snapshot(UsageDoc, child.id)`；
