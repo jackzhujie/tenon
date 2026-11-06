@@ -67,7 +67,7 @@ GLM / Kimi / Ollama…），保存即生效，不用重启。Key 本地加密存
 
 ## 状态
 
-**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**700 项单测 + 20 个 e2e 脚本**绿。
+**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**700 项单测 + 22 个端到端/验收脚本**绿。
 九个包（`protocol` / `component-host` / `core` / `agent` / `generator` / `gateway` /
 `db-provisioner` / `runtime-sdk` / `server`）+ 两个 app（渲染器 `apps/web`，浏览器与窗口共用一套代码；
 壳 `apps/desktop`，只做生命周期）。
@@ -100,7 +100,8 @@ pnpm test                   # 700 项单测/集成，约 210s（含 PGlite 冷�
 pnpm build:web              # 前端产物（server 启动时把它读进内存）
 ```
 
-端到端脚本按链路分组。**多数要联网装依赖**；标 ★ 的是真机全链路（真进程 / 真 Chromium / 真容器）：
+端到端脚本按链路分组。**多数要联网装依赖**；标 ★ 的是真机全链路（真进程 / 真 Chromium / 真容器）。
+下表 19 条；另有三个**人眼截图验收**脚本不在表内：`pnpm shot:settings` / `shot:export` / `shot:plugins`。
 
 | 命令 | 项数 | 验什么 |
 |---|---|---|
@@ -118,6 +119,7 @@ pnpm build:web              # 前端产物（server 启动时把它读进内存�
 | `pnpm e2e:docker` ★ | 21 | 导出 Docker 上下文并真跑 compose（带 PG、迁移自动跑；没有 docker 就 skip） |
 | `pnpm e2e:postgres` ★ | 31 | 起真 `postgres:18-alpine`，验跨档迁移与纯 JS 快照（没有 docker 就 skip） |
 | `pnpm e2e:real` ★ | 12 | 真模型验收（要真 key）：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问 |
+| `pnpm e2e:provider` | — | BYOK 接线（真模型验收的前置）：本地假 OpenAI 服务走完整条路 —— profile 加密存库 → resolveModel → 流式 SSE → 工具落盘 → 收尾 → commit。**它证明我们这一侧没坏**，于是接真 key 后若不对，问题只可能在模型或提示词 |
 | `pnpm spike:chord` | 10 | chord 宿主回归网（契约 / 变体 / 跨 host / 热重载 / 打包） |
 | `pnpm smoke:desktop` | 8 | 桌面冒烟：`build:desktop` → 真起窗口 |
 | `pnpm smoke:desktop:packaged` | 8 | 打包产物冒烟：真的起 `.app`、加载界面、退出后不留孤儿进程 |
