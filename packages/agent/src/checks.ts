@@ -48,18 +48,43 @@ const MAX_LINT_BYTES = 64 * 1024
 /** lint 的有用信息在**头部**（第一个文件的第一个错误），与测试相反 */
 const LINT_HEAD_LINES = 40
 /**
- * 这些输出说明命令根本没装，不是"代码有问题"。
- *
- * 必须分开的原因很实际：`eslint` 没装时用户该去 `pnpm install`，
- * 查到 3 个未用变量时用户该去改代码。混成一句"lint 失败"，
- * 用户会去改一段本来就没问题的代码，然后发现怎么改都不对。
- *
- * **只匹配 shell 的"找不到命令"**，不匹配 pnpm 自己的报错：
+ * shell 报"找不到命令"时的几种说法。**只匹配 shell 的报错行**，不匹配 pnpm 自己的报错：
  * `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` / `ELIFECYCLE` 在**任何**失败里都会出现，
  * 拿它当判据会把"代码有问题"全报成"没装依赖" —— 那比不报还坏。
+ *
+ * 两种 shell 的文案不一样，这条正则必须同时认（CI 是 Debian 的 dash）：
+ * - bash/zsh：`sh: eslint: command not found`
+ * - dash：   `sh: 1: eslint: not found`
  */
 const MISSING_COMMAND =
-  /: command not found|is not recognized as an internal or external command|Cannot find module '(?:eslint|typescript-eslint|@eslint)/i
+  /sh: (?:\d+: )?.*(?:command )?not found|is not recognized as an internal or external command|Cannot find module '(?:eslint|typescript-eslint|@eslint)/i
+
+/** 这些是 shell 内置或总能解析到的，不该去 `node_modules/.bin` 里找 */
+const NOT_FROM_NODE_MODULES = /^(node|npm|pnpm|npx|yarn|sh|bash|true|false|exit|echo)$/
+
+/**
+ * 判断"命令没装"（而不是"代码有问题"）。
+ *
+ * 两件事决定了不能只靠一种办法：
+ *
+ * - **退出码不可靠**：`pnpm` 会把子进程的 127 折成 1，与"lint 查到 3 个错误"一模一样。
+ * - **输出文案不可靠**：macOS 的 `sh` 说 `command not found`，Debian 的 `dash` 说 `not found`。
+ *   本地全绿、CI 红就是这么来的（这条是 CI 抓到的，不是本地）。
+ *
+ * 所以先走一条**与环境无关**的判据：脚本的第一个词如果不是内置命令，就去
+ * `node_modules/.bin` 里看它在不在。这只对简单脚本（`eslint .`，最常见）有效，
+ * 复合脚本（`tsc && eslint .`）只能退回看输出。
+ *
+ * 误判方向是"说没装"—— 用户去装一下就能跑，代价可接受；反过来（把没装说成代码有问题）
+ * 会让人去改一段本来没问题的代码。
+ */
+function looksLikeMissingCommand(repoDir: string, script: string, output: string): boolean {
+  const first = script.trim().split(/\s+/)[0] ?? ''
+  if (first !== '' && !NOT_FROM_NODE_MODULES.test(first)) {
+    if (!existsSync(join(repoDir, 'node_modules', '.bin', first))) return true
+  }
+  return MISSING_COMMAND.test(output)
+}
 
 /**
  * 交给子进程的环境。
@@ -549,7 +574,7 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
   if (code === null) {
     return { id: 'lint', status: 'fail', summary: '没跑成：lint 脚本起不来', detail: excerpt, elapsedMs }
   }
-  if (code !== 0 && (code === 127 || MISSING_COMMAND.test(output))) {
+  if (code !== 0 && looksLikeMissingCommand(repoDir, script, output)) {
     return {
       id: 'lint',
       status: 'fail',

@@ -178,6 +178,26 @@ describe('lint 脚本', () => {
     expect(result.detail).toContain('未使用变量')
   })
 
+  it('★ 两种 shell 的"找不到命令"文案都认（这条曾经本地绿、CI 红）', async () => {
+    /*
+     * macOS 的 sh（bash 系）说 `sh: eslint: command not found`，
+     * Debian 的 dash（GitHub Actions 的默认 sh）说 `sh: 1: eslint: not found`。
+     * 只认前者的话，本地全绿、CI 上那条断言会挂 —— 而且挂的是"文案"，不是逻辑。
+     *
+     * 退一步说，真正与环境无关的判据是 `looksLikeMissingCommand` 里那条
+     * 「脚本第一个词在不在 node_modules/.bin」，文案正则只是复合脚本的兜底。
+     */
+    for (const line of ['sh: 1: eslint: not found', 'sh: eslint: command not found']) {
+      await project({
+        lintScript: `node -e "console.error('${line}');process.exit(1)"`,
+        withNodeModules: true,
+      })
+      const result = await runLintScript(dir)
+      expect(result.status, line).toBe('fail')
+      expect(result.summary, line).toContain('命令没装')
+    }
+  })
+
   it('★ 命令没装 → 说"没跑成"，不说"没过"（两种处置方式相反）', async () => {
     /*
      * 这条是最容易写错的一条：`eslint` 没装时退出码是 127，与"查到 3 个错误"

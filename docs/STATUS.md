@@ -1903,7 +1903,7 @@ DESIGN §8.6 从 M1 就写着 `tsc → eslint → vitest → build`，但**模�
 理由：lint 查的是 tsc 看不见的两类问题 —— 未用变量（**往往是改到一半的证据**：旧实现没删干净）
 和条件调 hook（运行时才炸）。只给门禁不给 Reviewer，Agent 只会在发布那一刻才发现。
 
-#### 这轮踩到的两个真问题（都不是测试写错）
+#### 这轮踩到的三个真问题（都不是测试写错）
 
 **① `kill` 只杀了 pnpm，孙进程握着 stdout → 门禁会一直转圈。**
 `runTestScript` 一直是 `child.kill('SIGKILL')` + 等 `close`。但我们 spawn 的是 `pnpm`，
@@ -1914,7 +1914,14 @@ DESIGN §8.6 从 M1 就写着 `tsc → eslint → vitest → build`，但**模�
 
 **② `MISSING_COMMAND` 一开始把 `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` 当判据 —— 那会把所有真失败误报成"没装依赖"。**
 那行在**任何** pnpm 失败里都会出现（真跑模板时亲眼看到 `ELIFECYCLE  Command failed with exit code 1.`）。
-只看 shell 的 `: command not found` / `is not recognized as an internal or external command` / `Cannot find module 'eslint`。
+
+**③ 改完②还是"本地绿、CI 红" —— 因为 shell 的文案跨平台不一样。**
+macOS 的 `sh` 说 `sh: eslint: command not found`，Debian 的 `dash`（Actions 的默认 shell）说
+`sh: 1: eslint: not found`；而且 **pnpm 会把 127 折成 1**，与"查到 3 个错误"同一个退出码。
+也就是说**退出码和文案两条路都不可靠**。
+最终判据改成两段：先看**脚本第一个词在不在 `node_modules/.bin`**（与环境无关，覆盖
+`eslint .` 这种最常见形式），复合脚本才退回看输出（正则同时认 bash 与 dash 两种说法）。
+CI 抓到这一条，也说明**这类跨平台判断只有 CI 能验**。
 
 #### 顺手消掉一处重复定义
 
