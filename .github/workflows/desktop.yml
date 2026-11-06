@@ -1,0 +1,122 @@
+## 桌面安装包：三个平台各打一份
+##
+## 为什么单独一个 workflow，而不是塞进 ci.yml：
+## - 它**慢且重**（每台机器都要下一个 ~100MB 的 Electron、再打 130MB 的包）。
+##   门禁的价值是"最新这一次绿不绿"，不该被这个拖到十几分钟。
+## - 它**不需要每次 push 都跑**。packaging 的输入是 tag / 手点，不是每行代码。
+##
+## 为什么当初 CI 里写着"不做三平台打包"，现在又做了：
+## 那条注释的理由是"mac 不签名会被 Gatekeeper 拦" —— 那说的是**可信分发**。
+## 而"能不能构建"是另一件事：Windows 的 nsis 只能在 Windows 上打（mac 上要 wine），
+## Linux 的 AppImage 只能在 Linux 上打。没有这条流水线，这两个平台的安装包
+## **永远只能停在"没产出"**，而我们在自己机器上没有那两台机器。
+##
+## 签名仍然不做（没有证书）：产物是**未签名**的。
+## - macOS：别人机器上 Gatekeeper 会拦（右键打开一次，或 `xattr -dr com.apple.quarantine`）
+## - Windows：SmartScreen 会提示"未知发布者"
+## 要做成"双击就装、不弹警告"，需要 Apple Developer（$99/年）与 Windows 代码签名证书，
+## 那是钱的问题；它们只影响**信任**，不影响**能不能装上试用**。
+
+name: Desktop packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '要打包的 ref（空=当前分支）'
+        required: false
+  push:
+    tags:
+      - 'v*'
+
+# 同一 ref 连点两次时取消旧的：packaging 没有"两次都要"的意义
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.os }}
+    strategy:
+      # 一个平台失败不该让另外两个的产物跟着丢 —— 三份产物是互相独立的价值
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    # Windows 上装依赖 + 打 nsis 明显比另外两个慢
+    timeout-minutes: 45
+    env:
+      # 没有证书：别让 electron-builder 去钥匙串里找，找不到会报警告甚至失败
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: 装 pnpm（版本来自 packageManager）
+        uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      # Electron 与 electron-builder 的二进制缓存：不缓存的话每跑一次都要重下 ~200MB
+      - name: 缓存 Electron 与 electron-builder 的二进制
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      # 三个产物共用这一步：web 产物 + 组件 + 主进程，铺成同构的 apps/desktop/dist
+      - name: 构建（web + 组件 + 主进程）
+        run: pnpm build:desktop
+
+      # 目标在 electron-builder.yml 里按平台配好了（mac: dmg+zip / win: nsis / linux: AppImage）
+      - name: 打安装包
+        run: pnpm --filter @tenon/desktop exec electron-builder --publish never
+
+      # macOS 上**真启动一次**打包产物：产物存在不等于能跑（历史上踩过"装完白屏"）。
+      # Windows / Linux 上没有等价的冒烟脚本（要 GUI 会话），所以那边只验"打得出来"。
+      - name: 冒烟：真启动打包产物（仅 macOS）
+        if: runner.os == 'macOS'
+        run: pnpm smoke:desktop:packaged
+
+      - name: 列出产物
+        shell: bash
+        run: |
+          ls -lh apps/desktop/release | head -20
+          # `release/mac` 之类的解包目录是给冒烟用的，不必上传；只看安装包本体。
+          # 刻意不用 `find -printf`：那是 GNU 的，macOS 的 BSD find 不认（会直接报错退出）
+          for f in apps/desktop/release/*.dmg apps/desktop/release/*.zip \
+                   apps/desktop/release/*.exe apps/desktop/release/*.AppImage; do
+            [ -e "$f" ] || continue
+            printf '  %s  %s 字节\n' "$(basename "$f")" "$(wc -c < "$f" | tr -d ' ')"
+          done
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenon-${{ matrix.os }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.AppImage
+          if-no-files-found: error
+          # 130MB 级产物，保留 14 天够试用；长期归档应该走 Release，不是 artifact
+          retention-days: 14
