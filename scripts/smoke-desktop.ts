@@ -10,7 +10,8 @@
  * 进程退出之后那个地址**连不上**。`TENON_SMOKE=1` 让主进程加载完就打印一行再退出。
  */
 import { spawn } from 'node:child_process'
-import { access, mkdtemp } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdtemp } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -29,7 +30,24 @@ const PACKAGED = process.argv.includes('--packaged')
 const require = createRequire(import.meta.url)
 /** electron 包的默认导出就是可执行文件路径（只有在 Electron 运行时里才是 API） */
 const electronPath = require(join(appDir, 'node_modules', 'electron')) as unknown as string
-const packagedExe = join(appDir, 'release', 'mac', 'Tenon.app', 'Contents', 'MacOS', 'Tenon')
+/**
+ * 打包产物的可执行文件。
+ *
+ * **不能写死 `release/mac`**：electron-builder 的目录名带架构后缀 ——
+ * 在 Intel 机器上是 `mac`，在 Apple Silicon 上是 `mac-arm64`，交叉编译时是 `mac-x64`。
+ * 本地一直是 Intel，所以写死 `mac` 谁也没发现问题，直到 CI 的 macOS runner（arm64）
+ * 上冒烟报"没有打包产物" —— 而包其实打出来了，只是躺在 `mac-arm64/` 里。
+ *
+ * 这里按顺序找，取第一个存在的；都不在才报错，并把找过的路径都列出来。
+ */
+function packagedCandidates(): string[] {
+  const app = join(appDir, 'release')
+  return ['mac', 'mac-arm64', 'mac-x64'].map((dir) =>
+    join(app, dir, 'Tenon.app', 'Contents', 'MacOS', 'Tenon'),
+  )
+}
+
+const packagedExe = packagedCandidates()[0]!
 
 interface Probe {
   title: string
@@ -53,15 +71,18 @@ function check(name: string, ok: boolean, detail = ''): void {
 async function main(): Promise<void> {
   const home = await mkdtemp(join(tmpdir(), 'tenon-desktop-'))
 
+  let packagedPath = packagedExe
   if (PACKAGED) {
-    try {
-      await access(packagedExe)
-    } catch {
-      throw new Error(`没有打包产物：${packagedExe}\n先跑 \`pnpm pack:desktop\``)
+    const found = packagedCandidates().find((candidate) => existsSync(candidate))
+    if (found === undefined) {
+      throw new Error(
+        `没有打包产物，找过：\n${packagedCandidates().join('\n')}\n先跑 \`pnpm pack:desktop\``,
+      )
     }
+    packagedPath = found
   }
 
-  const exe = PACKAGED ? packagedExe : electronPath
+  const exe = PACKAGED ? packagedPath : electronPath
   const args = PACKAGED ? [] : ['.']
   console.log(`\n1) 起 ${PACKAGED ? '打包后的 Tenon.app' : 'electron .'}（HOME=${home}）`)
 

@@ -62,5 +62,11 @@ win:
 
 linux:
   category: Development
+  # ★ 必须显式给一个干净的名字。`package.json` 的 name 是 `@tenon/desktop`，
+  # electron-builder 会把它去掉斜杠拼成可执行名 `@tenondesktop` —— 而 AppImage
+  # **不允许路径里出现 `@`**，构建直接失败：
+  #   ⨯ executableName contains characters that cannot be safely used in file paths: @tenondesktop
+  # 这条只有在 Linux 上才会炸（mac/win 用的是 productName）。CI 三平台第一次跑抓到的。
+  executableName: tenon
   target:
     - target: AppImage
