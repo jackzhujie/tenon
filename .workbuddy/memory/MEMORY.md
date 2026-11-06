@@ -6,6 +6,12 @@
 **开工入口：`docs/STATUS.md`**（进度 / DoD / 代码地图 / **§5 陷阱 168 条，细节都在那里**）；
 方案 `docs/DESIGN.md`（v1.2.26）。这里只留「不知道就会走错方向」的。
 
+## 协议（已落地，别搞反）
+**按目录分区**，不是单一协议：`apps/*` + `packages/*`（除下面两项）= **AGPL-3.0-only**；
+`packages/runtime-sdk`、`packages/generator/templates`、`plugins/` = **Apache-2.0**（生成的应用不传染）；
+`docs/` = **CC BY 4.0**。版权行 `Copyright (c) 2026 jackzhujie and contributors`。
+商业双许可（闭源集成 / 公司内部多人部署）写在 `NOTICE` 与 README 的 License 段。
+
 ## 三条铁律
 1. **Electron 只做壳**，业务全在本地 HTTP Server（否则 Web 模式 / Agent 自调试 / SaaS 化全废）
 2. **生成应用永不感知运行环境**，只认 `DATABASE_URL`（`POOL_MAX` 是容量参数，不是环境判断）
@@ -88,6 +94,9 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
   `priced`（没配价格时 $0 是"没算"）。三格全是"看起来像数字其实是假的"
 - **`formatTokens` 10k 以上取整会让汇总对不上**（6.3k+4.2k=10k）→ 改成 10k~99.9k 保留一位小数
 - **模块脚本加载失败是静默的** → 网关插了错误捕手 `window.__tenonComponentErrors`，端到端读它
+- **GitHub 建仓选的 license 会直接变成 `LICENSE` 文件**：它不读 README / 设计文档。本仓出现过
+  "README 写 AGPL、LICENSE 却是建仓默认的 MIT"，而后者才有法律效力。MIT 是永久授权、发出去
+  收不回来 —— 这次是在 `forks=0` 时换掉的（有时间窗）
 - **`postgres:18` 的卷必须挂 `/var/lib/postgresql`**（不是 `.../data`）：18 起 PGDATA 在
   `/var/lib/postgresql/18/docker`。挂错不报"挂载点不对"，而是入口脚本说"数据在 unused mount/volume 里"
   拒绝启动 → db `unhealthy`、`app`（`depends_on: service_healthy`）连启动都没有
