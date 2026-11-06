@@ -101,6 +101,13 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
   做的是**单次派活成本**（`subagent` → `details.spend` → `MessagePart.spend` → 工具行显示）。
   触发条件写在 STATUS §4.44（按角色计费 / 多人按人出账单 / 真出过事故）
 - **GitHub 建仓选的 license 会直接变成 `LICENSE` 文件**：它不读 README / 设计文档。本仓出现过
+- **"不随开源发布"写成注释 ≠ 不在仓库里**：`docs/REVERSE_ENGINEERING.md` 被 README 与 STATUS
+  两处声明"仅内部"，却一直 tracked，公开仓库上直接能打开。判定要看 `git ls-files`。
+  已 `git rm --cached` + `.gitignore`（本地保留），**但历史里仍在** —— 彻底清除要重写历史
+- **README 与 STATUS 双写必然长出过期句子**：什么"规划中"、"518 个测试"、"某半边是下一步"，
+  都是两边各抄一份的后果。读者不同：README 讲"能做什么"，STATUS 讲"怎么做的、坑在哪"
+- **`SelectionContext` 没有 `screenshot` 字段**（只有 kind/route/loc/selector/rect/text/styles/
+  elements/viewport）—— 曾把"留了没填"当成欠账写在 STATUS，实际是选了结构化描述而非像素
   "README 写 AGPL、LICENSE 却是建仓默认的 MIT"，而后者才有法律效力。MIT 是永久授权、发出去
   收不回来 —— 这次是在 `forks=0` 时换掉的（有时间窗）
 - **`postgres:18` 的卷必须挂 `/var/lib/postgresql`**（不是 `.../data`）：18 起 PGDATA 在
