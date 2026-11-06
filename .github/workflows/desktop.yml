@@ -143,3 +143,105 @@ jobs:
           if-no-files-found: error
           # 130MB 级产物，保留 14 天够试用；长期归档应该走 Release，不是 artifact
           retention-days: 14
+
+  # 推 tag 时把四份产物挂到 GitHub Release 上。
+  #
+  # 为什么要有这一步：artifact **14 天就过期，而且下载要登录**。想让人（或明天的自己）
+  # 换个机器装一遍，需要的是一个稳定链接。Release 资产就是那个链接。
+  #
+  # 只在推 tag 时跑：Release 是"我决定发一版"的动作，不该由一次手点的打包触发。
+  release:
+    name: Release（推 tag 时）
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          # 四个产物各落到 dist/<artifact 名>/ 下
+          pattern: tenon-*
+          path: dist
+
+      # 校验和解决的是"下载有没有坏"，不是"东西是不是我发的"（没有签名就做不到后者）。
+      # 大文件在这台机器上实测会 EOF —— 有个 sha256 至少能区分"没下完"和"包本身坏了"。
+      - name: 生成 SHA256SUMS
+        shell: bash
+        run: |
+          cd dist
+          shopt -s nullglob
+          files=(*/*.dmg */*.zip */*.exe */*.AppImage)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::一个产物都没有，先看 package 那几个 job"
+            exit 1
+          fi
+          sha256sum "${files[@]}" | sort -k2 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: 写 Release 说明
+        shell: bash
+        run: |
+          cat > NOTES.md <<'NOTES'
+          预览构建（未签名）。四个平台各一份，都是**免安装依赖**的整包：
+          Node 不用装、pnpm 随包、数据库是 WASM。
+
+          | 文件 | 平台 |
+          |---|---|
+          | `Tenon-*-arm64.dmg` / `-arm64-mac.zip` | macOS（Apple Silicon） |
+          | `Tenon-*.dmg` / `-mac.zip`（无 arm64 后缀） | macOS（Intel） |
+          | `Tenon Setup *.exe` | Windows x64（NSIS 安装包） |
+          | `Tenon-*.AppImage` | Linux x64 |
+
+          ## 未签名，系统会拦一次
+
+          没有 Apple / Windows 代码签名证书，所以：
+
+          - **macOS**：双击会提示"无法验证开发者"。右键 → 打开 → 再点"打开"；
+            或终端 `xattr -dr com.apple.quarantine /Applications/Tenon.app`
+          - **Windows**：SmartScreen 提示"未知发布者"。点"更多信息" → "仍要运行"
+          - **Linux**：`chmod +x Tenon-*.AppImage` 再运行
+
+          这不是包坏了，是没买证书。只影响第一次打开时的信任提示。
+
+          ## 校验
+
+          下载完先比一下 `SHA256SUMS.txt`（分辨"没下完"和"包本身坏了"）：
+
+          ```bash
+          shasum -a 256 -c SHA256SUMS.txt   # macOS / Linux
+          ```
+
+          ## 已知限制
+
+          - Windows / Linux 的产物**没有被真启动过**（CI 上没有 GUI 会话）；
+            只有 macOS 那份每次都会在 CI 里真启动一次。
+          - 没有 Hub：「组件商店」会显示未配置，本地三个官方组件可正常安装使用。
+          - 模型要自己配（OpenAI 兼容即可）；不配也能建应用、看 HMR，只是对话是 faux 假回复。
+          NOTES
+          cat NOTES.md
+
+      - name: 建 Release 并上传
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          TAG="${GITHUB_REF_NAME}"
+          files=(dist/*/*.dmg dist/*/*.zip dist/*/*.exe dist/*/*.AppImage dist/SHA256SUMS.txt)
+
+          # 带预发布后缀的 tag（如 v0.0.0-alpha.1）标成 prerelease，别让人以为这是正式版
+          extra=()
+          case "$TAG" in *-*) extra+=(--prerelease);; esac
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，改为覆盖上传（重跑同一 tag 是常见操作）"
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            gh release create "$TAG" "${files[@]}" \
+              --title "Tenon $TAG" \
+              --notes-file NOTES.md \
+              "${extra[@]}"
+          fi
+          gh release view "$TAG" --json url,assets --jq '"URL: \(.url)\n" + (.assets[] | "  \(.name)  \(.size/1024/1024|floor)MB")'
