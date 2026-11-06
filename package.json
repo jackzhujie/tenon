@@ -48,6 +48,7 @@
     "e2e:export": "tsx scripts/export-app.ts",
     "shot:export": "tsx scripts/shot-export.ts",
     "shot:usage": "tsx scripts/shot-usage.ts",
+    "shot:release": "tsx scripts/shot-release.ts",
     "e2e:docker": "tsx scripts/export-docker.ts",
     "e2e:postgres": "tsx scripts/e2e-postgres.ts",
     "shot:plugins": "tsx scripts/shot-plugins.ts"

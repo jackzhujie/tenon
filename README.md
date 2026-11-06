@@ -84,7 +84,7 @@ GLM / Kimi / Ollama…），保存即生效，不用重启。Key 本地加密存
 | 多 Agent | 1 主 + 5 子（调度 / 检索 / 脚本 / 调研 / E2E 验收 / 审查），**是真的另一个会话**（独立 transcript 与工具白名单）；能派活、能审代码、能自己点页面断言，崩溃后断点续跑 |
 | 看得见 | 任务树逐帧推（不是轮询）、用量面板（含跨应用汇总与单次派活成本）、运行时日志、异常聚合 |
 | 组件 | 一句话装「AI 小助手 / 导出 CSV / 审批流」；装什么写在应用自己的仓库里跟着 git 走，按 `hub > bundled` 覆盖层选版本；`db:*` 权限换到 `(应用, 组件)` 键值空间，数据活过重启 |
-| 发布 | 打 annotated tag + 推本地裸库（标准裸库，`git clone` 出来就是这一版）；发布前门禁**并行**真跑 `tsc` / `test` / `lint`，三态判定，被拒的发布不留 tag、不消耗版本号 |
+| 发布 | 打 annotated tag + 推本地裸库（标准裸库，`git clone` 出来就是这一版）；发布前门禁**并行**真跑 `tsc` / `test` / `lint`，三态判定，被拒的发布不留 tag、不消耗版本号；**同一版代码再打开对话框不重跑**（存档 + 三条判据） |
 | 导得出 | 静态包（拷走就能跑）/ Docker 上下文（compose 自带 PG，迁移自动跑）/ 桌面 `.app`（自带 pnpm，不依赖系统装了什么） |
 
 **还差什么**（完整清单与理由见 [STATUS.md](docs/STATUS.md) 的欠账段）：
@@ -125,6 +125,7 @@ pnpm build:web              # 前端产物（server 启动时把它读进内存�
 | `pnpm smoke:desktop` | 8 | 桌面冒烟：`build:desktop` → 真起窗口 |
 | `pnpm smoke:desktop:packaged` | 8 | 打包产物冒烟：真的起 `.app`、加载界面、退出后不留孤儿进程 |
 | `pnpm shot:usage` | — | 人眼验收：用量面板三个应用 → 截图看「全部应用」那一行 |
+| `pnpm shot:release` | — | 人眼验收：发布对话框（故意不装依赖 → 门禁真红）→ 截图看三项清单与"同一版代码"那句 |
 
 打包：`pnpm pack:desktop` → `apps/desktop/release/mac/Tenon.app`（`electron-builder --dir`，
 不做签名公证 —— 那要 Apple 账号）。安装包默认路径上不带任何需按平台编译的原生模块，打包脚本会审计并打印清单。

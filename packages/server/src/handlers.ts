@@ -5,7 +5,7 @@
  * 声明了方法却忘了实现，tsc 直接报错。运行期再叠一层 zod 输入/输出校验，
  * 防止「handler 返回了契约外的形状」这种更隐蔽的漂移。
  */
-import type { CoreServices } from '@tenon/core'
+import { lastCheckKey, readLastCheck, type CoreServices } from '@tenon/core'
 import { join } from 'node:path'
 import {
   SETTING_KEYS,
@@ -312,6 +312,8 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       await preview.stop(input.id)
       // 日志缓冲跟着应用一起丢，否则删掉的应用还在内存里留着几百行
       preview.forget(input.id)
+      // 预检存档也一起走：应用都没了，留着那条"上次检查没过"只是垃圾
+      core.settings.remove(lastCheckKey(input.id))
       await core.apps.delete(input.id, input.removeFiles)
       return { deleted: true }
     },
@@ -557,12 +559,57 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     // 但门禁的全部价值在于"发之前就知道"，而点了才知道等于没有
     'release.check': async (input) => {
       const app = core.apps.require(input.appId)
-      return inspectRelease({ core, app })
+      const result = await inspectRelease({ core, app })
+      /*
+       * 存下来（v1.2.23）：预检是**真跑**测试，几十秒。门禁没过的时候用户会反复打开
+       * 对话框看"还差什么" —— 每次重跑 30 秒才看到同样的三行，那才是真痛点。
+       *
+       * **只在真的跑了门禁时存**（`gate !== null`）：`blocked` 有值那种（工作区脏、
+       * 没提交、正在生成）是**瞬时状态**，几分钟后就变了，存下来只会让下次打开
+       * 看到一句已经过时的"工作区有未提交的改动"。
+       */
+      if (result.gate !== null) {
+        core.settings.set({
+          [lastCheckKey(app.id)]: {
+            commitSha: result.commitSha,
+            ready: result.ready,
+            blocked: result.blocked,
+            gate: result.gate,
+            elapsedMs: result.elapsedMs,
+            checkedAt: Date.now(),
+          },
+        })
+      }
+      return result
+    },
+
+    'release.lastCheck': async (input) => {
+      const app = core.apps.require(input.appId)
+      const check = readLastCheck(core.settings, app.id)
+      if (check === null) return { check: null, reusable: false }
+      /*
+       * "能不能直接复用这份存档" —— 三条判据，全在这里算，因为前端既看不到工作区
+       * 也看不到 HEAD。
+       *
+       * 第 2 条（工作区干净）是最容易被忘的那条：用户改了一半没提交时 HEAD 没变，
+       * 只比 sha 会拿"上一版通过"去证明"这一版"。
+       */
+      const paths = appPaths(core.home, app.id)
+      const head = await gitops.headSha(paths.repoDir).catch(() => null)
+      const dirty = await gitops.uncommittedChanges(paths.repoDir).catch(() => ['?'])
+      const reusable = head !== null && head === check.commitSha && dirty.length === 0
+      return { check, reusable }
     },
 
     'release.publish': async (input) => {
       const app = core.apps.require(input.appId)
-      return publishRelease({ core, app, notes: input.notes, force: input.force === true })
+      const result = await publishRelease({ core, app, notes: input.notes, force: input.force === true })
+      /*
+       * 发布成功 = 那份预检存档"用掉了"。留着它会显示"上次检查：通过"，而那条结论讲的是
+       * **已经发出去的那一版** —— 下一个版本的检查是全新的，从"还没查过"开始才对。
+       */
+      core.settings.remove(lastCheckKey(app.id))
+      return result
     },
 
     /*

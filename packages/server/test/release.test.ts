@@ -16,6 +16,7 @@
  * 是这类功能最容易出的毛病，一旦出现用户就会绕开它。
  */
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lastCheckKey } from '@tenon/core'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -542,3 +543,123 @@ describe('发布预检（release.check）', () => {
     expect(a.commitSha).toBe(b.commitSha)
   }, 90_000)
 })
+
+describe('预检存档（release.lastCheck，v1.2.23）', () => {
+  it('跑完预检能读到，且与那次检查一致', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+    const committed = await gitops.commitAll(paths.repoDir, 'feat: 写对了')
+    const sha = committed?.sha
+    expect(sha).toBeDefined()
+
+    // 从没查过：null，不是空对象 —— 界面要能区分"还没查"和"查了但没结果"
+    const before = await rpc<{ check: unknown }>(server, 'release.lastCheck', { appId })
+    expect(before.check).toBeNull()
+
+    const check = await rpc<{ gate: { ok: boolean; checks: CheckOutcome[] } }>(server, 'release.check', { appId })
+    const { check: stored } = await rpc<{ check: Record<string, unknown> | null }>(server, 'release.lastCheck', {
+      appId,
+    })
+    expect(stored).not.toBeNull()
+    expect(stored?.commitSha).toBe(sha)
+    expect(stored?.ready).toBe(check.gate.ok)
+    // 存档里的清单与那次检查一模一样：界面拿它逐项画，少一项就会画错
+    expect((stored?.gate as { checks: CheckOutcome[] }).checks.map((item) => item.id)).toEqual(
+      check.gate.checks.map((item) => item.id),
+    )
+    expect(typeof stored?.checkedAt).toBe('number')
+  }, 60_000)
+
+  it('★ 工作区脏时（没跑门禁）不覆盖上次的存档', async () => {
+    /*
+     * "工作区脏"是**瞬时状态**，几分钟后就变了。存下来只会让下次打开对话框看到
+     * 一句已经过时的"工作区有未提交的改动"，而用户真正想看的是上次跑出来的结论。
+     * 所以 gate 为 null 时不写 —— 旧的那份继续留着（界面会标"已过期"）。
+     */
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+    const committed = await gitops.commitAll(paths.repoDir, 'feat: 写对了')
+    const sha = committed?.sha
+    expect(sha).toBeDefined()
+    await rpc(server, 'release.check', { appId })
+
+    await writeFile(join(paths.repoDir, 'note.txt'), '写了一半\n')
+    const blocked = await rpc<{ blocked: unknown }>(server, 'release.check', { appId })
+    expect(blocked.blocked).not.toBeNull()
+
+    const { check } = await rpc<{ check: { commitSha: string } | null }>(server, 'release.lastCheck', { appId })
+    expect(check?.commitSha).toBe(sha)
+  }, 60_000)
+
+  it('★ 发布成功之后清掉：下一个版本从"还没查过"开始', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+    await gitops.commitAll(paths.repoDir, 'feat: 写对了')
+    await rpc(server, 'release.check', { appId })
+    expect((await rpc<{ check: unknown }>(server, 'release.lastCheck', { appId })).check).not.toBeNull()
+
+    await rpc(server, 'release.publish', { appId })
+
+    // 那份结论讲的是**已经发出去的那一版**，留着会显示"上次检查：通过"而让人以为下一版也过了
+    expect((await rpc<{ check: unknown }>(server, 'release.lastCheck', { appId })).check).toBeNull()
+  }, 60_000)
+
+  it('删应用时把存档一起清掉（不留孤儿 settings 键）', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+    await gitops.commitAll(paths.repoDir, 'feat: 写对了')
+    await rpc(server, 'release.check', { appId })
+
+    const key = lastCheckKey(appId)
+    expect(server.core.settings.get(key)).toBeDefined()
+
+    await rpc(server, 'app.delete', { id: appId, removeFiles: true })
+    expect(server.core.settings.get(key)).toBeUndefined()
+  }, 60_000)
+  it('★ reusable 的判据：同一版 + 工作区干净才为真，改了任何一样都要真跑', async () => {
+    /*
+     * 这是"打开对话框不再等 30 秒"的全部依据，所以三条边界都要钉住：
+     * 1. 没存档 → false
+     * 2. 同一版 + 干净 → true
+     * 3. 之后又提交 → false
+     * 4. **工作区脏（HEAD 没变）→ false** ← 最容易漏的一条：只比 sha 会拿
+     *    "上一版通过"去证明"这一版"
+     */
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+    await gitops.commitAll(paths.repoDir, 'feat: 写对了')
+
+    // 1. 从没查过
+    expect((await rpc<{ reusable: boolean }>(server, 'release.lastCheck', { appId })).reusable).toBe(false)
+
+    // 2. 查完、同一版、干净
+    await rpc(server, 'release.check', { appId })
+    expect((await rpc<{ reusable: boolean }>(server, 'release.lastCheck', { appId })).reusable).toBe(true)
+
+    // 4. 工作区脏而 HEAD 没变（先测这条：它最容易漏）
+    await writeFile(join(paths.repoDir, 'note.txt'), '改了一半\n')
+    expect((await rpc<{ reusable: boolean }>(server, 'release.lastCheck', { appId })).reusable).toBe(false)
+    await rm(join(paths.repoDir, 'note.txt'))
+
+    // 3. 又提交了一版（存档还是上一版的）
+    await writeFile(join(paths.repoDir, 'src', 'main.ts'), 'export const answer: number = 43\n')
+    await gitops.commitAll(paths.repoDir, 'feat: 改成 43')
+    expect((await rpc<{ reusable: boolean }>(server, 'release.lastCheck', { appId })).reusable).toBe(false)
+  }, 60_000)
+})
+

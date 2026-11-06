@@ -32,7 +32,7 @@ export * from './stores/apps.js'
 export * from './stores/providers.js'
 export * from './stores/releases.js'
 export * from './stores/settings.js'
-export { SETTING_KEYS, budgetKey, readBudget, NO_BUDGET } from './setting-keys.js'
+export { SETTING_KEYS, budgetKey, lastCheckKey, readBudget, readLastCheck, NO_BUDGET } from './setting-keys.js'
 export { PriceStore, type UpsertPriceInput } from './stores/prices.js'
 export {
   ComponentStore,

@@ -1,4 +1,4 @@
-import type { Budget } from '@tenon/protocol'
+import { ReleaseCheckRecord, type Budget } from '@tenon/protocol'
 import type { SettingsStore } from './stores/settings.js'
 
 /** 产品级设置键（拼写集中在这里，避免各路由各写一份字符串） */
@@ -40,6 +40,38 @@ export function readBudget(settings: SettingsStore, appId: string): Budget {
 /** 负数与 NaN 一律当"没设"：它们只会让比较永远成立，变成一个关不掉的应用 */
 function positiveOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+/**
+ * 上次预检的结论：`release.lastCheck.<appId>`（v1.2.23）。
+ *
+ * 与 `budgetKey` 同一个理由：键里带 id，写不进 `SETTING_KEYS` 常量表。
+ */
+export function lastCheckKey(appId: string): string {
+  return `release.lastCheck.${appId}`
+}
+
+/**
+ * 读上次预检的存档。
+ *
+ * 三条边界各有处置：
+ *
+ * 1. **没有** → `null`（从没查过，正常状态）
+ * 2. **JSON 坏了** → `null`（`SettingsStore.get` 已经吞掉解析错误）
+ * 3. **形状不对** → `null`。这一条是给"代码升级后旧存档缺字段"准备的：用 zod 的
+ *    `safeParse` 而不是手工挡几个字段，是因为**形状会变**（比如以后加一项），
+ *    手写的校验最容易在加字段时漏掉一处，而漏掉的后果是界面上显示一个 undefined。
+ *
+ * 绝不抛：读坏一格不该让发布对话框打不开。
+ */
+export function readLastCheck(
+  settings: SettingsStore,
+  appId: string,
+): ReleaseCheckRecord | null {
+  const raw = settings.get<unknown>(lastCheckKey(appId))
+  if (raw === undefined) return null
+  const parsed = ReleaseCheckRecord.safeParse(raw)
+  return parsed.success ? parsed.data : null
 }
 
 export type { SettingsStore }

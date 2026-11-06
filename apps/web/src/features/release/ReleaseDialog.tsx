@@ -24,6 +24,7 @@ import { CHECK_LABELS } from '@tenon/protocol'
 import type { CheckOutcome, GitCommit, Release } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
+import { relativeTime } from '../../lib/relative-time.js'
 import { rpc } from '../../lib/rpc.js'
 import type {
   CheckOutcomeResult,
@@ -102,6 +103,9 @@ function CheckRow({ check }: { check: CheckOutcome }) {
   )
 }
 
+/** 提交号只显示前 7 位。声明在模块级：`LastCheckRow` 在组件外，也要用它 */
+const shortSha = (sha: string): string => sha.slice(0, 7)
+
 function GateList({ checks }: { checks: CheckOutcome[] }) {
   return (
     <ul className="divide-y divide-line-soft rounded-lg border border-line">
@@ -144,6 +148,13 @@ export function ReleaseDialog({
   const [result, setResult] = useState<PublishResult | null>(null)
   /** 预检结果。null = 还没出来（checking 为真时） */
   const [preflight, setPreflight] = useState<ReleaseCheck | null>(null)
+  /**
+   * 这次显示的是"上次那份结论"的时间戳（v1.2.23）；null = 是真跑出来的。
+   *
+   * 存时间戳而不是布尔：界面要说"这是 3 分钟前的检查结果"，只说"来自缓存"
+   * 用户没法判断该不该信。
+   */
+  const [usedCacheAt, setUsedCacheAt] = useState<number | null>(null)
   const [checking, setChecking] = useState(false)
   /** 预检本身没跑成（网络 / 服务端崩）。它不等于"检查没过"，不能混成一个红条 */
   const [checkError, setCheckError] = useState<string | null>(null)
@@ -218,13 +229,47 @@ export function ReleaseDialog({
     setConfirming(false)
     const outcome = await onCheck()
     setChecking(false)
+    // 真跑出来的结论，不再是"上次那份"
+    setUsedCacheAt(null)
     if (outcome.ok) setPreflight(outcome.result)
     else setCheckError(outcome.message)
   }, [onCheck])
 
   /**
-   * 打开就跑一次预检。
+   * 打开对话框时决定**要不要真跑一遍**（v1.2.23）。
    *
+   * 原来是无条件跑：同一版代码，关掉再打开就要再等 30 秒（有测试的应用更久）。
+   * 现在先问服务端"上次那份结论还能不能用" —— 它比三条：存档在、HEAD 没变、
+   * 工作区干净。全成立就直接把那份结果显示出来，一秒都不用等。
+   *
+   * **"之后又提交过"和"工作区有没提交的改动"都必须真跑**。拿"A 版通过"去证明
+   * "B 版"比不检查更糟，它给的是虚假的安心 —— 这条在 `stale` 的逻辑里已经写过一次，
+   * 这里是同一个道理的另一个入口。
+   */
+  const bootstrap = useCallback(async (): Promise<void> => {
+    if (appId === null) return
+    try {
+      const { check, reusable } = await rpc('release.lastCheck', { appId })
+      if (reusable && check !== null) {
+        setPreflight({
+          ready: check.ready,
+          blocked: check.blocked,
+          commitSha: check.commitSha,
+          gate: check.gate,
+          // 能复用就说明 HEAD 没变，所以不存在"结果讲的是上一版"这回事
+          stale: false,
+          elapsedMs: check.elapsedMs,
+        })
+        setUsedCacheAt(check.checkedAt)
+        return
+      }
+    } catch {
+      // 读存档失败不该挡住正常预检：当成"没有存档"，照常跑一遍
+    }
+    await runCheck()
+  }, [appId, runCheck])
+
+  /**
    * `openedFor` 是给 React StrictMode 的：开发模式下 effect 会跑两遍，而这个 effect
    * 跑一遍就是**真跑一遍 `pnpm run test`**（几十秒，还占满 CPU）。按"这一次打开"去重 ——
    * 不能靠调用方去重，因为它不知道我们为什么要跑两次。
@@ -240,8 +285,8 @@ export function ReleaseDialog({
     setNotes('')
     setError(null)
     setResult(null)
-    void runCheck()
-  }, [open, runCheck])
+    void bootstrap()
+  }, [open, bootstrap])
 
   // 计时：只在"正在检查"期间走，每半秒刷一次（刷太勤没有意义，人眼也看不出）
   useEffect(() => {
@@ -288,7 +333,6 @@ export function ReleaseDialog({
     setConfirming(false)
   }
 
-  const shortSha = (sha: string): string => sha.slice(0, 7)
 
   /**
    * 主按钮。
@@ -478,6 +522,18 @@ export function ReleaseDialog({
               )}
             </div>
           </div>
+
+          {/*
+            "这份是缓存"必须说出来，而且要说清**为什么可以信**（同一版代码、工作区没动）。
+            只写"来自缓存"会让人怀疑"你是不是没检查"。
+          */}
+          {usedCacheAt !== null && !checking && (
+            <p className="text-[10.5px] leading-relaxed text-faint">
+              这是 <span className="text-muted">{relativeTime(usedCacheAt)}</span> 对
+              <span className="text-muted">同一版代码</span>的检查结果 —— 代码没变，就直接用了，没重跑。
+              想再看一遍点「重新检查」。
+            </p>
+          )}
 
           {preflightBlock()}
 

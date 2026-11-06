@@ -20,6 +20,7 @@ import {
   shortPath,
   STATUS_SIGN,
 } from '../../lib/diff.js'
+import { relativeTime } from '../../lib/relative-time.js'
 
 export interface DiffPanelProps {
   commits: GitCommit[]
@@ -37,14 +38,6 @@ export interface DiffPanelProps {
   onSelect(sha: string): void
   onRevert(sha: string, dbRestore: boolean): void
   onClose(): void
-}
-
-function relativeTime(at: number): string {
-  const delta = Date.now() - at
-  if (delta < 60_000) return '刚刚'
-  if (delta < 3_600_000) return `${String(Math.floor(delta / 60_000))} 分钟前`
-  if (delta < 86_400_000) return `${String(Math.floor(delta / 3_600_000))} 小时前`
-  return new Date(at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }
 
 const SIGN_CLASS: Record<DiffFile['status'], string> = {
@@ -287,7 +280,7 @@ export function DiffPanel({
                 <span className="flex items-baseline gap-1.5">
                   <span className="font-mono text-[10.5px] text-muted">{commit.sha.slice(0, 7)}</span>
                   {index === 0 && <span className="text-[9.5px] text-brand-soft">最新</span>}
-                  <span className="ml-auto text-[10px] text-faint">{relativeTime(commit.at)}</span>
+                  <span className="ml-auto text-[10px] text-faint">{relativeTime(commit.at, 'date')}</span>
                 </span>
                 <span className="mt-0.5 block truncate text-[11.5px] text-ink/85" title={commit.message}>
                   {commit.message.split('\n')[0]}

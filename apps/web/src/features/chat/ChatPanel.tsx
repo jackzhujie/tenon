@@ -5,20 +5,13 @@ import type { LiveTurn } from '../../hooks/useWorkspace.js'
 import type { StreamState } from '../../lib/stream.js'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
+import { relativeTime } from '../../lib/relative-time.js'
 
 const STATUS_TEXT: Record<AppStatus, string> = {
   idle: '空闲',
   running: '运行中',
   error: '出错',
   archived: '已归档',
-}
-
-function relativeTime(at: number): string {
-  const seconds = Math.round((Date.now() - at) / 1000)
-  if (seconds < 60) return '刚刚'
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟前`
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)} 小时前`
-  return `${Math.round(seconds / 86_400)} 天前`
 }
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {

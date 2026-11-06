@@ -29,6 +29,7 @@ import {
   ProviderProfile,
   Release,
   TaskGraph,
+  ReleaseCheckRecord,
   TemplateInfo,
   UsageAppUsage,
   UsageSnapshot,
@@ -445,6 +446,36 @@ export const rpcMethods = {
       stale: z.boolean(),
       /** 这次预检花了多久（用户要理解为什么打开对话框要等一会儿） */
       elapsedMs: z.number().int().nonnegative(),
+    }),
+  },
+  /**
+   * 上一次预检的存档（v1.2.23）。
+   *
+   * **为什么存**：`release.check` 是**真跑**测试，几十秒。门禁没过的时候用户会反复打开
+   * 对话框看"还差什么" —— 每次重跑 30 秒才能看到同样的三行，这才是真痛点。
+   *
+   * **为什么存了也不影响正确性**：`release.publish` **自己还会再跑一遍门禁**
+   * （见 `publishRelease`）。这份存档只是 UI 的"上次看到过什么"，**不是发布依据**。
+   *
+   * 与 `release.check` 的输出比少了 `stale`：存下来的东西天然"可能过期"，
+   * 判据在**读**的时候算（`commitSha` 与当前 HEAD 比），不是存的时候。
+   */
+  'release.lastCheck': {
+    input: z.object({ appId: Id }),
+    output: z.object({
+      check: ReleaseCheckRecord.nullable(),
+      /**
+       * 这份存档现在**还能不能直接用**（v1.2.23）。
+       *
+       * 判据三条，**都由服务端算**（前端看不到工作区与 HEAD）：
+       * 1. 存档针对的提交就是当前 HEAD —— 之后没提交过
+       * 2. 工作区干净 —— 用户可能改了一半没提交，那时 HEAD 没变但代码变了
+       * 3. 存档本身存在
+       *
+       * 三条全成立时，打开对话框**不必再跑那 30 秒**：同一版代码，结论就是那个。
+       * 只要有一条不成立，就得真跑一遍 —— 拿旧结论给新代码用，比不检查更糟。
+       */
+      reusable: z.boolean(),
     }),
   },
   'release.publish': {

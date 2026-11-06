@@ -77,6 +77,25 @@ export const GateOutcome = z.object({
 export type GateOutcome = z.infer<typeof GateOutcome>
 
 /**
+ * 一次预检的存档形状（`release.lastCheck`，v1.2.23）。字段是 `release.check` 输出的子集。
+ *
+ * 为什么是子集而不是整个输出：`stale` 是"检查期间又提交了"的**瞬时**判断，
+ * 存下来没有意义 —— 存下来的东西天然可能过期，那个判据应该在**读**的时候
+ * 拿 `commitSha` 与当前 HEAD 比。
+ */
+export const ReleaseCheckRecord = z.object({
+  /** 检查针对的是哪个提交。没有提交时为 null（那时 `blocked` 一定有值） */
+  commitSha: z.string().nullable(),
+  ready: z.boolean(),
+  blocked: z.object({ code: z.string(), message: z.string() }).nullable(),
+  gate: GateOutcome.nullable(),
+  elapsedMs: z.number().int().nonnegative(),
+  /** 检查完成的时间戳 —— 界面要显示"3 分钟前"，那需要一个绝对时间做基准 */
+  checkedAt: z.number().int().nonnegative(),
+})
+export type ReleaseCheckRecord = z.infer<typeof ReleaseCheckRecord>
+
+/**
  * 这一版是怎么发出去的。
  * - `pass`：检查跑过且没有 fail（**包括全部 skip 的情况** —— 那是"没得检查"，不是"偷偷发的"）
  * - `forced`：检查没过，用户明确选择"我知道，仍然发布"
