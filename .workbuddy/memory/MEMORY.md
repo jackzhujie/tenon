@@ -28,8 +28,8 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
 **导出静态包**（`export.static`，产物拷走就能跑）+ **Docker 上下文**（`export.docker`，
 M2 第 8 步落地；compose 自带 PG，`e2e:docker` 全栈 21 项真跑 compose）。
-全绿基线：**lint 0 error / 10 warn** / typecheck 18 project / test **713** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
-e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** / **shot:usage** /
+全绿基线：**lint 0 error / 10 warn** / typecheck 18 project / test **718** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** / **shot:usage** / **shot:release** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
@@ -93,6 +93,18 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 - **用量汇总缺一格就会骗人**：`known`（还没账本 ≠ 花了 0）、`failed`（读不到的不加进合计）、
   `priced`（没配价格时 $0 是"没算"）。三格全是"看起来像数字其实是假的"
 - **`formatTokens` 10k 以上取整会让汇总对不上**（6.3k+4.2k=10k）→ 改成 10k~99.9k 保留一位小数
+- **"打开就自动跑"的对话框里，"上次结论"永远没机会显示**：想做"预检结论常驻"时第一版是
+  "在旁边多显示一块"，但对话框一打开就真跑（`checking` 立刻为真），那块 UI 永不渲染。
+  正确做法是**能复用就不跑**：判据三条（存档在 + HEAD 没变 + **工作区干净**），
+  由服务端算（前端看不到工作区）。第 3 条最容易漏 —— 改了没提交时 HEAD 没变但代码变了
+- **发布对话框的存档只在 `gate !== null` 时写**：`blocked`（工作区脏/没提交/正在生成）
+  是瞬时状态，存下来只会让下次打开看到一句过时的话；发布成功后要删（那结论讲的是
+  已经发出去那版）；删应用要一起删
+- **`relativeTime` 已抽到 `apps/web/src/lib/relative-time.ts`**（原本 ChatPanel 与
+  DiffPanel 各一份，`round` vs `floor` 还不一样）。`beyondDay` 参数保留两种
+  "超过一天"的显示：会话问"多新"，提交问"哪一天"
+- **JSX 文本里的 `**xx**` 不会变成加粗**，会显示字面星号。类型检查和单测都不会管，
+  只能看图
 - **杀 pnpm 不等于杀掉它的子进程**：`child.kill('SIGKILL')` 只杀直接子进程，而它再 spawn
   `eslint`/`vitest`，**孙进程握着 stdout** → 管道不关 → `close` 永远不来 → `await` 挂着，
   界面"检查中…"永不结束。要 `detached: true` 进自己的进程组 + 负 pid 杀整组，
