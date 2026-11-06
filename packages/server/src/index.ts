@@ -125,7 +125,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
    * 而那时 ComponentRuntime 还没建（它依赖 agent）。用一个后填的引用即可 ——
    * 回调真正被调用时（用户装组件那一刻）它早已就位。
    */
-  let componentsRef: ComponentRuntime | undefined
+  // 用一格的容器而不是 `let`：这里只赋值一次，`const` 更准确，但 `const` 做不到"先声明、
+  // 等 ComponentRuntime 建好再填"。容器把这件事写明白，也不用挂 disable 注释。
+  const componentsRef: { current: ComponentRuntime | undefined } = { current: undefined }
   const resolvedRoots = options.pluginRoots ?? pluginRoots({ env, homeRoot: core.home.root })
   /*
    * Hub 配置（M6）：`env > 随包 hub.json > 未配置`，见 `resolveHubConfig`。
@@ -161,7 +163,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       roots: resolvedRoots,
       tenonVersion: options.version ?? '0.0.0',
       onChanged: async (appId) => {
-        await componentsRef?.reload(appId)
+        await componentsRef.current?.reload(appId)
       },
       /*
        * 让 Agent 也能装"本机还没有"的组件（否则它只能说"请去插件页点一下"）。
@@ -180,7 +182,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     store: core.components,
     tenonVersion: options.version ?? '0.0.0',
   })
-  componentsRef = components
+  componentsRef.current = components
   const server = buildServer({
     core,
     agent,

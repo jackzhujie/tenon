@@ -1381,6 +1381,11 @@ tsc --noEmit  →  eslint  →  vitest run（若有）  →  build（client+serv
 >
 > `lint` 脚本本身属于**生成应用自己的资产**（跟着 `eslint.config.mjs` 一起被导出、可以被用户改），
 > 所以 eslint 装在应用的 `devDependencies` 里，不用 Tenon 侧那一份。代价是每个应用多约 12MB。
+>
+> **Tenon 自己也接上了（v1.2.21）**：根目录一份 `eslint.config.mjs` + `pnpm lint` + CI 里一步。
+> 两份配置**刻意不同** —— 生成应用那份只留三条（它从零开始、量小，规则一多就"写一次红一次"）；
+> 本仓库这份可以宽些，但也只宽到"能长期绿"为止（常年红的检查同样等于不存在）。
+> 三条例外（`no-undef` / `no-useless-assignment` / `set-state-in-effect`）各有实测理由，见 STATUS §4.47。
 
 ### 8.7 模板与生成器（M1 落地：`packages/generator`）
 

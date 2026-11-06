@@ -42,7 +42,7 @@ const LEVEL_RANK: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, er
 
 /** 去掉 CSI / OSC 序列（Vite、Nest 的输出都带颜色） */
 export function stripAnsi(text: string): string {
-  // eslint-disable-next-line no-control-regex
+   
   return text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\u001B\][^\u0007]*\u0007/g, '')
 }
 

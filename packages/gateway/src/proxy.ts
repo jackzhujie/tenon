@@ -19,7 +19,6 @@ import type { Server, Socket } from 'node:net'
 import {
   PAGE_HELLO_PATH,
   PAGE_POLL_PATH,
-  PAGE_REPLY_PATH,
   PAGE_SCRIPT,
   PAGE_SCRIPT_PATH,
   injectPageScript,

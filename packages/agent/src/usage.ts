@@ -280,7 +280,6 @@ export class UsageService {
   private async compose(appId: string, entry: Entry): Promise<UsageSnapshot> {
     await this.read(entry)
     const budget = this.budget(appId)
-    const choice = this.options.pool.modelChoice
     return {
       appId,
       totals: entry.totals,

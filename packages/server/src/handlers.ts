@@ -26,7 +26,6 @@ import {
   hubKeyFingerprint,
   installComponentWithHub,
   installFromHubIndex,
-  latestVersion,
   listAvailable,
   listInstalledHubComponents,
   planHubUpdates,

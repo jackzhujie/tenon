@@ -202,7 +202,11 @@ export class HarnessPool {
         })
     // `subagent` 需要 Harness（子会话的模型/工具只能在创建那一刻定），而扩展必须在
     // `Harness.open` 之前建好 —— 所以给一个懒读取器，调用发生时它一定已经有值。
-    let harnessRef: Harness | undefined
+    //
+    // 用一格的容器而不是 `let`：`let` 在这里只赋值一次，`eslint` 会（正确地）建议
+    // `const`，但 `const` 又做不到"先声明、等 Harness 建好再填"。容器把这件事写明白，
+    // 也不用挂一条 disable 注释。
+    const harnessRef: { current: Harness | undefined } = { current: undefined }
     // registry 全量：子角色按白名单从这里面挑
     const tools: ToolRegistration[] = [
       ...(coding.tools ?? []),
@@ -211,7 +215,7 @@ export class HarnessPool {
       ...codeact.tools,
     ]
     const subagent = subagentExtension({
-      getHarness: () => harnessRef,
+      getHarness: () => harnessRef.current,
       getTools: () => tools,
       // 子会话默认继承父会话的扩展；CodeAct 还要额外一个（它的工具在那个扩展里）
       getExtensions: () => [codeact.extension],
@@ -257,7 +261,7 @@ export class HarnessPool {
       { models: this.options.model.models, registry },
       ctx,
     )
-    harnessRef = harness
+    harnessRef.current = harness
 
     // ★ 崩溃恢复的唯一开关
     const resumed: unknown = harness.resume()

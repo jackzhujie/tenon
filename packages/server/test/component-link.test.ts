@@ -12,7 +12,7 @@
  * 与这里测试客户端用的是**同一套 chord 调用**，只是它多了 DOM。
  */
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'

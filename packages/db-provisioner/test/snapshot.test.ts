@@ -12,7 +12,7 @@
  * 4. **档位不匹配必须拒绝**。拿 PGlite 的 tar.gz 去喂 `pg_restore` 只会得到
  *    一句看不懂的报错，不如在这里说清楚。
  */
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from 'pg'

@@ -19,7 +19,7 @@ import type { SseEvent, UsageAppUsage, UsageSnapshot, UsageTotals } from '@tenon
 import { appPaths, resolveHome } from '@tenon/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { RunningServer } from '../src/index.js'
-import { TEST_TOKEN, boot, openSse, rpc as rpcSupport } from './support.js'
+import { boot, openSse, rpc as rpcSupport } from './support.js'
 
 let dir: string
 let running: RunningServer | undefined

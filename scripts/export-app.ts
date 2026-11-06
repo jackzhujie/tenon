@@ -163,13 +163,15 @@ try {
   delete env['NODE_OPTIONS']
 
   const child = spawn(join(result.dir, 'start.sh'), [], { cwd: result.dir, env, stdio: ['ignore', 'pipe', 'pipe'] })
-  let output = ''
-  child.stdout.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
-  child.stderr.on('data', (chunk: Buffer) => {
-    output += chunk.toString()
-  })
+  /*
+   * 必须把这两条管道读掉：`start.sh` 的输出超过管道缓冲区（通常 64KB）之后，
+   * 不读它子进程就会**阻塞在 write 上** —— 表现是"启动卡住"，而且没有任何报错。
+   *
+   * 这里刻意只 `resume()` 不存：原来是存进一个 `output` 变量，但全文从没读过它，
+   * 等于白占内存（而且误导人以为失败时会打印它）。
+   */
+  child.stdout.resume()
+  child.stderr.resume()
   exported = {
     pid: child.pid,
     stop: () => child.kill('SIGTERM'),

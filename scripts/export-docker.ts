@@ -20,7 +20,6 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appPaths, resolveHome } from '../packages/core/src/index.js'
 import { startServer, type RunningServer } from '../packages/server/src/index.js'
 
 const TOKEN = 'e2e-docker-token'
@@ -134,8 +133,6 @@ try {
     name: 'Docker 验收',
     templateId,
   })
-  const paths = appPaths(resolveHome({ TENON_HOME: home }), created.app.id)
-
   const port = await freePort()
   console.log(`\n2) 导出 Docker 构建上下文（对外端口 ${port}）`)
   const started = Date.now()

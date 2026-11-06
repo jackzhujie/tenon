@@ -44,8 +44,6 @@ import {
   type RoleSpec,
 } from '../roles.js'
 
-const ctx = BACKGROUND_CONTEXT
-
 export const SUBAGENT_EXTENSION = 'tenon.subagent'
 export const SUBAGENT_TOOL = 'subagent'
 
@@ -103,7 +101,7 @@ function extraExtensions(
 }
 
 /** 子会话里最后一条 assistant 文本就是"结论" */
-async function readAnswer(conversation: Conversation, context: typeof ctx): Promise<string> {
+async function readAnswer(conversation: Conversation, context: typeof BACKGROUND_CONTEXT): Promise<string> {
   const view = await conversation.viewState(context)
   try {
     const messages = normalizeEntries(view.value.entries as unknown as RawEntry[])
@@ -259,7 +257,7 @@ type Spend = {
 async function readSpend(
   harness: Harness,
   child: Conversation,
-  context: typeof ctx,
+  context: typeof BACKGROUND_CONTEXT,
 ): Promise<Spend | null> {
   try {
     const state = await harness.snapshot(UsageDoc, child.id, context)

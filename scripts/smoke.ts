@@ -53,7 +53,13 @@ function waitReady(child: ReturnType<typeof spawn>, timeoutMs = 25_000): Promise
   })
 }
 
-/** 带头部与超时的 fetch，避免某个环节静默挂住整条冒烟 */
+/**
+ * 带头部与超时的 fetch，避免某个环节静默挂住整条冒烟。
+ *
+ * 返回 `any` 是刻意的：响应形状由**被测服务**决定，而冒烟脚本每一步只读几个固定字段。
+ * 写死类型的结果是每个调用点都要断言一次，读起来比 `any` 更糟。
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function httpJson(url: string, init: RequestInit, timeoutMs = 15_000): Promise<any> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)

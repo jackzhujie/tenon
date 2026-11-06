@@ -192,9 +192,6 @@ type Action =
   | { kind: 'error'; message: string | null }
   | { kind: 'event'; event: SseEvent }
 
-/** 流式气泡的固定 id：pi 的 assistant entry id 在 `message_end` 之前不存在 */
-const LIVE = 'live'
-
 function appendDelta(live: LiveTurn | null, text: string): LiveTurn {
   return { text: (live?.text ?? '') + text, tools: live?.tools ?? [] }
 }

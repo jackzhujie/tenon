@@ -25,7 +25,7 @@ import { corsHeaderRecord, handleCors } from './cors.js'
 import { ComponentRuntime } from './components.js'
 import { createHandlers, type HandlerMap, type ServerDeps } from './handlers.js'
 import { SseBus } from './sse.js'
-import { createStaticServing, type StaticServing } from './static.js'
+import { createStaticServing } from './static.js'
 
 const HEARTBEAT_MS = 15_000
 

@@ -70,17 +70,6 @@ const brain: AssistantBrain = {
   complete: async ({ text }) => `回答：${text}`,
 }
 
-let hostCounter = 0
-function newHost(appId: string): Host<Principal> {
-  hostCounter += 1
-  return createHost<Principal>({
-    name: `ui-${hostCounter}`,
-    self: { appId },
-    principalKey: (principal) => principal.appId,
-    kind: 'client',
-  })
-}
-
 describe('装载 server facet', () => {
   it('import 起来并调用 activate；没激活的组件不会出现在 loaded 里', async () => {
     await fixture(

@@ -1,6 +1,6 @@
-## 质量门禁：类型检查 + 测试 + 前端构建
+## 质量门禁：lint + 类型检查 + 测试 + 前端构建
 ##
-## 为什么只有这三步：
+## 为什么只有这四步：
 ## - **不跑 `e2e:*`**（docker / 真 PG / Electron）：runner 未必有容器运行时，而且那些脚本
 ##   本来就是"在真机上手动跑"的（`pnpm e2e:docker` / `e2e:postgres` / `shot:*`）。
 ##   把它们塞进 CI 会得到一堆需要 sudo / GUI / 大镜像的步骤，失效时没人愿意修。
@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   check:
-    name: typecheck + test + build
+    name: lint + typecheck + test + build
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -44,7 +44,11 @@ jobs:
       - name: 装依赖
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      # 先跑最快的：类型错了就不必等测试
+      # 最快的先跑（约 3 秒）：一条未用变量就没必要再等 5 分钟的类型检查
+      - name: Lint
+        run: pnpm lint
+
+      # 类型错了就不必等测试
       - name: 类型检查（18 个 project）
         run: pnpm typecheck
 

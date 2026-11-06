@@ -1949,13 +1949,65 @@ CI 抓到这一条，也说明**这类跨平台判断只有 CI 能验**。
 
 **没做的两件（如实记）**：
 
-1. **Tenon 自己还没有 eslint**。只给**生成的应用**接了：它们从零开始、量小，规则一开就干净。
-   本仓库几万行，同一套规则开下去是几千条历史问题 —— 那是一次专门的清理工程，
-   不是"顺手加一下"。**现状是"我们要求生成的应用过 lint，自己的代码没过"**，
-   这件事要么接受、要么排期清，不能装作不存在。
+1. ~~Tenon 自己没有 eslint~~ → **已接上（§4.47）**：真实要修的是 16 条 error，全清完了。
+   （当初以为"几万行开下去是几千条历史问题"—— 实测 27 条，判断错了。原因见 §4.47 那张表：
+   那个"几万"来自没 ignore 的逆向材料与构建产物。）
 2. **发布对话框的第三行没截图验收**。但确认了它是**遍历 `checks` 渲染**的
    （`CHECK_LABEL[check.id] ?? check.id` + `summary`），所以第三行会自动出现 ——
    剩下的风险只是"三行会不会把对话框撑高"，不是"会不会不显示"。
+
+### 4.47 Tenon 自己的 lint 也接上了（67,590 → 794 → 27 → 0）
+
+§4.46 给生成的应用接了 lint，但**本仓库自己没有** —— "我们要求生成的应用过 lint，
+自己的代码没过"。有人问"那自己的问题多吗"，于是跑了一遍。
+
+**先说那个数字是怎么骗人的**（这一节最值得记的就是这张表）：
+
+| 配置 | 报出来的问题 | 多出来的来自哪 |
+|---|---|---|
+| 不 ignore `docs/reverse/` | **67590** | 逆向导出的几百个**压缩过的** `.js`（已进 `.gitignore`，但磁盘上还在） |
+| 排除研究材料，但没排产物 | **794** | `plugins/bundled/*/web.js`（3.4MB 单文件 bundle）里 732 条 |
+| **合理配置** | **27**（16 error + 11 warn） | ← 真的 |
+| 修完 | **0 error / 10 warn** | |
+
+所以"lint 报了几万个问题"这种说法，**先问 ignore 配对了没有**。
+
+#### 三条例外，每条都有自己的理由
+
+| 规则 | 处置 | 为什么 |
+|---|---|---|
+| `no-undef` | `off` | TS 自己就管（且有类型信息）。这条只能靠 globals 白名单猜，对 `.ts` 是纯噪声 |
+| `no-useless-assignment` | `off` | 探到的 15 处**全是同一种写法**：给 `let` 一个初值以满足 TS 的确定性赋值分析（`let last = ''` + `for(;;)`），去掉它 tsc 会报"使用前未赋值" |
+| `react-hooks/set-state-in-effect` | `warn` | react-hooks v7 的新性能建议。7 个面板都是 `useEffect(() => { setLoading(true); void load() })`，值得知道，但不该拦发布 |
+
+#### `--fix` 基本没用
+
+`fixableErrorCount: 0`。13 个未用变量要删代码（eslint 不给 fixer，因为不安全），
+`prefer-const` 的 fixer 在 eslint 9+ 被降级了。**43 条全得手改** —— 但每条都是一两行的活。
+
+#### 修的过程里三处值得单说
+
+1. **`packages/agent/src/usage.ts` 那个未用的 `choice` 是我上一轮自己引入的**：把 `priced`
+   抽成方法之后忘了删局部变量。lint 抓到的第一个"真信号"是自己的。
+2. **`packages/gateway/src/logs.ts:45` 有一条多余的 `eslint-disable`**（指着 `no-control-regex`，
+   而那条规则现在没开）—— 说明那里曾经处理过控制字符正则，代码改完注释忘了删。`--fix` 顺手清了。
+3. **两处 `let xxxRef`（先声明、后赋值）改成容器对象**（`{ current }`）而不是挂 disable 注释。
+   `const` 表达"这个引用不变"，容器表达"值后填" —— 挂注释是把问题藏起来，改结构是把问题解决掉。
+
+#### 一处刻意没放宽
+
+`scripts/smoke.ts` 的 `httpJson` 返回 `any` 是对的（响应形状由**被测服务**决定，写死类型
+只会变成每个调用点一次断言）。但用的是**局部 disable + 理由**，不是在配置里放宽整个 `scripts/**`
+—— 后者会让将来真有问题的 `any` 也一起沉默。
+
+#### 没做的（如实记）
+
+**`.mjs` 构建脚本不进 lint**（`apps/desktop/build.mjs`、`scripts/*.mjs`）。给它们配一套 node
+globals 才能消掉 `process is not defined`，而那些文件的数量与风险都远低于这份配置的复杂度。
+**它们现在没有 lint。**
+
+**验证**：`pnpm lint` → **0 error / 10 warning**；713 项测试；typecheck 18 project；
+CI 加了 lint 步骤（放在类型检查**之前** —— 它只要 3 秒，一条未用变量不该等 5 分钟）。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
@@ -2142,6 +2194,7 @@ CI 抓到这一条，也说明**这类跨平台判断只有 CI 能验**。
 | **`postgres:18` 的卷必须挂 `/var/lib/postgresql`** | 18 起 `PGDATA` 挪到 `/var/lib/postgresql/18/docker`，`VOLUME` 也改成 `/var/lib/postgresql`。挂成 17 及以前的 `.../data` 不会报"挂载点不对"，而是入口脚本认定"数据在 unused mount/volume 里"然后拒绝启动 → db 容器 `unhealthy`，而 `app` 因为 `depends_on: service_healthy` **连启动都没有**，看着像整个 compose 坏了 |
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
+| **"lint 报了几万个问题"先问 ignore 配对了没** | 本仓不 ignore `docs/reverse/`（几百个压缩 `.js`）时报 **67590** 个；不 ignore `plugins/bundled/*/web.js`（3.4MB bundle）时报 **794** 个；都排掉只剩 **27** 个。隔着两个数量级的差距，都是配置问题 |
 | **spawn 出来的 pnpm 被杀掉 ≠ 它的子进程死了** | `child.kill('SIGKILL')` 只杀直接子进程。我们 spawn 的是 `pnpm`，它再 spawn `eslint`/`vitest`，**孙进程握着 stdout** → 管道不关 → `close` 事件永远不来 → `await` 挂着，界面显示"检查中…"永不结束。修法：`detached: true` 进自己的进程组 + 负 pid 杀整组 + **超时立刻 resolve 不等 close** |
 | **不能拿 `ELIFECYCLE` / `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` 判断"命令没装"** | 这两行在**任何** pnpm 失败里都会出现（包括"lint 查到 3 个错误"）。拿它当判据会把所有真失败报成"没装依赖"，用户会去改一段本来没问题的代码。只看 shell 的 `: command not found` / `is not recognized as an internal or external command` |
 | **"不随开源发布"写成注释不等于不在仓库里** | `docs/REVERSE_ENGINEERING.md` 被 README 与 STATUS 两处声明为"仅内部"，但它一直是 tracked 的，公开仓库上直接能打开。判定要看 `git ls-files`，不是看文档怎么写。用 `git rm --cached` + `.gitignore` 移出（本地文件保留），注意**历史里仍在**，彻底清除要重写历史 |
