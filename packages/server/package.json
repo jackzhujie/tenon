@@ -26,5 +26,6 @@
   "devDependencies": {
     "@types/ws": "8.18.1",
     "isomorphic-git": "1.44.8"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

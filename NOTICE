@@ -1,0 +1,34 @@
+Tenon（榫）
+Copyright (c) 2026 jackzhujie and contributors
+
+本仓库**按目录分区授权**，整个仓库不是单一协议：
+
+  LICENSE                                     GNU AGPL-3.0-only（主体）
+  apps/*                                      同上
+  packages/server                            同上
+  packages/core                              同上
+  packages/agent                             同上
+  packages/generator                         同上
+  packages/gateway                           同上
+  packages/protocol                          同上
+  packages/db-provisioner                    同上
+  packages/component-host                    同上
+  packages/runtime-sdk/                       Apache License 2.0
+  packages/generator/templates/               Apache License 2.0
+  plugins/                                    Apache License 2.0
+  docs/                                       CC BY 4.0
+
+为什么这么分（DESIGN §16.1）：
+
+- **主体用 AGPL-3.0-only**。任何人可以自用、修改、分发；但只要把修改版**作为网络服务
+  对外提供**，就必须向使用者提供源码。这一条挡的是「拿这套代码直接做竞品 SaaS」，
+  也是它取代 MIT / Apache 全家桶的唯一理由 —— 那两种协议允许原样托管而不回馈。
+- **运行时 SDK、模板、组件用 Apache-2.0**。这是为了一个承诺：**由 Tenon 生成的应用
+  不受 AGPL 传染**，归使用者所有，可以闭源、可以商用、可以再卖。组件是装进用户应用里
+  运行的，如果它是 AGPL，「生成物不传染」这句话就会变得很难解释。
+- **docs/ 用 CC BY 4.0**。文档可以被自由引用与改写，只要署名。
+
+商业授权：需要**闭源集成**、或**以公司身份在内部多人部署**（超出「个人免费」的范围）时，
+可另行取得商业许可（双许可）。联系方式见仓库主页。
+
+第三方依赖不受上述协议影响，各自遵循其原许可（见 `pnpm-lock.yaml` 与各包 package.json）。

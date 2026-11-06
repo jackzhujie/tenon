@@ -11,5 +11,6 @@
   "dependencies": {
     "@tenon/protocol": "workspace:*",
     "isomorphic-git": "1.44.8"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

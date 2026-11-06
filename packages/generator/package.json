@@ -10,5 +10,6 @@
   "types": "./src/index.ts",
   "dependencies": {
     "@tenon/protocol": "workspace:*"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

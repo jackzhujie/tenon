@@ -17,5 +17,6 @@
     "esbuild": "0.28.2",
     "tsx": "4.23.15",
     "@types/ws": "8.18.1"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

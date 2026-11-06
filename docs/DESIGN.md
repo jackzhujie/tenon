@@ -2076,6 +2076,23 @@ Web 渲染器（`apps/web`）是 server 的纯客户端：只经 `lib/rpc.ts` �
 **为什么不是 Apache-2.0 全家桶**：那样 AWS 式厂商可原样托管而无回馈，你的商业版失去护城河。
 **为什么不是 FSL/BUSL**：它们不是 OSI 开源，会削弱"开源产品"的传播力与社区信任（可作备选，见 16.3）。
 
+> **v1.2.18 已落地**（2026-11-06）：上面这张表不再只是纸面方案。落点：
+> `LICENSE`（AGPL-3.0 全文）、`packages/runtime-sdk/LICENSE` + `packages/generator/templates/LICENSE`
+> + `plugins/LICENSE`（Apache-2.0 全文）、`docs/LICENSE`（CC BY 4.0 全文）、
+> `NOTICE`（按目录的分区映射 + 商业授权边界）、每个 `package.json` 的 `license` 字段，
+> 以及配套的 `CONTRIBUTING.md`（DCO + clean-room 红线）与 `SECURITY.md`（私密披露）。
+>
+> 三个决定值得记：
+>
+> 1. **GitHub 建仓时默认塞了一份 MIT**，与本节的结论不一致，而 README 里写的却是 AGPL
+>    —— 也就是"文档说一套、仓库是另一套"。发现时仓库刚公开一个多小时、`forks=0`，
+>    所以直接换掉。**这件事有时间窗**：MIT 是永久授权，一旦有人拿到副本并分发，
+>    那条授权收不回来。
+> 2. **`plugins/` 也归 Apache-2.0**（原表没列）。组件装进**用户的应用**里运行，
+>    若它是 AGPL，「生成物绝不传染」这句话就没法向用户解释；而组件不是护城河，Server 才是。
+> 3. **版权行用 `jackzhujie and contributors`** 而不是真名：这是 GitHub 上的主账号，
+>    与实际提交身份一致（91 个提交都是它）；接受外部贡献时不至于要把每个名字都列上来。
+
 ### 16.2 免费 / 商业边界（建议）
 
 | 能力 | 社区版（AGPL） | 商业版 |

@@ -1748,6 +1748,33 @@ timestamptz 是 Date、NULL 仍是 NULL、树搬得过去 → 新建记录 id �
 
 **现在的基线**：GitHub Actions `ubuntu-latest` + Node 22，4 分钟绿（`Test Files 77 / Tests 700`）。
 
+### 4.43 协议落地：把建仓时的默认 MIT 换成分区授权
+
+DESIGN §16 早就定了「AGPL-3.0-only 主体 + Apache-2.0 运行时 SDK/模板 + CC BY 4.0 文档 +
+商业双许可」，README 的 License 段也一直这么写。但**仓库里那份 `LICENSE` 是 GitHub 建仓时
+默认塞的 MIT** —— 文档说一套、仓库是另一套，而真正有法律效力的是后者。
+
+**这件事有时间窗**：MIT 是永久授权，谁拿到副本就永久可以用、可以再分发。
+发现时仓库刚公开一个多小时、`forks=0 stars=0`，所以直接换掉；再晚就换不了了。
+
+改了什么：
+
+| 文件 | 内容 |
+|---|---|
+| `LICENSE` | AGPL-3.0-only 全文（34KB，取自 gnu.org，不手抄） |
+| `packages/runtime-sdk/LICENSE`、`packages/generator/templates/LICENSE`、`plugins/LICENSE` | Apache-2.0 全文 |
+| `docs/LICENSE` | CC BY 4.0 全文 + 一段署名说明 |
+| `NOTICE` | 按目录的分区映射、为什么这么分、商业授权边界 |
+| 17 个 `package.json` | `license` 字段（主体 AGPL-3.0-only，`runtime-sdk` 是 Apache-2.0） |
+| `README` 的 License 段 | 从三行列表改成表格 + 「个人免费 / 公司内部多人部署要商业授权」+ 商标声明 |
+| `CONTRIBUTING.md`、`SECURITY.md` | DESIGN §16.4 要求的治理件（DCO、clean-room 红线、私密披露） |
+
+**一个原设计没写、这次补的判断**：`plugins/` 也归 Apache-2.0。组件是装进**用户应用**里跑的，
+如果它是 AGPL，「生成物绝不传染」这句话就没法向用户解释；而组件不是护城河，Server 才是。
+
+**没做的**：`DCO` 没有强制（本地无法校验，靠 `git commit -s` 自觉；真要强制得加 CI 检查
+`Signed-off-by`，现在没加）。商标只做了声明，没有申请。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1933,6 +1960,7 @@ timestamptz 是 Date、NULL 仍是 NULL、树搬得过去 → 新建记录 id �
 | **`postgres:18` 的卷必须挂 `/var/lib/postgresql`** | 18 起 `PGDATA` 挪到 `/var/lib/postgresql/18/docker`，`VOLUME` 也改成 `/var/lib/postgresql`。挂成 17 及以前的 `.../data` 不会报"挂载点不对"，而是入口脚本认定"数据在 unused mount/volume 里"然后拒绝启动 → db 容器 `unhealthy`，而 `app` 因为 `depends_on: service_healthy` **连启动都没有**，看着像整个 compose 坏了 |
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
+| **GitHub 建仓时选的 license 会直接变成 `LICENSE` 文件** | 它不会去读你的 README 或设计文档。于是很容易出现"文档写 AGPL、仓库实际是 MIT"，而真正有法律效力的是那份文件。建仓时就该按设计选，或者建完立刻核对一遍 |
 | **本地通过、CI 失败：`~/node_modules` 在替仓库兜底** | 家目录里一份 `node_modules`（160 个包）会被 Node 一路往上解析到。未声明的依赖因此本地永远"能跑"，到干净的 runner 上才炸。判据不是"看 package.json 有没有声明"，而是**逐个 import 真解析、看结果落在哪**。本机解决了 `isomorphic-git`、`@babel/types` 两处 |
 | **快照还原不能"按行数组前 N 个值"取值** | 快照之后如果 `drop column` 过，保留的列不再是行数组的前 N 个 —— 按位置取会让整行**往前错一位**。类型相容时是**静默写进错误的列**，类型不容才报 `malformed array literal: "12.50"`（score 被写进了 labels）。必须按**列名取下标** |
 | **迁移的校验不能是"源行数 == 目标行数"** | 目标库里有迁移之后新写的数据时（或只是重跑），这个比较会把一次**正确**的迁移判成失败，提示还是"先清空目标表再迁" —— 等于建议用户删数据。正确判据是「目标(后) == 目标(前) + 实写」，`on conflict` 跳过的行数如实进报告 |

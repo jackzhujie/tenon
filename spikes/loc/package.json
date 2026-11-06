@@ -20,5 +20,6 @@
     "esbuild": "0.28.2",
     "linkedom": "0.18.14",
     "tsx": "4.23.15"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }

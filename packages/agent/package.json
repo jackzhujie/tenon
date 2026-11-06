@@ -18,5 +18,6 @@
     "@tenon/protocol": "workspace:*",
     "typebox": "1.3.27",
     "@tenon/component-host": "workspace:*"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }
