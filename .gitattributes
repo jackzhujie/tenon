@@ -1,0 +1,25 @@
+# 换行统一成 LF。**这不只是风格问题**：
+#
+# - `packages/runtime-sdk/test/sync.test.ts` 是**逐字节**比对模板里的副本与源码；
+# - 发布档快照、导出产物的 hash、组件的签名都对文件内容做字节级计算。
+#
+# Windows 上 git 默认会把文本转成 CRLF（GitHub 的 windows runner 镜像里
+# `core.autocrlf=true`），一旦转换，上面那些比对在 Windows 上必然红 ——
+# 而且红得莫名其妙（"内容明明一样"）。把规则写进仓库，比在 CI 里临时 `git config` 可靠：
+# 它对每个 clone 的人、每个编辑器都生效。
+* text=auto eol=lf
+
+# 二进制：不做任何换行/编码处理（`text=auto` 一般能自己认出来，这里显式写死几个常见的）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.node binary
+*.dmg binary
+*.zip binary
+*.gz binary
+*.har binary

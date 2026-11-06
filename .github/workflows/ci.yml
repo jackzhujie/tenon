@@ -1,10 +1,18 @@
-## 质量门禁：lint + 类型检查 + 测试 + 前端构建
+## 质量门禁：lint + 类型检查 + 测试 + 前端构建，**三个平台各跑一遍**
 ##
-## 为什么只有这四步：
-## - **不跑 `e2e:*`**（docker / 真 PG / Electron）：runner 未必有容器运行时，而且那些脚本
-##   本来就是"在真机上手动跑"的（`pnpm e2e:docker` / `e2e:postgres` / `shot:*`）。
-##   把它们塞进 CI 会得到一堆需要 sudo / GUI / 大镜像的步骤，失效时没人愿意修。
-## - **不做三平台打包**：mac 不签名会被 Gatekeeper 拦，要 Apple 账号（$99/年）。
+## 为什么要矩阵（v1.2.24）：
+## 这套东西到处在 spawn 子进程、拼路径、判断退出码与 shell 文案 —— 这些行为**跨平台不一样**，
+## 而且差别都藏在"本地绿、CI 红"里。已经真实发生过两次：
+## - `pnpm` 把子进程的 127 折成 1（与"查到 3 个错误"同码）；
+## - macOS 的 `sh` 说 `command not found`，Debian 的 `dash` 说 `not found`。
+## 那两次都是 macOS → Linux 的差异，靠 ubuntu runner 抓到了。**反方向（macOS → Windows）
+## 没有任何人能发现** —— 而 Windows 的差异更大（路径分隔符、cmd 而不是 sh、junction、
+## 换行、进程组）。
+##
+## 为什么仍然**不跑**这些：
+## - `e2e:*`（docker / 真 PG / Electron / 真 Chromium）：runner 上要容器、要 GUI、要大镜像，
+##   失效时没人愿意修。它们是"在真机上手动跑"的（见 README 的脚本表）。
+## - **三平台打包**：mac 不签名会被 Gatekeeper 拦，要 Apple 账号（$99/年）。
 ##   这件事单独做，别和质量门禁混在一起 —— 门禁要快、要稳、要能天天绿。
 ##
 ## pnpm 版本从 `package.json` 的 `packageManager` 读（pnpm/action-setup 自己认），
@@ -25,9 +33,15 @@ concurrency:
 
 jobs:
   check:
-    name: lint + typecheck + test + build
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    name: ${{ matrix.os }}
+    strategy:
+      # 一个平台红了不要遮住另外两个的结果：三份报告一起看才知道"是平台相关还是一般的坏"
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Windows runner 慢（文件系统 + 进程启动），718 项测试在那边要久一些
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -39,12 +53,25 @@ jobs:
           node-version: 22.x
           cache: pnpm
 
+      # 换行由 `.gitattributes` 保证（`* text=auto eol=lf`）。这里再断言一次：
+      # 万一有人在 Windows 上改了配置又不小心提交了 CRLF，早失败比等到字节比对红好定位
+      - name: 确认索引里没有 CRLF
+        shell: bash
+        run: |
+          bad=$(git ls-files --eol | grep -E 'i/(crlf|mixed)' | head -5 || true)
+          if [ -n "$bad" ]; then
+            echo "::error::下面这些文件在索引里是 CRLF —— 检查 .gitattributes 是否生效"
+            echo "$bad"
+            exit 1
+          fi
+          echo "索引里全部 LF"
+
       # frozen-lockfile：lock 与 package.json 不一致时**当场失败**，
       # 而不是在 CI 里悄悄装出另一套依赖
       - name: 装依赖
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      # 最快的先跑（约 3 秒）：一条未用变量就没必要再等 5 分钟的类型检查
+      # 最快的先跑（约 3 秒）：一条未用变量就没必要再等几分钟的类型检查
       - name: Lint
         run: pnpm lint
 
@@ -63,7 +90,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: web-dist
+          name: web-dist-${{ matrix.os }}
           path: apps/web/dist
           retention-days: 3
           if-no-files-found: ignore

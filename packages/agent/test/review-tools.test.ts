@@ -164,7 +164,13 @@ describe('typecheck（跑应用自己的 tsc）', () => {
     await writeProject('export const n: number = 1\n')
     // 把本仓库装的那份 typescript 链进去，模拟"应用的依赖装好了"
     await mkdir(join(dir, 'node_modules'), { recursive: true })
-    await symlink(resolve(dirname(TSC_ENTRY), '..'), join(dir, 'node_modules', 'typescript'), 'dir')
+    /*
+     * Windows 上 `'dir'` 类型的软链要**特权**（管理员或开发者模式），runner 上不保证有；
+     * `'junction'` 不需要特权，但它只支持目录 —— 正好这里就是目录。
+     * 传绝对路径也是 junction 的要求（下面这个 resolve 已经是绝对路径）。
+     */
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    await symlink(resolve(dirname(TSC_ENTRY), '..'), join(dir, 'node_modules', 'typescript'), linkType)
 
     const { text, isError } = await run('typecheck')
     expect(isError).toBe(false)

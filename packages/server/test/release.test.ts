@@ -195,7 +195,9 @@ async function withTestScript(repoDir: string, script: string): Promise<void> {
 /** 应用自己的 node_modules 里放一份 typescript（软链到仓库那份），门禁才跑得起来 */
 async function installTypescript(repoDir: string): Promise<void> {
   await mkdir(join(repoDir, 'node_modules'), { recursive: true })
-  await symlink(TS_DIR, join(repoDir, 'node_modules', 'typescript'), 'dir')
+  // Windows 的 `'dir'` 软链要特权，`'junction'` 不要（且只支持目录 —— 这里正好是目录）
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+  await symlink(TS_DIR, join(repoDir, 'node_modules', 'typescript'), linkType)
 }
 
 describe('发布（release.publish）', () => {
