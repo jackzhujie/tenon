@@ -215,7 +215,13 @@ export class AppStore {
     if (!isInside(this.home.appsDir, paths.dir)) {
       throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.dir}`)
     }
-    await rm(paths.dir, { recursive: true, force: true })
+    /*
+     * `maxRetries` 是给 Windows 的：那边删目录时如果**还有句柄没释放**（子进程刚退出、
+     * 索引器/杀软正在扫），会拿到 EBUSY/EPERM，而且往往是几百毫秒内就没了。
+     * Node 的 `rm` 自带这套重试就是为这几种错误码准备的（对 POSIX 无副作用）。
+     * 真被长期占用时仍然会失败 —— 那时该看到的是错误，而不是"删了一半"。
+     */
+    await rm(paths.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 })
     /*
      * 发布用的备份裸库也跟着删（`<home>/backups/<appId>.git`）。
      *
@@ -228,7 +234,7 @@ export class AppStore {
     if (!isInside(this.home.backupsDir, paths.backupRepo)) {
       throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.backupRepo}`)
     }
-    await rm(paths.backupRepo, { recursive: true, force: true })
+    await rm(paths.backupRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 })
   }
 
   touch(id: string): void {

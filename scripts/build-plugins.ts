@@ -11,7 +11,7 @@
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -113,7 +113,21 @@ export async function buildPlugins(options: { only?: readonly string[] } = {}): 
 }
 
 /** 直接 `node scripts/build-plugins.ts` 跑时打印结果 */
-if (process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`) {
+/*
+ * ⚠️ 判断"是不是被直接跑"必须用 `pathToFileURL`，**不能拼字符串**。
+ *
+ * 原来写的是 `import.meta.url === `file://${process.argv[1]}``。在 macOS/Linux 上
+ * 恰好相等（`file:///Users/…`），在 Windows 上**永远不相等**：
+ * `import.meta.url` 是 `file:///D:/a/tenon/scripts/build-plugins.ts`，而拼出来的是
+ * `file://D:\a\tenon\scripts\build-plugins.ts`（盘符、反斜杠、少一个斜杠）。
+ *
+ * 后果不是报错，是**静默什么都不做**：`pnpm build:plugins` 打印零行、退出码 0，
+ * 于是 `plugins/bundled/<id>/{web,server}.js` 不存在，所有组件测试报
+ * "清单说 server facet 在「server.js」，但文件不存在"。三平台 CI 第一次跑时才炸出来。
+ * （顺带一个坑：这段注释的第一版在中间写了「星号 + 斜杠」那两个字符 ——
+ *   那是块注释的结束符，注释当场就断了，报的是一串看不懂的语法错。）
+ */
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const built = await buildPlugins()
   if (built.length === 0) process.stdout.write('没有要构建的组件\n')
   for (const facet of built) {
