@@ -28,7 +28,7 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
 **导出静态包**（`export.static`，产物拷走就能跑）+ **Docker 上下文**（`export.docker`，
 M2 第 8 步落地；compose 自带 PG，`e2e:docker` 全栈 21 项真跑 compose）。
-全绿基线：**lint 0 error / 10 warn** / typecheck 18 project / **CI 三平台矩阵** / test **726** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+全绿基线：**lint 0 error / 10 warn** / typecheck 18 project / **CI 三平台矩阵** / test **728** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
 e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** / **shot:usage** / **shot:release** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
@@ -124,6 +124,12 @@ DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§
   用 `relative()`（按平台分隔符、天然处理 `..`）
 - **Windows 没有可捕获的 SIGTERM**（`kill` 即 TerminateProcess）→ 优雅关停走**关 stdin**，
   且要用环境变量开关（`< /dev/null` 启动时 stdin 一开始就 EOF，会"启动即退出"）
+- **建应用"不等地"装依赖 + 删应用 = 赛跑**：`app.create` 里 `void ensureDeps(...)`（装 React 十几秒），
+  那个 pnpm 进程拿 `repo/` 当 CWD。删应用不等它就删目录 → POSIX 留半装的 node_modules、
+  **Windows 直接 EBUSY**（重试没用，占用者是我们自己）。删前必须 `await preview.cancelDeps(id)`
+  （AbortSignal + 杀整棵树 + 等 task 结束）
+- **测试夹具里 `write()` 后立刻 `process.exit()` 会丢最后一行**（管道未 flush）→ 偶发红，
+  且看起来像产品 bug。等 write 的回调再 exit
 - **Windows 删目录会短暂 EBUSY**（句柄/索引器/杀软）→ `fs.rm` 的 `maxRetries`/`retryDelay`
 - **杀 pnpm 不等于杀掉它的子进程**：`child.kill('SIGKILL')` 只杀直接子进程，而它再 spawn
   `eslint`/`vitest`，**孙进程握着 stdout** → 管道不关 → `close` 永远不来 → `await` 挂着，
