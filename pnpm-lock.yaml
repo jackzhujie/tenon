@@ -237,6 +237,9 @@ importers:
       '@types/ws':
         specifier: 8.18.1
         version: 8.18.1
+      isomorphic-git:
+        specifier: 1.44.8
+        version: 1.44.8
 
   spikes/agent:
     dependencies:

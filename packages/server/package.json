@@ -20,10 +20,11 @@
     "@tenon/generator": "workspace:*",
     "@tenon/protocol": "workspace:*",
     "fastify": "5.12.7",
-    "zod": "4.6.7",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/ws": "8.18.1"
+    "@types/ws": "8.18.1",
+    "isomorphic-git": "1.44.8"
   }
 }
