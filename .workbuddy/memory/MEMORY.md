@@ -28,7 +28,7 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
 **导出静态包**（`export.static`，产物拷走就能跑）+ **Docker 上下文**（`export.docker`，
 M2 第 8 步落地；compose 自带 PG，`e2e:docker` 全栈 21 项真跑 compose）。
-全绿基线：typecheck 18 project / test **713** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+全绿基线：**lint 0 error / 10 warn** / typecheck 18 project / test **713** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
 e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** / **shot:usage** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
@@ -106,6 +106,13 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 - **"命令没装"与"代码有问题"必须两句话**：前者 `pnpm install`，后者改代码。
   门禁里混成一句，等于给用户指错方向
 - **模板的 lint 规则只留三条是设计不是没配完**：开 `recommended` 全家桶会让 Agent 生成
+- **"lint 报了几万个问题"先查 ignore**：本仓不 ignore `docs/reverse/`（几百个压缩 `.js`）报
+  **67590**；不 ignore `plugins/bundled/*/web.js`（3.4MB bundle）报 **794**；排掉后只剩 **27**。
+  隔两个数量级的差距全是配置问题
+- **`no-useless-assignment` 对 TS 项目基本是噪声**：本项目 15 处全是"给 `let` 初值以满足
+  TS 确定性赋值分析"（`let last = ''` + `for(;;)`），去掉 tsc 会报"使用前未赋值" → 关掉
+- **`--fix` 指望不上**：未用变量删代码有风险（eslint 不给 fixer）、`prefer-const` 的 fixer
+  在 eslint 9+ 被降级。`fixableErrorCount` 常是 0
   一次红一次，而**被关掉的检查等于不存在**。`exhaustive-deps` 设 warn（误报太多，
   设 error 会成最常见拦路石）
 - **模块脚本加载失败是静默的** → 网关插了错误捕手 `window.__tenonComponentErrors`，端到端读它
