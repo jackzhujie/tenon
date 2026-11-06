@@ -22,8 +22,8 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
 **导出静态包**（`export.static`，产物拷走就能跑）+ **Docker 上下文**（`export.docker`，
 M2 第 8 步落地；compose 自带 PG，`e2e:docker` 全栈 21 项真跑 compose）。
-全绿基线：typecheck 18 project / test **695** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
-e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** /
+全绿基线：typecheck 18 project / test **700** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** / **shot:usage** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
@@ -81,6 +81,12 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 - **组件覆盖层按"根"选版本**（hub > bundled，不是全局最高）；装配逐条独立判定；
   装不上返回 problem 不抛 500；facet 是构建产物不进 git（忘建的表现是 Cannot find module）；
   `TENON_PLUGINS_DIR` 与 `TENON_TEMPLATES_DIR` 同坑（错的表现是"插件页空空如也"且无报错）
+- **跨应用读账本不能 `acquire()`**：那会建 5 个扩展（`codeact` 起 worker 线程）、`configure`
+  根会话、还 `resume()` —— 为了看一眼别人花了多少钱，把人家的任务也接着跑了。开"最小 harness"
+  （同 storage + 共享 models + 空 registry + 不 resume）读 `usage()`，16ms 一个
+- **用量汇总缺一格就会骗人**：`known`（还没账本 ≠ 花了 0）、`failed`（读不到的不加进合计）、
+  `priced`（没配价格时 $0 是"没算"）。三格全是"看起来像数字其实是假的"
+- **`formatTokens` 10k 以上取整会让汇总对不上**（6.3k+4.2k=10k）→ 改成 10k~99.9k 保留一位小数
 - **模块脚本加载失败是静默的** → 网关插了错误捕手 `window.__tenonComponentErrors`，端到端读它
 - **`postgres:18` 的卷必须挂 `/var/lib/postgresql`**（不是 `.../data`）：18 起 PGDATA 在
   `/var/lib/postgresql/18/docker`。挂错不报"挂载点不对"，而是入口脚本说"数据在 unused mount/volume 里"
