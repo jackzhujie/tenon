@@ -8,7 +8,7 @@
  *    否则已有会话仍用旧的 —— 但只在真的变了才写，避免每次启动都产生一次无意义的 commit。
  */
 import { join } from 'node:path'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, stat } from 'node:fs/promises'
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import { Harness, createRegistry } from '@earendil-works/pi-durable'
 import type { Extension, ToolRegistration } from '@earendil-works/pi-durable'
@@ -106,6 +106,50 @@ export class HarnessPool {
       // 打开失败不要留下"永远失败"的缓存
       this.sessions.delete(appId)
       throw err
+    }
+  }
+
+  /**
+   * **只读账本**：跨应用用量汇总用它，不建完整会话。
+   *
+   * 为什么不能直接 `acquire()` 每个应用：`open()` 会建 5 个扩展（其中 `codeact`
+   * 会起一个 worker 线程）、`configure` 根会话、还会调 `resume()` —— 也就是
+   * **为了看一眼别人花了多少钱，把别人的活也接着跑了**。那样汇总一个面板的代价
+   * 是 N 个应用的会话全部活起来，而且 `resume()` 会真的开始执行被中断的任务。
+   *
+   * 所以这里开一个"最小 harness"：同一个 storage、共享同一份 models、空 registry、
+   * **不 resume、不建 root 会话**。实测 16ms 一个（`harness.usage()` 本身只是
+   * `scanConversations` + 逐个读 `pi.usage` 文档，纯读）。
+   *
+   * 返回 `null` 的意思很明确：**这个应用还没有账本**（`harness.db` 都不存在，
+   * 从没跑过一轮）。此时不能返回一份零账本冒充"花了 0"。
+   */
+  async readUsageLedger(appId: string): Promise<Awaited<ReturnType<Harness['usage']>> | null> {
+    const existing = this.sessions.get(appId)
+    if (existing !== undefined) {
+      // 已经在跑：直接读它，顺手还能拿到最新的未落盘之外的已提交量
+      return (await existing).harness.usage(ctx)
+    }
+
+    const paths = appPaths(this.options.home, appId)
+    // 没有库文件就不要 open —— 那会顺手创建一个空库，把"没账本"变成"账本是 0"
+    const present = await stat(paths.harnessDb).then(
+      (info) => info.isFile(),
+      () => false,
+    )
+    if (!present) return null
+
+    const storage = await openNodeSqliteStorage(paths.harnessDb, { prefix: 'pi_' })
+    let harness: Harness | null = null
+    try {
+      harness = await Harness.open(
+        storage,
+        { models: this.options.model.models, registry: createRegistry() },
+        ctx,
+      )
+      return await harness.usage(ctx)
+    } finally {
+      if (harness !== null) await harness.close(ctx).catch(() => undefined)
     }
   }
 

@@ -15,12 +15,21 @@
  *    0 会被读成"没花钱"，那是错的。
  */
 import { useEffect, useRef, useState } from 'react'
-import type { BudgetDimension, UsageSnapshot } from '@tenon/protocol'
+import type { BudgetDimension, UsageAppUsage, UsageSnapshot, UsageTotals } from '@tenon/protocol'
 // 走 `/browser` 子路径：主入口会把整张 zod 表带进产物（见 protocol/browser.ts 的说明）
 import { budgetMessage, formatCost, formatTokens } from '@tenon/protocol/browser'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
+import { rpc } from '../../lib/rpc.js'
 import type { Outcome } from '../../hooks/useWorkspace.js'
+
+/** `usage.total` 的返回（跨应用汇总）。只列面板要用的四格 */
+interface UsageTotal {
+  totals: UsageTotals
+  apps: UsageAppUsage[]
+  failed: Array<{ appId: string; name: string; error: string }>
+  priced: boolean
+}
 
 const DOT_CLASS: Record<UsageSnapshot['level'], string> = {
   ok: 'bg-line',
@@ -62,6 +71,9 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
   const [costInput, setCostInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 跨应用汇总（v1.2.17）。`null` = 还没拉到 —— 与"合计是 0"分开 */
+  const [total, setTotal] = useState<UsageTotal | null>(null)
+  const [totalError, setTotalError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   // 每次打开都从当前额度重新起稿：上次没保存的输入不该留下来（会被误当成已生效）
@@ -87,6 +99,27 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
       document.removeEventListener('keydown', onKeyDown)
     }
   }, [open])
+
+  /*
+   * 每次打开都拉一次汇总。依赖里带 `usage`：本应用的量一变（一轮跑完），
+   * 合计也该跟着变 —— 否则面板上"本应用"动了、"全部应用"不动，看着像 bug。
+   * 服务端有 15s 缓存，所以这里多拉几次不会真的去扫 N 个库。
+   */
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setTotalError(null)
+    void rpc('usage.total', {})
+      .then((value) => {
+        if (!cancelled) setTotal(value as UsageTotal)
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setTotalError(cause instanceof Error ? cause.message : String(cause))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, usage])
 
   const level = usage?.level ?? 'ok'
   const chip = usage === null ? '用量' : formatTokens(usage.totals.totalTokens)
@@ -131,6 +164,8 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
       <button
         type="button"
         disabled={disabled}
+        /* 截图与端到端靠它定位：这个按钮的文案是数字，没法按文字选 */
+        data-tenon-usage-trigger
         onClick={() => setOpen((value) => !value)}
         className={cn(
           'flex h-7 items-center gap-1.5 rounded-md px-2 transition-colors',
@@ -182,6 +217,43 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
               {budgetMessage(usage.totals, usage.budget, stoppedDim)}
             </p>
           )}
+
+          {/* 全部应用：跨应用汇总。放最上面，因为"我到底花了多少"是打开这个面板的第一个问题 */}
+          <div className="space-y-1 border-b border-line-soft px-3 py-2">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[11.5px] text-muted">全部应用</span>
+              <span className="ml-auto font-mono text-[11.5px] tabular-nums text-ink">
+                {total === null
+                  ? totalError === null
+                    ? '…'
+                    : '—'
+                  : `${formatTokens(total.totals.totalTokens)} · ${total.priced ? formatCost(total.totals.costUsd) : '未定价'}`}
+              </span>
+            </div>
+            {total !== null &&
+              total.apps.slice(0, 4).map((app) => (
+                <AppRow
+                  key={app.appId}
+                  app={app}
+                  priced={total.priced}
+                  current={app.appId === usage?.appId}
+                />
+              ))}
+            {total !== null && total.apps.length > 4 && (
+              <p className="text-[10px] text-faint">…另有 {total.apps.length - 4} 个应用</p>
+            )}
+            {total !== null && total.failed.length > 0 && (
+              <p className="text-[10px] leading-4 text-warn">
+                {total.failed.length} 个应用的账本读不到（没算进合计）：{total.failed.map((item) => item.name).join('、')}
+              </p>
+            )}
+            {total !== null && total.apps.every((app) => !app.known) && total.apps.length > 0 && (
+              <p className="text-[10px] leading-4 text-faint">这些应用还没跑过一轮，没有账本</p>
+            )}
+            {totalError !== null && (
+              <p className="text-[10px] leading-4 text-warn">读不到汇总：{totalError}</p>
+            )}
+          </div>
 
           <div className="space-y-1 px-3 py-2">
             <Row label="本应用累计" value={usage === null ? '—' : `${chip} · ${cost}`} />
@@ -259,6 +331,32 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * 汇总里的一行。`known: false` 显示"还没跑过"而不是 `0` ——
+ * 0 会被读成"用了但没花钱"，而这两种状态要用户做的事完全不同。
+ */
+function AppRow({
+  app,
+  priced,
+  current,
+}: {
+  app: UsageAppUsage
+  priced: boolean
+  current: boolean
+}) {
+  return (
+    <div className="flex items-baseline gap-2 text-[11px]">
+      <span className={cn('size-1 shrink-0 rounded-full', DOT_CLASS[app.level])} />
+      <span className={cn('min-w-0 flex-1 truncate', current ? 'text-brand-soft' : 'text-muted')}>
+        {app.name}
+      </span>
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-faint">
+        {app.known ? `${formatTokens(app.totals.totalTokens)} · ${priced ? formatCost(app.totals.costUsd) : '未定价'}` : '还没跑过'}
+      </span>
     </div>
   )
 }

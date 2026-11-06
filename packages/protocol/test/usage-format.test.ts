@@ -30,7 +30,9 @@ describe('formatTokens', () => {
     expect(formatTokens(999)).toBe('999')
     expect(formatTokens(1000)).toBe('1k')
     expect(formatTokens(1234)).toBe('1.2k')
-    expect(formatTokens(45_600)).toBe('46k')
+    // 10k~99.9k 保留一位小数：跨应用汇总要能把几行加起来对得上（详见 formatTokens 注释）
+    expect(formatTokens(45_600)).toBe('45.6k')
+    expect(formatTokens(10_400)).toBe('10.4k')
     expect(formatTokens(2_400_000)).toBe('2.4M')
   })
 

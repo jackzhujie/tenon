@@ -30,7 +30,9 @@ import {
   Release,
   TaskGraph,
   TemplateInfo,
+  UsageAppUsage,
   UsageSnapshot,
+  UsageTotals,
 } from './domain.js'
 
 const Id = z.string().min(1)
@@ -298,6 +300,27 @@ export const rpcMethods = {
   'usage.get': {
     input: z.object({ appId: Id }),
     output: z.object({ snapshot: UsageSnapshot }),
+  },
+  /**
+   * 跨应用汇总（v1.2.17）：面板顶部那句「全部应用」。
+   *
+   * 没有 appId —— 它算的就是"这台机器上所有应用"。每个应用的真值仍来自自己的
+   * harness 账本（`usage.get` 是同一个来源），这里只是把它们加起来。
+   *
+   * 三个字段都不能省：
+   * - `apps`：不给出处的话，用户只知道一个总数，答不了"贵的是哪个"
+   * - `failed`：读失败的应用**没被算进** `totals`，必须点名，不能装成 0
+   * - `priced`：没配价格时 `costUsd` 恒 0，那是"没算"而不是"便宜"
+   */
+  'usage.total': {
+    input: z.object({}).default({}),
+    output: z.object({
+      totals: UsageTotals,
+      apps: z.array(UsageAppUsage),
+      failed: z.array(z.object({ appId: z.string(), name: z.string(), error: z.string() })),
+      priced: z.boolean(),
+      generatedAt: z.number(),
+    }),
   },
   /**
    * 设额度。两个字段**每次都传**（空就是 `null` = 这条不设限），

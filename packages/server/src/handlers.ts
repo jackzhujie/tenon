@@ -425,6 +425,35 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       return { snapshot: await agent.usage.snapshot(input.appId) }
     },
 
+    'usage.total': async () => {
+      /*
+       * 应用列表在这里取，不让前端传上来：前端手上的列表可能是旧的（刚删过一个应用），
+       * 而"合计对不上"是最难查的一类问题 —— 与其相信调用方，不如自己列一次。
+       */
+      const apps = core.apps.list().map((app) => ({ id: app.id, name: app.name }))
+      if (agent.usage === undefined) {
+        // 没配模型：没有账本，但额度照读（与 zeroUsage 同一个理由）
+        return {
+          totals: ZERO_USAGE,
+          apps: apps.map((app) => {
+            const budget = readBudget(core.settings, app.id)
+            return {
+              appId: app.id,
+              name: app.name,
+              totals: ZERO_USAGE,
+              budget,
+              level: levelOf(ZERO_USAGE, budget),
+              known: false,
+            }
+          }),
+          failed: [] as Array<{ appId: string; name: string; error: string }>,
+          priced: false,
+          generatedAt: Date.now(),
+        }
+      }
+      return agent.usage.total(apps)
+    },
+
     'budget.set': async (input) => {
       core.apps.require(input.appId)
       const budget = { maxCostUsd: input.maxCostUsd, maxTokens: input.maxTokens }

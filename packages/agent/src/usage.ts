@@ -26,7 +26,7 @@ import type {
   UsageTotals,
 } from '@tenon/protocol'
 import type { CoreServices } from '@tenon/core'
-import { ZERO_USAGE, breached, budgetKey, diffUsage, levelOf, readBudget, sumUsage } from '@tenon/core'
+import { ZERO_USAGE, addUsage, breached, budgetKey, diffUsage, levelOf, readBudget, sumUsage } from '@tenon/core'
 import { agentContext as ctx } from './context.js'
 import type { HarnessPool } from './harness-pool.js'
 
@@ -54,9 +54,45 @@ export interface StartTurnResult {
   exceeded: BudgetDimension | null
 }
 
+/** 汇总里的一行：一个应用的全部用量 */
+export interface UsageAppRow {
+  appId: string
+  name: string
+  totals: UsageTotals
+  budget: Budget
+  level: ReturnType<typeof levelOf>
+  /**
+   * `false` = 这个应用还没有账本（从没跑过一轮）。
+   *
+   * 这一格存在的理由：`totals` 在两种情况下都是 0 —— "确实没花" 与 "没账本"。
+   * 不区分的话，刚建的应用会和用过的应用长得一样，而"合计"会看着像个准数。
+   */
+  known: boolean
+}
+
+/** 跨应用汇总（`usage.total`） */
+export interface UsageTotalSnapshot {
+  totals: UsageTotals
+  /** 按花费从大到小排好，界面直接渲染 */
+  apps: UsageAppRow[]
+  /** 账本读失败的应用：它们**没有**被算进 totals，不能装成 0 */
+  failed: Array<{ appId: string; name: string; error: string }>
+  /** 当前模型配了价格才为真（否则 costUsd 恒 0 是"没算"） */
+  priced: boolean
+  generatedAt: number
+}
+
+/** 汇总的缓存时长：面板反复开关不该每次都去扫 N 个库 */
+const TOTAL_TTL_MS = 15_000
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 export class UsageService {
   private readonly entries = new Map<string, Promise<Entry>>()
   private closed = false
+  private totalCache: { at: number; key: string; value: UsageTotalSnapshot } | null = null
 
   constructor(private readonly options: UsageServiceOptions) {}
 
@@ -79,6 +115,8 @@ export class UsageService {
     const entry = await this.entry(appId)
     const snapshot = await this.compose(appId, entry)
     this.publishIfChanged(appId, entry, snapshot)
+    // 有新数据了，汇总的缓存立刻作废：面板上"本应用"动了、"全部应用"没动会很怪
+    this.totalCache = null
     return snapshot
   }
 
@@ -108,15 +146,92 @@ export class UsageService {
     return this.refresh(appId)
   }
 
+  /**
+   * 跨应用汇总：面板上"全部应用"那个数字。
+   *
+   * 两个边界必须一起处理，否则这个数会骗人：
+   * - **还没有账本**（从没跑过一轮）→ `known: false`，行照常出现但不算进合计
+   * - **读失败** → 进 `failed`，**不参与求和**。装成 0 等于告诉用户"它没花钱"
+   *
+   * 为什么不去 `acquire()` 每个应用：那会把 N 个应用的会话全部拉活（含 `resume()`，
+   * 也就是真的去执行别人被中断的任务）。见 `HarnessPool.readUsageLedger`。
+   */
+  async total(apps: readonly { id: string; name: string }[]): Promise<UsageTotalSnapshot> {
+    const key = apps.map((app) => app.id).join(',')
+    const cached = this.totalCache
+    if (cached !== null && cached.key === key && Date.now() - cached.at < TOTAL_TTL_MS) {
+      return cached.value
+    }
+
+    let totals = ZERO_USAGE
+    const rows: UsageAppRow[] = []
+    const failed: UsageTotalSnapshot['failed'] = []
+
+    for (const app of apps) {
+      const budget = this.budget(app.id)
+      try {
+        const known = await this.ledgerTotals(app.id)
+        const value = known ?? ZERO_USAGE
+        totals = addUsage(totals, value)
+        rows.push({
+          appId: app.id,
+          name: app.name,
+          totals: value,
+          budget,
+          level: levelOf(value, budget),
+          known: known !== null,
+        })
+      } catch (error) {
+        failed.push({ appId: app.id, name: app.name, error: messageOf(error) })
+      }
+    }
+
+    // 花费大的排前面：第一眼该看到"贵的是哪个"
+    rows.sort(
+      (a, b) => b.totals.costUsd - a.totals.costUsd || b.totals.totalTokens - a.totals.totalTokens,
+    )
+
+    const value: UsageTotalSnapshot = {
+      totals,
+      apps: rows,
+      failed,
+      priced: this.priced(),
+      generatedAt: Date.now(),
+    }
+    this.totalCache = { at: value.generatedAt, key, value }
+    return value
+  }
+
+  /** 一个应用的累计。`null` = 从没跑过（连账本都没有），**不是**"花了 0" */
+  private async ledgerTotals(appId: string): Promise<UsageTotals | null> {
+    const existing = this.entries.get(appId)
+    if (existing !== undefined) {
+      // 正在用的应用：顺手读一次最新，免得汇总比面板上的"本应用"落后一整轮
+      const entry = await existing
+      await this.read(entry)
+      return entry.totals
+    }
+    const state = await this.options.pool.readUsageLedger(appId)
+    return state === null ? null : sumUsage(state).totals
+  }
+
+  /** 当前模型有没有价格表（没有的话 costUsd 恒 0 = "没算"，不是"便宜"） */
+  private priced(): boolean {
+    const choice = this.options.pool.modelChoice
+    return this.options.core.prices.find(choice.provider, choice.modelId) !== undefined
+  }
+
   /** 应用被删：连着它的额度一起扔掉，免得下次同 id 复活时莫名带一个旧上限 */
   async release(appId: string): Promise<void> {
     this.entries.delete(appId)
     this.options.core.settings.remove(budgetKey(appId))
+    this.totalCache = null
   }
 
   async close(): Promise<void> {
     this.closed = true
     this.entries.clear()
+    this.totalCache = null
   }
 
   private async entry(appId: string): Promise<Entry> {
@@ -176,7 +291,7 @@ export class UsageService {
       level: levelOf(entry.totals, budget),
       exceeded: breached(entry.totals, budget),
       // 价格表里有这一条才算"算得出来"；faux 没有价格表，所以它永远是 false
-      priced: this.options.core.prices.find(choice.provider, choice.modelId) !== undefined,
+      priced: this.priced(),
     }
   }
 

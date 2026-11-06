@@ -9,7 +9,13 @@
  */
 import type { Budget, BudgetDimension, UsageTotals } from './domain.js'
 
-/** `1234` → `1.2k`。面板宽度有限，这个数只用来判断量级，不需要精确到个位 */
+/**
+ * `1234` → `1.2k`。面板宽度有限，这个数只用来判断量级，不需要精确到个位。
+ *
+ * 保留一位小数到 99.9k（`>= 100` 才取整）：跨应用汇总出现之后，用户会**把几行加起来
+ * 对一眼**。若 10k 以上直接取整，`6.3k + 4.2k` 会和合计 `10k` 对不上 —— 这种"数字不
+ * 自洽"的观感比多一个字符严重得多。代价是表头那个 chip 宽一个字符。
+ */
 export function formatTokens(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens <= 0) return '0'
   if (tokens < 1000) return String(Math.round(tokens))
@@ -45,6 +51,7 @@ export function budgetMessage(totals: UsageTotals, budget: Budget, dimension: Bu
 }
 
 function trimZero(value: number): string {
-  const fixed = value >= 10 ? value.toFixed(0) : value.toFixed(1)
+  // 100 以上才取整：见 formatTokens 的注释（跨应用汇总要对得上）
+  const fixed = value >= 100 ? value.toFixed(0) : value.toFixed(1)
   return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed
 }

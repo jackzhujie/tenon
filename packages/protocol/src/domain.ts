@@ -305,6 +305,28 @@ export const UsageSnapshot = z.object({
 })
 export type UsageSnapshot = z.infer<typeof UsageSnapshot>
 
+/**
+ * 跨应用汇总里的一行（`usage.total`，v1.2.17）。
+ *
+ * 单独成型而不是"把 UsageSnapshot 数组起来"：汇总不需要 models / tools 两个分桶
+ * （那是"这个应用为什么贵"的解释，属于本应用面板），跨应用只要一个能和别的应用相加的数。
+ */
+export const UsageAppUsage = z.object({
+  appId: z.string(),
+  name: z.string(),
+  totals: UsageTotals,
+  budget: Budget,
+  level: UsageLevel,
+  /**
+   * `false` = 这个应用还没有账本（从没跑过一轮）。
+   *
+   * 必须与"花了 0"分开：刚建的应用和用过的应用在 totals 上都是 0，
+   * 不区分的话合计会看着像个准数。
+   */
+  known: z.boolean(),
+})
+export type UsageAppUsage = z.infer<typeof UsageAppUsage>
+
 // ---------------------------------------------------------------- 预览
 
 /** 分维度就绪（DESIGN §9.2）：UI 按这几格显示进度，不要白屏 */
