@@ -133,8 +133,11 @@ export function startSupervisor(options: SupervisorOptions): ServerSupervisor {
     const tail = (): string => (stderrTail.length === 0 ? '' : `\n${stderrTail.join('\n')}`)
 
     const started = spawn(execPath, [...args], {
-      env: { ...options.env, ELECTRON_RUN_AS_NODE: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // `TENON_STDIN_SHUTDOWN` 让 server 监听 stdin 的 EOF —— Windows 上那是唯一
+      // 能"优雅关停"的通道（那边没有可捕获的 SIGTERM）
+      env: { ...options.env, ELECTRON_RUN_AS_NODE: '1', TENON_STDIN_SHUTDOWN: '1' },
+      // stdin 必须是管道：stop() 靠"关掉它"通知对方收尾
+      stdio: ['pipe', 'pipe', 'pipe'],
     })
     child = started
 
@@ -244,7 +247,15 @@ export function startSupervisor(options: SupervisorOptions): ServerSupervisor {
           clearTimeout(timer)
           resolve()
         })
-        target.kill('SIGTERM')
+        /*
+         * 先关 stdin（三个平台都有效的"请收尾"），POSIX 上再补一个 SIGTERM。
+         *
+         * 顺序不能反：Windows 上 `kill('SIGTERM')` 是 `TerminateProcess`，
+         * 先 kill 就没有"收尾"可言了 —— server 里的 sqlite / PGlite / git 锁
+         * 一个都来不及放。`shutdown()` 自己是幂等的，两边都到也无害。
+         */
+        target.stdin?.end()
+        if (process.platform !== 'win32') target.kill('SIGTERM')
       })
     },
   }

@@ -20,13 +20,22 @@ async function fakeServer(body: string): Promise<string> {
   return file
 }
 
+/*
+ * 两条关停通道都挂上，因为**Windows 上没有可捕获的 SIGTERM**（那边是 TerminateProcess）。
+ * supervisor 的做法是「先关 stdin，POSIX 上再补一个 SIGTERM」，两条都到也无害（幂等）。
+ * 这个假 server 照着真实 server 的样子两条都听 —— 真 server 见
+ * `packages/server/src/bin.ts` 的 `TENON_STDIN_SHUTDOWN`。
+ */
 const STAY = `
 const port = 4242
+const bye = () => { process.stdout.write('bye\\n'); process.exit(0) }
 process.stdout.write('TENON_READY ' + JSON.stringify({
   url: 'http://127.0.0.1:' + port, port, token: 'tok-1', home: '/tmp/x',
   model: { mode: 'faux', modelId: 'faux-mini' },
 }) + '\\n')
-process.on('SIGTERM', () => { process.stdout.write('bye\\n'); process.exit(0) })
+process.stdin.on('end', bye)
+process.stdin.resume()
+process.on('SIGTERM', bye)
 setInterval(() => {}, 1000)
 `
 
@@ -47,7 +56,7 @@ describe('parseReady', () => {
 })
 
 describe('supervisor', () => {
-  it('就绪 → 交回 url/token；stop() 走 SIGTERM 让它自己收尾', async () => {
+  it('就绪 → 交回 url/token；stop() 让它自己收尾（不是被 SIGKILL 打死）', async () => {
     const logs: string[] = []
     const supervisor = startSupervisor({
       entry: await fakeServer(STAY),
@@ -61,7 +70,7 @@ describe('supervisor', () => {
     expect(ready.token).toBe('tok-1')
 
     await supervisor.stop()
-    // 收到 SIGTERM 后它自己打印了 bye 才退出 —— 证明不是被 SIGKILL 打死的
+    // 收到"请收尾"后它自己打印了 bye 才退出 —— 证明不是被 SIGKILL 打死的
     expect(logs).toContain('bye')
   })
 

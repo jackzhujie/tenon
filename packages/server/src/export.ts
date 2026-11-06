@@ -35,7 +35,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { resolvePnpm } from '@tenon/core'
+import { invokePnpm, resolvePnpm } from '@tenon/core'
 import { ensureDeps, nodeRunEnv } from '@tenon/gateway'
 import { TenonError } from '@tenon/protocol'
 
@@ -120,6 +120,8 @@ async function runOnce(options: {
   cwd: string
   env: NodeJS.ProcessEnv
   timeoutMs: number
+  /** Windows 上 pnpm 是 `.cmd`，必须经过 shell（见 `invokePnpm`） */
+  shell?: boolean
   onLog?: (line: string) => void
   label: string
 }): Promise<{ code: number | null; output: string }> {
@@ -128,6 +130,8 @@ async function runOnce(options: {
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
       env: options.env,
+      shell: options.shell === true,
+      windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const timer = setTimeout(() => {
@@ -166,10 +170,11 @@ async function runScript(options: {
   onLog?: (line: string) => void
 }): Promise<{ code: number | null; output: string }> {
   const pnpm = resolvePnpm(options.env)
-  const args = ['run', options.script]
+  const call = invokePnpm(pnpm, ['run', options.script])
   return runOnce({
-    command: pnpm.isScript ? process.execPath : pnpm.command,
-    args: pnpm.isScript ? [pnpm.command, ...args] : args,
+    command: call.command,
+    args: call.args,
+    shell: call.shell,
     cwd: options.repoDir,
     env: pnpm.isScript ? nodeRunEnv(options.env) : options.env,
     timeoutMs: options.timeoutMs,
@@ -361,9 +366,11 @@ export async function exportStatic(options: StaticExportOptions): Promise<Static
     const pnpm = resolvePnpm(env)
     const args = ['install', '--prod', '--prefer-offline', '--reporter=append-only']
     if (existsSync(join(options.outDir, 'pnpm-lock.yaml'))) args.push('--frozen-lockfile')
+    const installCall = invokePnpm(pnpm, args)
     const installed = await runOnce({
-      command: pnpm.isScript ? process.execPath : pnpm.command,
-      args: pnpm.isScript ? [pnpm.command, ...args] : args,
+      command: installCall.command,
+      args: installCall.args,
+      shell: installCall.shell,
       cwd: options.outDir,
       env: pnpm.isScript ? nodeRunEnv(env) : env,
       timeoutMs: INSTALL_TIMEOUT_MS,

@@ -104,8 +104,13 @@ describe('卸载即清理（DoD ②）', () => {
 
     // ① 装
     const installed = await call(tools, 'install_component', { id: ID })
-    expect(installed.isError).toBeFalsy()
+    /*
+     * **先断言文本，再断言 isError**。顺序是有讲究的：`expect(installed.isError)`
+     * 失败时只说"true 不是 falsy"，工具的返回原文一个字都不显示 —— 而那句话里
+     * 往往就写着真正的原因（"找不到组件" / "facet 构建产物过期" / 某个 EPERM）。
+     */
     expect(textOf(installed)).toContain('已装')
+    expect(installed.isError).toBeFalsy()
 
     const afterInstall = await rpc<{ components: { id: string; loaded: boolean }[] }>(
       server,
@@ -120,8 +125,8 @@ describe('卸载即清理（DoD ②）', () => {
 
     // ② 卸
     const removed = await call(tools, 'remove_component', { id: ID })
-    expect(removed.isError).toBeFalsy()
     expect(textOf(removed)).toContain('已卸')
+    expect(removed.isError).toBeFalsy()
 
     const listAfter = await rpc<{ components: unknown[]; available: { id: string; installed: boolean }[] }>(
       server,

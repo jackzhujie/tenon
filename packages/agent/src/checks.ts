@@ -24,13 +24,13 @@
  * `process.execPath` 是 Tenon 自己 —— 不补回来就会**弹出一个窗口**，`tsc` 一行不跑。
  * 两份实现 = 两份记住这个坑的机会，早晚漏一个。
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CHECK_LABELS } from '@tenon/protocol'
 import type { CheckOutcome, CheckStatus, GateOutcome } from '@tenon/protocol'
-import { formatTscReport, parseTscOutput, resolvePnpm, scrubEnv } from '@tenon/core'
+import { formatTscReport, invokePnpm, parseTscOutput, resolvePnpm, scrubEnv } from '@tenon/core'
 
 const MAX_TSC_BYTES = 128 * 1024
 const DEFAULT_TSC_TIMEOUT_MS = 60_000
@@ -336,8 +336,16 @@ interface AppScriptRun {
 function killTree(child: ReturnType<typeof spawn>): void {
   if (child.pid === undefined) return
   try {
-    if (process.platform === 'win32') child.kill('SIGKILL')
-    else process.kill(-child.pid, 'SIGKILL')
+    if (process.platform === 'win32') {
+      /*
+       * Windows 没有进程组，`child.kill()` 只杀**直接子进程** —— 而它是 `cmd.exe`
+       * （走了 shell）或 pnpm，eslint / vitest 作为孙进程会变成孤儿继续占 CPU。
+       * `taskkill /T` 是那边唯一的"杀整棵树"，`/F` 强制。
+       */
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+    } else {
+      process.kill(-child.pid, 'SIGKILL')
+    }
   } catch {
     // 已经死了、或者没有权限杀这个组：都不是错误，尽力而为
     try {
@@ -365,14 +373,15 @@ async function runAppScript(
 ): Promise<AppScriptRun> {
   const started = Date.now()
   const env: NodeJS.ProcessEnv = { ...childEnv(), CI: '1' }
-  const pm = resolvePnpm(process.env)
-  // 随包的 pnpm 是 `.cjs`：必须用 node 跑（和 `deps.ts` 装依赖时同一套判断）
-  const command = pm.isScript ? process.execPath : pm.command
-  const args = pm.isScript ? [pm.command, 'run', name] : ['run', name]
+  // 随包的 pnpm 是 `.cjs` 要用 node 跑、Windows 上要走 shell —— 判断都在 `invokePnpm` 里
+  const call = invokePnpm(resolvePnpm(process.env), ['run', name])
 
-  const child = spawn(command, args, {
+  const child = spawn(call.command, call.args, {
     cwd: repoDir,
     env,
+    shell: call.shell,
+    // 不隐藏的话，Windows 上每跑一次门禁都闪一个黑框
+    windowsHide: true,
     // 自己的进程组：超时才能用负 pid 把 pnpm 和它 spawn 出来的 eslint 一起杀掉
     detached: process.platform !== 'win32',
   })

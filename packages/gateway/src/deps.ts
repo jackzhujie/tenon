@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { TenonError } from '@tenon/protocol'
-import { resolvePnpm } from '@tenon/core'
+import { invokePnpm, resolvePnpm } from '@tenon/core'
 import { nodeRunEnv } from './child.js'
 
 export interface EnsureDepsOptions {
@@ -60,12 +60,14 @@ export async function ensureDeps(options: EnsureDepsOptions): Promise<DepsResult
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000
 
   const code = await new Promise<number | null>((resolve) => {
-    // 随包的 pnpm 是 `.cjs`：必须用 node 跑，而且打包态下还要 ELECTRON_RUN_AS_NODE
-    const command = pnpm.isScript ? process.execPath : pnpm.command
-    const commandArgs = pnpm.isScript ? [pnpm.command, ...args] : args
-    const child = spawn(command, commandArgs, {
+    // 随包的 pnpm 是 `.cjs`（要用 node 跑，打包态还要 ELECTRON_RUN_AS_NODE）；
+    // Windows 上 pnpm 是 `.cmd`，必须走 shell —— 判断在 `invokePnpm` 里
+    const call = invokePnpm(pnpm, args)
+    const child = spawn(call.command, call.args, {
       cwd: options.repoDir,
       env: pnpm.isScript ? nodeRunEnv(env) : env,
+      shell: call.shell,
+      windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const timer = setTimeout(() => {

@@ -7,21 +7,31 @@
  *
  * `hubConfigFile`（M6 第 5 步）尤其如此：壳把它设成 `TENON_HUB_CONFIG_FILE`，
  * 指错时 `resolveHubConfig` 只会说"读不到"，商店静默变成未配置。
+ *
+ * ⚠️ **期望值一律用 `join()` 拼，不写字面量 `'a/b/c'`**。这个文件里的路径是喂给
+ * `resolveDesktopPaths` 的输入，它内部用 `join` —— Windows 上产出的是 `\` 分隔。
+ * 第一版写成字面量（`toBe('/repo/apps/desktop/dist')`）在 macOS/Linux 上一直绿，
+ * 铺到三平台 CI 时 Windows 一列全红，而**产品代码是对的**（错的是断言）。
  */
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { resolveDesktopPaths } from '../src/paths.js'
 
-const DEV = resolveDesktopPaths({ isPackaged: false, appPath: '/repo/apps/desktop', resourcesPath: '/ignored' })
+const DEV = resolveDesktopPaths({
+  isPackaged: false,
+  appPath: join('/repo', 'apps', 'desktop'),
+  resourcesPath: join('/ignored'),
+})
 const PACKAGED = resolveDesktopPaths({
   isPackaged: true,
-  appPath: '/Applications/Tenon.app/Contents/Resources/app.asar',
-  resourcesPath: '/Applications/Tenon.app/Contents/Resources',
+  appPath: join('/Applications', 'Tenon.app', 'Contents', 'Resources', 'app.asar'),
+  resourcesPath: join('/Applications', 'Tenon.app', 'Contents', 'Resources'),
 })
 
 describe('resolveDesktopPaths', () => {
   it('开发态的 base 是 apps/desktop/dist，打包态是 Contents/Resources', () => {
-    expect(DEV.base).toBe('/repo/apps/desktop/dist')
-    expect(PACKAGED.base).toBe('/Applications/Tenon.app/Contents/Resources')
+    expect(DEV.base).toBe(join('/repo', 'apps', 'desktop', 'dist'))
+    expect(PACKAGED.base).toBe(join('/Applications', 'Tenon.app', 'Contents', 'Resources'))
   })
 
   it('五个交给 server 的路径都在 base 之下（两种形态同构）', () => {
@@ -31,9 +41,9 @@ describe('resolveDesktopPaths', () => {
       }
     }
     // server 的入口必须是 <base>/server/server.mjs：`templates` 的相对位置靠它
-    expect(DEV.serverEntry).toBe('/repo/apps/desktop/dist/server/server.mjs')
-    expect(DEV.hubConfigFile).toBe('/repo/apps/desktop/dist/hub.json')
-    expect(PACKAGED.hubConfigFile).toBe('/Applications/Tenon.app/Contents/Resources/hub.json')
+    expect(DEV.serverEntry).toBe(join('/repo', 'apps', 'desktop', 'dist', 'server', 'server.mjs'))
+    expect(DEV.hubConfigFile).toBe(join('/repo', 'apps', 'desktop', 'dist', 'hub.json'))
+    expect(PACKAGED.hubConfigFile).toBe(join('/Applications', 'Tenon.app', 'Contents', 'Resources', 'hub.json'))
   })
 
   it('两套形态的目录名一致（只有 base 不同）', () => {

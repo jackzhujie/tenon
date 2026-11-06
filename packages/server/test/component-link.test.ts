@@ -101,7 +101,20 @@ describe('组件链路（网关 → WS → chord host）', () => {
     await assemble()
     await bootGateway()
     const html = await (await fetch(`${gateway?.url}/`)).text()
-    expect(html).toContain('type="module"')
+    /*
+     * 注入不发生只有一种可能：**加载计划里没有带 web facet 的目标**。
+     * 而"为什么没有"藏在两处 problems 里（计划阶段 / 激活阶段）。
+     * 断言失败时把它们带出来 —— 否则只知道"HTML 里没脚本"，
+     * 而这句现象在三个平台上一模一样，帮不上忙。
+     */
+    const activated = await runtime!.ensure(APP_ID)
+    const why = [
+      ...activated.plan.problems.map((item) => `计划：${item.message}`),
+      ...activated.problems.map((item) => `激活：${item.message}`),
+    ]
+    expect(html, why.length === 0 ? `计划目标数 ${activated.plan.targets.length}` : why.join(' / ')).toContain(
+      'type="module"',
+    )
     expect(html).toContain(`${COMPONENT_SCRIPT_PATH}?appId=${APP_ID}`)
     // 应用自己的内容不能被吃掉
     expect(html).toContain('应用页面')

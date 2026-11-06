@@ -6,7 +6,7 @@
  */
 import { rm } from 'node:fs/promises'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import type { App, AppStatus } from '@tenon/protocol'
 import { TenonError, isTenonError } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
@@ -14,6 +14,22 @@ import { commitAll, headSha, initRepo, isRepo } from '../git.js'
 import { newId, slugify } from '../ids.js'
 import type { TenonHome } from '../paths.js'
 import { appPaths } from '../paths.js'
+
+/**
+ * `target` 是不是**在** `base` 里面（而不是等于它）。
+ *
+ * 原先这里写的是 `startsWith(`${base}/`)`。那个判断在 macOS/Linux 上一直是对的，
+ * 在 Windows 上**永远为假** —— 因为分隔符是 `\`，拼出来的前缀是 `...\apps/`，
+ * 而真实路径是 `...\apps\app_x`。表现不是"删错了"，而是"删应用永远失败"，
+ * 且报的是一句看不懂的"拒绝删除越界路径"。（三平台 CI 第一次跑就是这样抓到的。）
+ *
+ * `relative` 按**运行平台**的分隔符算，而且天然处理 `..`：
+ * 越界的相对路径不是以 `..` 开头就是绝对路径。
+ */
+function isInside(base: string, target: string): boolean {
+  const rel = relative(base, target)
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
 
 interface AppRow {
   id: string
@@ -196,7 +212,7 @@ export class AppStore {
     if (!removeFiles) return
     const paths = appPaths(this.home, id)
     // 安全护栏：只允许删 appsDir 下面的目录（防 id 被污染成 ../..）
-    if (!paths.dir.startsWith(`${this.home.appsDir}/`)) {
+    if (!isInside(this.home.appsDir, paths.dir)) {
       throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.dir}`)
     }
     await rm(paths.dir, { recursive: true, force: true })
@@ -209,7 +225,7 @@ export class AppStore {
      *
      * 这与"删除不可恢复"是同一件事，UI 的确认文案里已经写清楚了。
      */
-    if (!paths.backupRepo.startsWith(`${this.home.backupsDir}/`)) {
+    if (!isInside(this.home.backupsDir, paths.backupRepo)) {
       throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.backupRepo}`)
     }
     await rm(paths.backupRepo, { recursive: true, force: true })
