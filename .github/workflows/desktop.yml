@@ -39,12 +39,35 @@ permissions:
 
 jobs:
   package:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.tag }}
     strategy:
-      # 一个平台失败不该让另外两个的产物跟着丢 —— 三份产物是互相独立的价值
+      # 一个平台失败不该让另外几份产物跟着丢 —— 每份产物是互相独立的价值
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        include:
+          # macOS runner 现在是 Apple Silicon：默认出 arm64。Intel 用户要 x64，
+          # 所以用交叉编译再出一份（`--x64` 只是换一个 Electron 二进制，没有原生模块要重编）。
+          - os: macos-latest
+            tag: mac-arm64
+            args: ''
+            smoke: true
+            cache: mac-arm64
+          - os: macos-latest
+            tag: mac-x64
+            args: '--x64'
+            # 交叉产物在这个 runner 上要 Rosetta 才能跑，冒烟只对宿主架构那一份做
+            smoke: false
+            cache: mac-x64
+          - os: windows-latest
+            tag: win-x64
+            args: ''
+            smoke: false
+            cache: win
+          - os: ubuntu-latest
+            tag: linux-x64
+            args: ''
+            smoke: false
+            cache: linux
     runs-on: ${{ matrix.os }}
     # Windows 上装依赖 + 打 nsis 明显比另外两个慢
     timeout-minutes: 45
@@ -75,9 +98,9 @@ jobs:
             ~/.cache/electron-builder
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
-          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: electron-${{ matrix.cache }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            electron-${{ runner.os }}-
+            electron-${{ matrix.cache }}-
 
       - name: 装依赖
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -88,12 +111,12 @@ jobs:
 
       # 目标在 electron-builder.yml 里按平台配好了（mac: dmg+zip / win: nsis / linux: AppImage）
       - name: 打安装包
-        run: pnpm --filter @tenon/desktop exec electron-builder --publish never
+        run: pnpm --filter @tenon/desktop exec electron-builder ${{ matrix.args }} --publish never
 
       # macOS 上**真启动一次**打包产物：产物存在不等于能跑（历史上踩过"装完白屏"）。
       # Windows / Linux 上没有等价的冒烟脚本（要 GUI 会话），所以那边只验"打得出来"。
-      - name: 冒烟：真启动打包产物（仅 macOS）
-        if: runner.os == 'macOS'
+      - name: 冒烟：真启动打包产物（仅宿主架构的 macOS 那一份）
+        if: matrix.smoke
         run: pnpm smoke:desktop:packaged
 
       - name: 列出产物
@@ -111,7 +134,7 @@ jobs:
       - name: 上传安装包
         uses: actions/upload-artifact@v4
         with:
-          name: tenon-${{ matrix.os }}
+          name: tenon-${{ matrix.tag }}
           path: |
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
