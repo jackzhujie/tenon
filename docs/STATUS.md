@@ -2173,7 +2173,7 @@ chord/dist/*.js 里的 import：2 处 "typebox"（根入口）、5 处 "typebox/
 - `web.js`：**自注册模块，导出为空是对的**（我第一版断言写成"也要有 activate"，错了；
   它的契约是靠 URL 里的 `appId` 自己挂载）。判据是"能被解析并执行、不抛"
 
-- 单测 **718 项全过**（含 4 个直接 `import()` 真实 `server.js` 的组件测试：25 项）
+- 单测 **726 项全过**（含 4 个直接 `import()` 真实 `server.js` 的组件测试：25 项）
 - `pnpm e2e:component` 5/5（真 Chromium 里加载压缩后的 web.js、挂上、点开、对话、HMR）
 - `pnpm e2e:hub` 32/32（现场生成密钥 → 打包压缩产物 → 静态 Hub → 真 server 装进应用 → 篡改/付费两种拒绝）
 
@@ -2182,6 +2182,93 @@ chord/dist/*.js 里的 import：2 处 "typebox"（根入口）、5 处 "typebox/
 这条欠账在清单上躺了两个里程碑，描述一直是错的（"各打一份 React"），所以方案也一直是错的
 （"共享运行时"）。**盘体积要先拆开看构成**：`--metafile` 一行命令就能回答"到底谁占的"，
 比照着常识猜省事得多。
+
+### 4.50 质量门禁铺到三个平台：第一轮红 32 条，抓到四个 Windows 真 bug
+
+上一轮盘点里"Windows/macOS 没进 CI"是仅剩的几条能自己做的事之一。铺开之后
+**第一轮 Windows 红了 32 条**，其中三条是**产品 bug**，不是"测试没写好"——
+这也正是铺这条 CI 的理由：这类问题没有任何人会在 macOS 上发现。
+
+#### 三轮收敛
+
+| 轮次 | Windows 失败数 | 这一轮查出的根因 |
+|---|---|---|
+| 第一次（只铺矩阵） | **32** | `spawn pnpm ENOENT` / 删应用永远失败 / 没有优雅关停 / 路径断言写死 `/` |
+| 第二次（修完上面四处） | **10** | `pnpm build:plugins` 在 Windows 上**静默空跑** |
+| 第三次 | **0** | — |
+
+三平台各 4–5 分钟，并行跑，墙钟时间没变。
+
+#### 四个真 bug
+
+**① `spawn pnpm ENOENT` —— 门禁与装依赖在 Windows 上根本跑不起来。**
+Windows 的 `pnpm` 实际是 `pnpm.cmd`（Node 的 `spawn` 不做 PATHEXT 补全），而且从
+Node 18.20/20.12 起（CVE-2024-27980 的修复）`.cmd` **必须** `shell: true`。
+`resolvePnpm` 的兜底直接返回 `'pnpm'`，于是四个调用点全挂：发布门禁的 test / lint、
+预览装依赖、导出时的 build 与 install。表现是"脚本起不来"，看着像环境坏了。
+
+修法不只是换名字：把复制了四遍的 `isScript ? execPath : command` 收成 `invokePnpm()`，
+平台判断只写一次；`resolvePnpm(env, platform)` 把平台做成**参数**，于是这条判断在
+macOS 上也能单测（新增 8 项）。另加 `windowsHide`：不然每跑一次门禁闪一个黑框。
+
+**② 删应用在 Windows 上永远失败。**
+`if (!paths.dir.startsWith(`${appsDir}/`))` —— 硬编码 `/`。Windows 的前缀是 `...\apps/`，
+永远不匹配 `...\apps\app_x`，于是**每次删除都抛"拒绝删除越界路径"**。
+改成 `relative()` 判断（按运行平台的分隔符算，天然处理 `..`），两处：应用目录与备份裸库。
+它还连带拖红了 `core.test` / `budget.test`：抛异常 → 测试里 `core.close()` 没跑到 →
+sqlite 句柄没关 → 目录删不掉（EBUSY）。
+
+**③ Windows 上没有可捕获的 SIGTERM。**
+那边 `kill('SIGTERM')` 就是 `TerminateProcess`，handler 一行都不跑，关窗口时
+sqlite / PGlite / git 锁都来不及收尾。加一条**跨平台**通道：supervisor 用
+`TENON_STDIN_SHUTDOWN=1` 拉起 server，`stop()` 时先 `stdin.end()`，POSIX 上再补 SIGTERM。
+用环境变量把它关起来是必须的：手工 dev、CI 里 `< /dev/null` 的 server，stdin 一开始
+就是 EOF —— 无条件监听会**启动即退出**。
+
+**④ `pnpm build:plugins` 在 Windows 上静默空跑。**
+脚本末尾那个"是不是被直接跑"的判断：
+
+```ts
+if (import.meta.url === `file://${process.argv[1]}`)
+```
+
+macOS 上恰好相等（`file:///Users/…`）；Windows 上**永远不相等** —— `import.meta.url`
+是 `file:///D:/a/tenon/scripts/build-plugins.ts`，拼出来的是
+`file://D:\a\tenon\scripts\build-plugins.ts`。于是整块 CLI 逻辑被跳过：
+不构建、不打印、**退出码 0**。`pretest` 0.3 秒"成功"，而 `plugins/bundled/<id>/*.js`
+一个都没有，所有组件测试报"清单说 server facet 在「server.js」，但文件不存在"。
+
+改成 `pathToFileURL(process.argv[1]).href`。这个 bug 的恶果不止测试：
+`pnpm build:plugins` 在 Windows 上一直是空跑，`build:desktop` 也跟着缺产物 ——
+只是没人从 Windows 上打过包。
+
+顺带把 `app.delete` 的 `rm` 加了 `maxRetries`（Windows 上目录可能被短暂占用：
+子进程刚退出 / 索引器 / 杀软；真被长期占用时仍然报错）。
+
+#### 两处只加诊断、不改行为
+
+诊断本身是这次的关键一步 —— 第二次那 10 条，如果不改断言就只能看到
+"HTML 里没有脚本"这种三个平台上一样的现象：
+
+- 组件安装测试原先先断言 `expect(installed.isError)`，失败时**工具返回的原文一个字都不显示**。
+  改成先断言文本（那句里往往就写着"facet 构建产物过期"）。
+- `component-link` 在断言失败时把"计划阶段 / 激活阶段的 problems"带出来。
+
+#### 一个必须进仓库的配套
+
+新增 `.gitattributes`：`* text=auto eol=lf`。这不只是风格 ——
+`runtime-sdk/test/sync.test.ts` 是**逐字节**比对模板副本与源码，发布快照 / 导出产物 /
+组件签名也都按字节算。Windows 上 git 默认转 CRLF（runner 镜像里 `core.autocrlf=true`），
+一旦转换这些比对必然红，而且红得莫名其妙（"内容明明一样"）。
+规则写进仓库比在 CI 里临时 `git config` 可靠：对每个 clone、每个人、每个编辑器都生效。
+CI 里另起一步用 `git ls-files --eol` 断言索引里没有 crlf/mixed。
+
+#### 没做的（如实记）
+
+- **桌面壳在 Windows / macOS 上仍没跑过**：`smoke:desktop` 要 GUI，runner 上没有。
+  CI 覆盖的是"核心 + Web 模式"（`apps/web` 的构建也在内），`apps/desktop` 只有单测。
+- **没出过 Windows 安装包**：`electron-builder` 只在本机打过 `--dir`（mac）。这条仍在欠账里。
+- **`e2e:*` 一个都不在 CI**（要容器 / GUI / 大镜像），维持原判。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
@@ -2369,6 +2456,12 @@ chord/dist/*.js 里的 import：2 处 "typebox"（根入口）、5 处 "typebox/
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
 | **"打开就自动跑"的对话框里，"上次结论"永远没机会显示** | 想加"预检结论常驻"时第一版是"在旁边多显示一块"，结果对话框一打开就真跑预检（`checking` 立刻为真），那块 UI 永远不渲染。正确的做法是**能复用就不跑**（判据：存档在 + HEAD 没变 + 工作区干净），而不是多显示一块 |
+| **用字符串拼 `file://` 去和 `import.meta.url` 比，在 Windows 上永远为假** | macOS 是 `file:///Users/…`，Windows 是 `file:///D:/…` 而拼出来是 `file://D:\…`（盘符、反斜杠、少一个斜杠）。后果是**静默什么都不做**：脚本不干活、不打印、退出码 0。一律用 `pathToFileURL(argv[1]).href` |
+| **Windows 上 `spawn('pnpm')` 是 ENOENT，`spawn('pnpm.cmd')` 还要 `shell: true`** | spawn 不做 PATHEXT 补全；且 Node ≥18.20 起不允许直接 spawn `.cmd`/`.bat`（CVE-2024-27980）。代价：**参数里不能有需要引用才安全的空格**（路径一律走 `cwd`）。另加 `windowsHide: true`，否则每跑一次闪一个黑框 |
+| **路径护栏不能在后面硬拼一个正斜杠** | Windows 上前缀是 `...\apps/`，永远不匹配 `...\apps\app_x` → **删应用永远失败**，报的是一句看不懂的"拒绝删除越界路径"。用 `relative()`：按平台分隔符算，且天然处理 `..` |
+| **Windows 没有可捕获的 SIGTERM** | `kill('SIGTERM')` 就是 `TerminateProcess`，handler 一行不跑 → 数据库与 git 锁来不及放。跨平台的优雅关停是**关掉子进程的 stdin**；但要用环境变量把它开起来，否则 `< /dev/null` 启动的进程会"启动即退出" |
+| **Windows 删目录会 EBUSY** | 句柄没释放（子进程刚退、索引器、杀软）时 rmdir 抛 EBUSY/EPERM。`fs.rm` 的 `maxRetries`/`retryDelay` 就是为这几个错误码准备的，对 POSIX 无副作用 |
+| **注释里不能出现"星号 + 斜杠"** | 写路径时特别容易（例如 `plugins/bundled/<id>` 的简写）。它在块注释里等于**结束符**，报的是一串看不懂的语法错误，而且位置指向后面几行 |
 | **"单文件自包含"是 Hub 分发的硬约束，所以跨组件共享依赖做不到** | 曾计划"网关提供 chord 共享 chunk"把三个 web bundle 的重复消掉。但第三方从 Hub 装的组件包里没有 `node_modules`，共享 = 缺依赖的坏包。**体积只能靠压缩或减少依赖**；共享只对随包的那几个可能，而两条加载路径的复杂度不值那 1MB |
 | **组件产物的体积不是 React 占的** | 735KB 的 `web.js` 里 532 个模块标记**全是 typebox**（`chord` 引它的根入口 + `typebox/value`），改 `contract.ts` 的 import 收窄没用。判断体积先跑 `esbuild --metafile` 看 `bytesInOutput`，别凭常识猜 |
 | **"lint 报了几万个问题"先问 ignore 配对了没** | 本仓不 ignore `docs/reverse/`（几百个压缩 `.js`）时报 **67590** 个；不 ignore `plugins/bundled/*/web.js`（当时 3.4MB，压缩后 1.6MB）时报 **794** 个；都排掉只剩 **27** 个。隔着两个数量级的差距，都是配置问题 |

@@ -28,14 +28,14 @@ M1 九步 + M2 七步（Docker 产物按用户决定跳过）+ M3 九步 + M4 �
 未发布版本数（`lib/release-hint.ts`）、脚本的 `@options` 不再能放大超时上限（§4.37）、
 **导出静态包**（`export.static`，产物拷走就能跑）+ **Docker 上下文**（`export.docker`，
 M2 第 8 步落地；compose 自带 PG，`e2e:docker` 全栈 21 项真跑 compose）。
-全绿基线：**lint 0 error / 10 warn** / typecheck 18 project / test **718** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
+全绿基线：**lint 0 error / 10 warn** / typecheck 18 project / **CI 三平台矩阵** / test **726** / smoke 9 / e2e:preview 16 / e2e:inspector 13 /
 e2e:diff 36 / e2e:release 44 / e2e:e2e 9 / **e2e:component 5** / **e2e:hub 32** / **e2e:apps 18** / **e2e:export 22** / **e2e:docker 21** / **e2e:postgres 31** / **shot:usage** / **shot:release** /
 spike:chord 10 / smoke:desktop 8 / smoke:desktop:packaged 8 / build:web 322KB。
 M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆盖层/加载计划）→
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
 `install_component`/`remove_component`/插件页 → 真 Chromium 端到端。
 **欠账**（M1–M6 计划内已清）：真远端 push、**真 Hub 未上线**（静态托管/域名/缓存）、
-额度无跨应用总闸、没出过 `.dmg`（只有 `--dir` 的 unpacked）、Windows/macOS 没进 CI、
+额度无跨应用总闸、没出过 `.dmg`（只有 `--dir` 的 unpacked）、
 DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§4.49）。
 
 ## 已定的架构选择（推翻要重做很多）
@@ -114,6 +114,17 @@ DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§
   盘体积先跑 `esbuild --metafile` 看 `bytesInOutput`
 - **`build:plugins` 用 `minify + keepNames`**：3.4MB→1.6MB（−53%）。全 minify 只多省 40KB
   但抹掉函数名 → 组件异常堆栈没法看。不做 sourcemap（.map 会打进 Hub 包）
+- **`import.meta.url === 'file://' + argv[1]` 在 Windows 永远为假** → 脚本**静默不干活、
+  退出码 0**。`build:plugins` 就这么在 Windows 上一直空跑（于是所有组件测试报"facet 文件不存在"）。
+  一律 `pathToFileURL(argv[1]).href`
+- **Windows：`spawn('pnpm')` ENOENT，`spawn('pnpm.cmd')` 还要 `shell: true`**（Node ≥18.20
+  不允许直接 spawn `.cmd`）。`resolvePnpm(env, platform)` 把平台做成参数，便于单测；
+  另加 `windowsHide: true`，否则每次闪黑框
+- **路径护栏别硬拼正斜杠**：`startsWith(`${base}/`)` 在 Windows 永远为假 → 删应用永远失败。
+  用 `relative()`（按平台分隔符、天然处理 `..`）
+- **Windows 没有可捕获的 SIGTERM**（`kill` 即 TerminateProcess）→ 优雅关停走**关 stdin**，
+  且要用环境变量开关（`< /dev/null` 启动时 stdin 一开始就 EOF，会"启动即退出"）
+- **Windows 删目录会短暂 EBUSY**（句柄/索引器/杀软）→ `fs.rm` 的 `maxRetries`/`retryDelay`
 - **杀 pnpm 不等于杀掉它的子进程**：`child.kill('SIGKILL')` 只杀直接子进程，而它再 spawn
   `eslint`/`vitest`，**孙进程握着 stdout** → 管道不关 → `close` 永远不来 → `await` 挂着，
   界面"检查中…"永不结束。要 `detached: true` 进自己的进程组 + 负 pid 杀整组，
