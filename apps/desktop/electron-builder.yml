@@ -57,6 +57,10 @@ mac:
     - target: zip
 
 win:
+  # ★ 文件名别带空格：NSIS 默认产出 `Tenon Setup 0.0.0.exe`，而 GitHub Release 会把空格
+  # 换成点（`Tenon.Setup.0.0.0.exe`）—— 于是"文档写的名字"和"下到的名字"对不上，
+  # 命令行里还得加引号。在源头定成一次一致的形状。
+  artifactName: ${productName}-${version}-setup.${ext}
   target:
     - target: nsis
 
