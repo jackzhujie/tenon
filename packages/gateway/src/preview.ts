@@ -211,7 +211,12 @@ export class PreviewManager {
    * 缓存结果的话，用户在对话里让 Agent 装了个包，预览重启时就不会再 install 了
    * —— 表现为"依赖明明加了却 import 不到"。
    */
-  private readonly installing = new Map<string, Promise<DepsResult>>()
+  /**
+   * 正在跑的依赖安装。**带 controller** 是为了能取消（v1.2.24）：
+   * 应用被删掉时，那个以 `repo/` 为 CWD 的 pnpm 进程还活着 ——
+   * Windows 上目录删不掉（EBUSY），而且它还在往一个正在被删的目录里写。
+   */
+  private readonly installing = new Map<string, { task: Promise<DepsResult>; controller: AbortController }>()
   private closed = false
 
   constructor(private readonly options: PreviewManagerOptions) {
@@ -393,14 +398,16 @@ export class PreviewManager {
       return { installed: false, command: 'install (已禁用)', durationMs: 0 }
     }
     const running = this.installing.get(appId)
-    if (running !== undefined) return running
+    if (running !== undefined) return running.task
 
     const paths = appPaths(this.options.home, appId)
     const installer = this.options.depsInstaller ?? ensureDeps
+    const controller = new AbortController()
     const task = (async (): Promise<DepsResult> => {
       const result = await installer({
         repoDir: paths.repoDir,
         env: this.spawnEnv(),
+        signal: controller.signal,
         ...(this.options.log === undefined ? {} : { onLog: this.options.log }),
       })
       if (result.installed) {
@@ -413,12 +420,29 @@ export class PreviewManager {
       }
       return result
     })()
-    this.installing.set(appId, task)
+    this.installing.set(appId, { task, controller })
     try {
       return await task
     } finally {
       this.installing.delete(appId)
     }
+  }
+
+  /**
+   * 掐掉这个应用正在跑的依赖安装，并**等它真的结束**（v1.2.24）。
+   *
+   * 为什么"等"是必须的：删应用紧接着就要删目录，而那个 pnpm 进程正拿 `repo/` 当 CWD。
+   * 不等的话两边赛跑 —— 在 POSIX 上表现为"留下几个写了一半的文件"，在 Windows 上
+   * 表现为**目录根本删不掉**（EBUSY）。返回 `true` 表示确实掐了一个。
+   *
+   * 不抛：被掐掉的安装本来就会以非零退出，那是预期内的。
+   */
+  async cancelDeps(appId: string): Promise<boolean> {
+    const entry = this.installing.get(appId)
+    if (entry === undefined) return false
+    entry.controller.abort()
+    await entry.task.catch(() => undefined)
+    return true
   }
 
   private spawnEnv(): NodeJS.ProcessEnv {

@@ -308,6 +308,12 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       await agent.taskGraph?.release(input.id)
       await agent.usage?.release(input.id)
       await agent.pool?.release(input.id)
+      /*
+       * 装依赖是**建应用时就不等它**开始的后台任务（`app.create` 里 fire-and-forget）。
+       * 它是个以 `repo/` 为 CWD 的子进程，所以删目录之前必须先掐掉它 ——
+       * 否则 Windows 上目录直接删不掉（EBUSY），POSIX 上会留下半装的 node_modules。
+       */
+      await preview.cancelDeps(input.id)
       // 预览必须先停：dev server 还在写 node_modules / .vite 时删目录会留下半截图
       await preview.stop(input.id)
       // 日志缓冲跟着应用一起丢，否则删掉的应用还在内存里留着几百行

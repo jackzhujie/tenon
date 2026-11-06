@@ -72,7 +72,7 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 
 ## 状态
 
-**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**726 项单测 + 23 个端到端/验收脚本**绿（三个平台各跑一遍）。
+**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**728 项单测 + 23 个端到端/验收脚本**绿（三个平台各跑一遍）。
 九个包（`protocol` / `component-host` / `core` / `agent` / `generator` / `gateway` /
 `db-provisioner` / `runtime-sdk` / `server`）+ 两个 app（渲染器 `apps/web`，浏览器与窗口共用一套代码；
 壳 `apps/desktop`，只做生命周期）。
@@ -102,7 +102,7 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 ```bash
 pnpm lint                   # eslint（约 3 秒）：0 error / 10 warning（那 10 条是 effect 里 setState 的性能建议）
 pnpm typecheck              # 18 个 tsconfig（含 scripts 与 spikes）
-pnpm test                   # 726 项单测/集成，约 210s（含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 728 项单测/集成，约 210s（含 PGlite 冷启动与真 QuickJS）
 pnpm build:web              # 前端产物（server 启动时把它读进内存）
 ```
 

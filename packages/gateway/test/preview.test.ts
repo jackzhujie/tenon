@@ -477,3 +477,61 @@ describe('PreviewManager', () => {
     expect(manager.logs(APP_ID)).toEqual([])
   })
 })
+
+describe('依赖安装的取消（v1.2.24）', () => {
+  /**
+   * 这条是删应用时"目录删不掉"的根因所在：`app.create` 建完就**不等地**开始装依赖，
+   * 那个 pnpm 进程拿 `repo/` 当 CWD。删应用如果不等它结束，Windows 上 rmdir 就是 EBUSY，
+   * POSIX 上则会留下半装的 node_modules。所以删之前必须掐掉 —— 而且要**等到**它真的结束。
+   */
+  it('★ cancelDeps 会掐掉正在跑的安装，并且等到它真的结束', async () => {
+    const dir = await makeApp()
+    let seen: AbortSignal | undefined
+    let settled = false
+
+    const manager = new PreviewManager({
+      home: resolveHome({ TENON_HOME: dir }),
+      // 这条用例不该起 dev server
+      launch: (() => Promise.reject(new Error('不该起预览'))) as unknown as Launcher,
+      installDeps: true,
+      readyTimeoutMs: 5000,
+      apiReadyTimeoutMs: 5000,
+      database: fakeDatabase(),
+      // 假的安装器：只有收到 abort 才结束 —— 模拟"pnpm 正在跑"
+      depsInstaller: (options) =>
+        new Promise((resolve) => {
+          seen = options.signal
+          options.signal?.addEventListener('abort', () => {
+            settled = true
+            resolve({ installed: false, command: 'stub install (已取消)', durationMs: 1 })
+          })
+        }),
+      publish: () => undefined,
+    })
+    cleanups.push(() => manager.close())
+
+    const installing = manager.ensureDeps(APP_ID)
+    // 等它真的进到 installer（ensureDeps 里还有几步 await）
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(seen).toBeDefined()
+
+    const cancelled = await manager.cancelDeps(APP_ID)
+    expect(cancelled).toBe(true)
+    // ★ 关键：cancelDeps 返回时安装已经结束了，不是"发了信号就走"
+    expect(settled).toBe(true)
+    await installing
+  })
+
+  it('没有正在装的 → 返回 false（删一个没在装依赖的应用是常态）', async () => {
+    const dir = await makeApp()
+    const manager = new PreviewManager({
+      home: resolveHome({ TENON_HOME: dir }),
+      launch: (() => Promise.reject(new Error('不该起预览'))) as unknown as Launcher,
+      installDeps: false,
+      database: fakeDatabase(),
+      publish: () => undefined,
+    })
+    cleanups.push(() => manager.close())
+    expect(await manager.cancelDeps(APP_ID)).toBe(false)
+  })
+})

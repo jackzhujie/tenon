@@ -2173,7 +2173,7 @@ chord/dist/*.js 里的 import：2 处 "typebox"（根入口）、5 处 "typebox/
 - `web.js`：**自注册模块，导出为空是对的**（我第一版断言写成"也要有 activate"，错了；
   它的契约是靠 URL 里的 `appId` 自己挂载）。判据是"能被解析并执行、不抛"
 
-- 单测 **726 项全过**（含 4 个直接 `import()` 真实 `server.js` 的组件测试：25 项）
+- 单测 **728 项全过**（含 4 个直接 `import()` 真实 `server.js` 的组件测试：25 项）
 - `pnpm e2e:component` 5/5（真 Chromium 里加载压缩后的 web.js、挂上、点开、对话、HMR）
 - `pnpm e2e:hub` 32/32（现场生成密钥 → 打包压缩产物 → 静态 Hub → 真 server 装进应用 → 篡改/付费两种拒绝）
 
@@ -2195,7 +2195,7 @@ chord/dist/*.js 里的 import：2 处 "typebox"（根入口）、5 处 "typebox/
 |---|---|---|
 | 第一次（只铺矩阵） | **32** | `spawn pnpm ENOENT` / 删应用永远失败 / 没有优雅关停 / 路径断言写死 `/` |
 | 第二次（修完上面四处） | **10** | `pnpm build:plugins` 在 Windows 上**静默空跑** |
-| 第三次 | **0** | — |
+| 第三次 | **0** | —（但之后一次文档提交又红了 1 条：见 ⑤） |
 
 三平台各 4–5 分钟，并行跑，墙钟时间没变。
 
@@ -2242,8 +2242,21 @@ macOS 上恰好相等（`file:///Users/…`）；Windows 上**永远不相等** 
 `pnpm build:plugins` 在 Windows 上一直是空跑，`build:desktop` 也跟着缺产物 ——
 只是没人从 Windows 上打过包。
 
-顺带把 `app.delete` 的 `rm` 加了 `maxRetries`（Windows 上目录可能被短暂占用：
-子进程刚退出 / 索引器 / 杀软；真被长期占用时仍然报错）。
+**⑤ 删应用与"建应用时后台装依赖"赛跑。**
+这条是第三轮之后**仍然偶发红**的那一条，也最值得记。`app.create` 建完就
+**不等地**开始装依赖（`void deps.preview.ensureDeps(...)`，注释写着"装 React 要十几秒，
+建应用不该卡这么久"）。测试建完几百毫秒就删 —— 那时 pnpm 还活着，**它拿 `repo/` 当 CWD**。
+
+在 POSIX 上这只是"留下半装的 node_modules"（目录能被 unlink）；在 Windows 上
+`rmdir` 直接 `EBUSY`，重试 4.6 秒也没用 —— 占用者不是杀软，是我们自己启动的安装进程。
+
+修法不是"多等一会儿"，是让删除**掐掉安装**：`EnsureDepsOptions` 加 `AbortSignal`，
+`preview` 记住每个应用在装的 `{ task, controller }`，新增 `cancelDeps(appId)`
+（abort → **等它真的结束**），`app.delete` 在删目录前 `await` 它。
+杀进程必须杀**整棵树**（Windows 上走了 shell 之后直接子进程是 `cmd.exe`，pnpm 是孙进程）。
+两条新测试钉住："cancelDeps 返回时安装已结束"（不是发了信号就走）、"没在装时返回 false"。
+
+`rm` 的 `maxRetries` 也留着了（Windows 上目录确实可能被短暂占用），但它不是这条的解法。
 
 #### 两处只加诊断、不改行为
 
