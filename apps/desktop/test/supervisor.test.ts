@@ -28,7 +28,14 @@ async function fakeServer(body: string): Promise<string> {
  */
 const STAY = `
 const port = 4242
-const bye = () => { process.stdout.write('bye\\n'); process.exit(0) }
+// 必须等 write 的回调再 exit：写完立刻 process.exit(0)，管道里最后一行经常还没刷出去
+// （macOS CI 上偶发红过一次，产品代码是对的）。两种触发都可能来，用 flag 去重。
+let said = false
+const bye = () => {
+  if (said) return
+  said = true
+  process.stdout.write('bye\\n', () => process.exit(0))
+}
 process.stdout.write('TENON_READY ' + JSON.stringify({
   url: 'http://127.0.0.1:' + port, port, token: 'tok-1', home: '/tmp/x',
   model: { mode: 'faux', modelId: 'faux-mini' },
