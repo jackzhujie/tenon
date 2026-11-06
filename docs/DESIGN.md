@@ -1363,6 +1363,25 @@ tsc --noEmit  →  eslint  →  vitest run（若有）  →  build（client+serv
 
 任一失败：Agent 自动修复（最多 2 轮），仍失败则把错误摘要给用户并保留现场，**不提交**。
 
+> **v1.2.20 落地（发布门禁这一侧）。** 上面这条链是 Agent 自己动手前的顺序；**发布前**的门禁
+> （`releases` 打 tag 之前）只跑前三项里的**判据**部分，且**三项并行**：`typecheck`（真跑应用自己的
+> `tsc`）、`test`（`pnpm run test`）、`lint`（`pnpm run lint`）。`build` 不在门禁里 ——
+> 它慢（而且 `vite build` 失败的信息远不如 `tsc` 精确），预检要的是"几秒内给出能不能发"。
+>
+> **`lint` 的三条设计约束**（每条都是为了不被关掉）：
+>
+> 1. **模板里的规则只有三条**：`no-unused-vars`（`_` 前缀豁免）、`rules-of-hooks`（error）、
+>    `exhaustive-deps`（**warn**）。开 `recommended` 全家桶的话 Agent 生成一次就红一次，
+>    而**一个被关掉的检查等于不存在**，还不如不加。
+> 2. **只认 `scripts.lint`**，不猜 eslint / biome / oxlint —— 猜错的表现是"跑了个不存在的命令，
+>    退出码 1"，用户会看到一条莫名其妙的失败。
+> 3. **"命令没装"与"代码有问题"必须是两句话**。前者让用户去 `pnpm install`，后者让用户去改代码；
+>    混成一句，用户会去改一段本来没问题的代码。判据只看 shell 的"找不到命令"，
+>    **不能看 `ELIFECYCLE` / `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`** —— 那两行在**任何**失败里都有。
+>
+> `lint` 脚本本身属于**生成应用自己的资产**（跟着 `eslint.config.mjs` 一起被导出、可以被用户改），
+> 所以 eslint 装在应用的 `devDependencies` 里，不用 Tenon 侧那一份。代价是每个应用多约 12MB。
+
 ### 8.7 模板与生成器（M1 落地：`packages/generator`）
 
 **模板是真实文件**（`packages/generator/templates/<id>/`），不是写在 TS 里的字符串常量：

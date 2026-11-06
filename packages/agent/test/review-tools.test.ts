@@ -181,8 +181,53 @@ describe('typecheck（跑应用自己的 tsc）', () => {
   }, 40_000)
 })
 
+describe('lint（第三种判据：tsc 看不见的那类问题）', () => {
+  async function withScripts(scripts: Record<string, string>): Promise<void> {
+    await writeFile(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'fixture', private: true, scripts }, null, 2),
+    )
+    await mkdir(join(dir, 'node_modules'), { recursive: true })
+  }
+
+  it('没有 scripts.lint → 明确说"不等于通过"，不是默默跳过', async () => {
+    await withScripts({})
+    const { text, isError } = await run('lint')
+    expect(isError).toBe(false)
+    expect(text).toContain('⏭')
+    expect(text).toContain('不等于通过')
+  })
+
+  it('★ 查到问题 → 带具体位置，且 isError=false（这是发现，不是工具错误）', async () => {
+    /*
+     * 标成 isError 会让模型换个姿势重试工具，而不是把问题写进风险清单 ——
+     * 与 `typecheck` 同一条规矩。
+     */
+    await withScripts({ lint: 'node -e "console.error(\'src/App.tsx:3:1 error 未使用变量 old\');process.exit(1)"' })
+    const { text, isError } = await run('lint')
+    expect(isError).toBe(false)
+    expect(text).toContain('✗')
+    expect(text).toContain('src/App.tsx:3:1')
+    expect(text).toContain('未使用变量 old')
+  })
+
+  it('通过 → ✓ 且带耗时', async () => {
+    await withScripts({ lint: 'node -e "process.exit(0)"' })
+    const { text } = await run('lint')
+    expect(text).toContain('✓')
+    expect(text).toContain('pnpm run lint')
+  })
+
+  it('"没跑成"绝不带 ✓（评审里最坏的假绿）', async () => {
+    await withScripts({ lint: 'definitely-not-a-command-tenon' })
+    const { text } = await run('lint')
+    expect(text).toContain('没跑成')
+    expect(text).not.toContain('✓')
+  })
+})
+
 describe('扩展装配', () => {
-  it('只挂两个工具，不带 section（工作顺序写在角色提示词里）', () => {
+  it('挂三个工具，不带 section（工作顺序写在角色提示词里）', () => {
     const extension = reviewExtension({ repoDir: dir })
     expect(extension.name).toBe('tenon.review')
     expect((extension.tools ?? []).map((tool) => tool.name).sort()).toEqual([...REVIEW_TOOL_NAMES].sort())

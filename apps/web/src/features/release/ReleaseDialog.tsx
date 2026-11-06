@@ -20,6 +20,7 @@
  * 不然用户会奇怪"刚才不是检查过了吗"。
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { CHECK_LABELS } from '@tenon/protocol'
 import type { CheckOutcome, GitCommit, Release } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
@@ -68,7 +69,8 @@ function CopyButton({ text, label = '复制' }: { text: string; label?: string }
   )
 }
 
-const CHECK_LABEL: Record<string, string> = { typecheck: '类型检查', test: '测试' }
+/* 与后端同一份（`protocol` 的 `CHECK_LABELS`）：加检查项时只需要改那一处 */
+const CHECK_LABEL: Record<string, string> = { ...CHECK_LABELS }
 const STATUS_STYLE: Record<CheckOutcome['status'], { glyph: string; className: string }> = {
   pass: { glyph: '✓', className: 'text-ok' },
   fail: { glyph: '✗', className: 'text-bad' },

@@ -28,6 +28,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { CHECK_LABELS } from '@tenon/protocol'
 import type { CheckOutcome, CheckStatus, GateOutcome } from '@tenon/protocol'
 import { formatTscReport, parseTscOutput, resolvePnpm, scrubEnv } from '@tenon/core'
 
@@ -40,6 +41,25 @@ const MAX_TEST_TIMEOUT_MS = 5 * 60_000
 const MAX_TEST_BYTES = 64 * 1024
 /** 测试失败时真正有用的信息在尾部（堆栈、断言差异），头部全是"正在跑 xxx" */
 const TEST_TAIL_LINES = 30
+
+const DEFAULT_LINT_TIMEOUT_MS = 90_000
+const MAX_LINT_TIMEOUT_MS = 5 * 60_000
+const MAX_LINT_BYTES = 64 * 1024
+/** lint 的有用信息在**头部**（第一个文件的第一个错误），与测试相反 */
+const LINT_HEAD_LINES = 40
+/**
+ * 这些输出说明命令根本没装，不是"代码有问题"。
+ *
+ * 必须分开的原因很实际：`eslint` 没装时用户该去 `pnpm install`，
+ * 查到 3 个未用变量时用户该去改代码。混成一句"lint 失败"，
+ * 用户会去改一段本来就没问题的代码，然后发现怎么改都不对。
+ *
+ * **只匹配 shell 的"找不到命令"**，不匹配 pnpm 自己的报错：
+ * `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` / `ELIFECYCLE` 在**任何**失败里都会出现，
+ * 拿它当判据会把"代码有问题"全报成"没装依赖" —— 那比不报还坏。
+ */
+const MISSING_COMMAND =
+  /: command not found|is not recognized as an internal or external command|Cannot find module '(?:eslint|typescript-eslint|@eslint)/i
 
 /**
  * 交给子进程的环境。
@@ -266,6 +286,102 @@ export interface TestOptions {
   timeoutMs?: number
 }
 
+export interface LintOptions {
+  timeoutMs?: number
+}
+
+interface AppScriptRun {
+  /** null = 起不来（找不到可执行文件） */
+  code: number | null
+  output: string
+  timedOut: boolean
+  elapsedMs: number
+}
+
+/**
+ * 杀掉整棵进程树。
+ *
+ * **只 kill 直接子进程是不够的**：我们 spawn 的是 `pnpm`，`pnpm` 再 spawn `eslint`，
+ * 而**孙进程握着 stdout** —— 父进程死了管道依然没关，`close` 事件永远不来。
+ * 表现是"点发布之后一直转圈"，比报错难看得多，也更难查。
+ *
+ * POSIX 上把子进程放进自己的进程组（spawn 时 `detached`），超时用负 pid 一锅端。
+ * Windows 没有进程组（负 pid 不支持），退回单独 kill。
+ */
+function killTree(child: ReturnType<typeof spawn>): void {
+  if (child.pid === undefined) return
+  try {
+    if (process.platform === 'win32') child.kill('SIGKILL')
+    else process.kill(-child.pid, 'SIGKILL')
+  } catch {
+    // 已经死了、或者没有权限杀这个组：都不是错误，尽力而为
+    try {
+      child.kill('SIGKILL')
+    } catch {
+      /* 连直接子进程都没了 */
+    }
+  }
+}
+
+/**
+ * 跑应用 `package.json` 里的一个脚本（`test` / `lint`）。
+ *
+ * 抽出来不是为了省代码，是为了 `ELECTRON_RUN_AS_NODE` 那个只在桌面版才炸的坑
+ * （见 `childEnv`）—— 两份实现就是两份记住它的机会，早晚漏一个。
+ *
+ * `CI=1` 是给 `vitest` 的：它默认 watch 模式，不加这个变量会**一直挂着**直到超时，
+ * 然后被报成"测试超时"。那不是测试的问题，是我们的问题。对 eslint 无副作用。
+ */
+async function runAppScript(
+  repoDir: string,
+  name: string,
+  timeoutMs: number,
+  maxBytes: number,
+): Promise<AppScriptRun> {
+  const started = Date.now()
+  const env: NodeJS.ProcessEnv = { ...childEnv(), CI: '1' }
+  const pm = resolvePnpm(process.env)
+  // 随包的 pnpm 是 `.cjs`：必须用 node 跑（和 `deps.ts` 装依赖时同一套判断）
+  const command = pm.isScript ? process.execPath : pm.command
+  const args = pm.isScript ? [pm.command, 'run', name] : ['run', name]
+
+  const child = spawn(command, args, {
+    cwd: repoDir,
+    env,
+    // 自己的进程组：超时才能用负 pid 把 pnpm 和它 spawn 出来的 eslint 一起杀掉
+    detached: process.platform !== 'win32',
+  })
+  let output = ''
+  let timedOut = false
+  const code = await new Promise<number | null>((resolvePromise) => {
+    const timer = setTimeout(() => {
+      timedOut = true
+      killTree(child)
+      /*
+       * **不等 `close`**。孙进程可能仍然握着 stdio（见 `killTree`），那样 `close`
+       * 永远不会来，而 `await` 会一直挂着 —— 用户看到的是"发布检查中…"永远不结束。
+       * `resolve` 是幂等的：之后 close 再触发一次也无害。
+       */
+      resolvePromise(null)
+    }, timeoutMs)
+    const collect = (chunk: Buffer): void => {
+      if (output.length < maxBytes) output += chunk.toString('utf8')
+    }
+    child.stdout?.on('data', collect)
+    child.stderr?.on('data', collect)
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      output += `\n[tenon] 起不来：${err.message}`
+      resolvePromise(null)
+    })
+    child.on('close', (exitCode) => {
+      clearTimeout(timer)
+      resolvePromise(exitCode)
+    })
+  })
+  return { code, output, timedOut, elapsedMs: Date.now() - started }
+}
+
 /**
  * 跑应用自己的 `test` 脚本。
  *
@@ -311,36 +427,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
   }
 
   const timeoutMs = Math.min(options.timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS, MAX_TEST_TIMEOUT_MS)
-  const env: NodeJS.ProcessEnv = { ...childEnv(), CI: '1' }
-  const pm = resolvePnpm(process.env)
-  // 随包的 pnpm 是 `.cjs`：必须用 node 跑（和 `deps.ts` 装依赖时同一套判断）
-  const command = pm.isScript ? process.execPath : pm.command
-  const args = pm.isScript ? [pm.command, 'run', 'test'] : ['run', 'test']
-
-  const child = spawn(command, args, { cwd: repoDir, env })
-  let output = ''
-  let timedOut = false
-  const code = await new Promise<number | null>((resolvePromise) => {
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGKILL')
-    }, timeoutMs)
-    const collect = (chunk: Buffer): void => {
-      if (output.length < MAX_TEST_BYTES) output += chunk.toString('utf8')
-    }
-    child.stdout?.on('data', collect)
-    child.stderr?.on('data', collect)
-    child.on('error', (err) => {
-      clearTimeout(timer)
-      output += `\n[tenon] 起不来：${err.message}`
-      resolvePromise(null)
-    })
-    child.on('close', (exitCode) => {
-      clearTimeout(timer)
-      resolvePromise(exitCode)
-    })
-  })
-  const elapsedMs = Date.now() - started
+  const { code, output, timedOut, elapsedMs } = await runAppScript(repoDir, 'test', timeoutMs, MAX_TEST_BYTES)
 
   const tail = output
     .split(/\r?\n/)
@@ -384,19 +471,125 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
   }
 }
 
-export interface GateOptions extends TypecheckOptions, TestOptions {}
+/**
+ * lint 输出的截断。
+ *
+ * 与测试**相反**：测试失败的有用信息在尾部（堆栈、断言差异），lint 的在头部
+ * （第一个文件的第一个错误）。所以砍尾不砍头。
+ *
+ * 但如果直接砍尾会丢掉最后那行 `✖ 12 problems (10 errors, 2 warnings)` ——
+ * 那是"到底有多少个"的唯一来源，单独补回来。
+ */
+function lintExcerpt(output: string): string | null {
+  const lines = output.split(/\r?\n/).filter((line) => line.trim() !== '')
+  if (lines.length === 0) return null
+  if (lines.length <= LINT_HEAD_LINES + 3) return lines.join('\n')
+  const head = lines.slice(0, LINT_HEAD_LINES)
+  const summary = lines.slice(-2)
+  return [...head, `…（省略 ${lines.length - LINT_HEAD_LINES - 2} 行）`, ...summary].join('\n')
+}
+
+/**
+ * 跑应用自己的 `lint` 脚本（v1.2.20，发布门禁的第三项）。
+ *
+ * 与 `runTestScript` 同一条思路：**只认 `scripts.lint`**，不猜 `eslint` / `biome` / `oxlint`。
+ * 猜错的表现是"跑了个不存在的命令，退出码 1"→ 用户看到一条莫名其妙的失败。
+ *
+ * 两处刻意不同的处理：
+ *
+ * 1. **"命令没装"和"代码有问题"分开说**（`MISSING_COMMAND`）。前者让用户去装依赖，
+ *    后者让用户去改代码 —— 混成一句话，用户会去改一段没问题的代码。
+ * 2. **截断取头部**（`lintExcerpt`），因为错误按文件排在前面，汇总在最后。
+ *
+ * 还有一条**不做**的事：不把 warning 当失败。`eslint` 只有 warning 时退出码是 0，
+ * 所以这条规则是白送的；但如果用户自己写了 `--max-warnings=0`，那是他的选择，
+ * 我们照他的退出码判 —— 门禁不替用户改自己的脚本。
+ */
+export async function runLintScript(repoDir: string, options: LintOptions = {}): Promise<CheckOutcome> {
+  const started = Date.now()
+  const pkg = await readPackageJson(repoDir)
+  if (pkg === undefined) {
+    return { id: 'lint', status: 'skip', summary: '跳过：没有 package.json', detail: null, elapsedMs: 0 }
+  }
+  const script = pkg.scripts?.['lint']
+  if (typeof script !== 'string' || script.trim() === '') {
+    return {
+      id: 'lint',
+      status: 'skip',
+      summary: '跳过：package.json 里没有 scripts.lint',
+      detail: null,
+      elapsedMs: 0,
+    }
+  }
+
+  // 脚本在、依赖不在：跑起来只会是 "command not found"，那不是"代码有问题"而是"还没准备好"
+  if (!existsSync(join(repoDir, 'node_modules'))) {
+    return {
+      id: 'lint',
+      status: 'fail',
+      summary: '没跑成：依赖还没装（没有 node_modules）',
+      detail: '让用户先把预览打开一次（会装依赖），然后再发布。',
+      elapsedMs: Date.now() - started,
+    }
+  }
+
+  const timeoutMs = Math.min(options.timeoutMs ?? DEFAULT_LINT_TIMEOUT_MS, MAX_LINT_TIMEOUT_MS)
+  const { code, output, timedOut, elapsedMs } = await runAppScript(repoDir, 'lint', timeoutMs, MAX_LINT_BYTES)
+  const excerpt = lintExcerpt(output)
+
+  if (timedOut) {
+    return {
+      id: 'lint',
+      status: 'fail',
+      summary: `超时（超过 ${Math.round(timeoutMs / 1000)}s，已终止）`,
+      detail: excerpt,
+      elapsedMs,
+    }
+  }
+  if (code === null) {
+    return { id: 'lint', status: 'fail', summary: '没跑成：lint 脚本起不来', detail: excerpt, elapsedMs }
+  }
+  if (code !== 0 && (code === 127 || MISSING_COMMAND.test(output))) {
+    return {
+      id: 'lint',
+      status: 'fail',
+      summary: '没跑成：lint 脚本里的命令没装（依赖不完整）',
+      detail: excerpt,
+      elapsedMs,
+    }
+  }
+  if (code !== 0) {
+    return {
+      id: 'lint',
+      status: 'fail',
+      summary: `没过（pnpm run lint 退出码 ${code}）`,
+      detail: excerpt,
+      elapsedMs,
+    }
+  }
+  return {
+    id: 'lint',
+    status: 'pass',
+    summary: `通过（pnpm run lint，${seconds(elapsedMs)}）`,
+    detail: null,
+    elapsedMs,
+  }
+}
+
+export interface GateOptions extends TypecheckOptions, TestOptions, LintOptions {}
 
 /**
  * 跑整套门禁。
  *
- * 两项**并行**：它们互不依赖，串行只是把等待时间翻倍。代价是机器负载高时两边都慢一点，
+ * 三项**并行**：它们互不依赖，串行只是把等待时间翻三倍。代价是机器负载高时都慢一点，
  * 但发布是低频动作，而且用户看得见"正在检查"。顺带说明：`test` 脚本自己如果也跑 tsc，
  * 那就是应用自己的选择，我们不去猜、也不去合并。
  */
 export async function runQualityGate(repoDir: string, options: GateOptions = {}): Promise<GateOutcome> {
-  const [typecheck, test] = await Promise.all([
+  const [typecheck, test, lint] = await Promise.all([
     runTypecheck(repoDir, options),
     runTestScript(repoDir, options),
+    runLintScript(repoDir, options),
   ])
   const checks: CheckOutcome[] = [
     {
@@ -408,12 +601,14 @@ export async function runQualityGate(repoDir: string, options: GateOptions = {})
       elapsedMs: typecheck.elapsedMs,
     },
     test,
+    lint,
   ]
   return { ok: checks.every((check) => check.status !== 'fail'), checks }
 }
 
 const GLYPH: Record<CheckStatus, string> = { pass: '✓', fail: '✗', skip: '⏭' }
-const LABEL: Record<string, string> = { typecheck: '类型检查', test: '测试' }
+/* 与界面共用一份（`protocol` 的 `CHECK_LABELS`）：否则发布记录里是中文、界面上是 `lint` */
+const LABEL: Record<string, string> = { ...CHECK_LABELS }
 
 /**
  * 检查的名字。

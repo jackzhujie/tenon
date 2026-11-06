@@ -49,9 +49,10 @@ const ALL = [
   'preview_click',
   'preview_type',
   'preview_open',
-  // M4 第 5 步：reviewer 的两个判据工具
+  // M4 第 5 步：reviewer 的判据工具（lint 是 v1.2.20 加的第三项）
   'git_diff',
   'typecheck',
+  'lint',
   // M4 第 6 步：codeact 的脚本沙箱
   'codemode',
 ].map(fake)
@@ -141,7 +142,7 @@ describe('角色表', () => {
 
   it('reviewer 拿得到判据工具，但一个写工具都没有（评审不改代码）', () => {
     const reviewer = toolsForRole(ROLES.reviewer, ALL).map((tool) => tool.name)
-    expect(reviewer.sort()).toEqual(['git_diff', 'glob', 'grep', 'ls', 'read', 'typecheck'])
+    expect(reviewer.sort()).toEqual(['git_diff', 'glob', 'grep', 'lint', 'ls', 'read', 'typecheck'])
     for (const forbidden of ['write', 'edit', 'bash', 'subagent', 'preview_click']) {
       expect(reviewer).not.toContain(forbidden)
     }

@@ -34,9 +34,26 @@ export type ReleaseKind = z.infer<typeof ReleaseKind>
  *
  * 混成一个 `false` 会让"没配测试"和"测试挂了"看起来一样，而这两件事的处置方式相反：
  * 前者照发不误，后者必须拦。所以判断能不能发只看有没有 `fail`，`skip` 不拦但要说出来。
+ *
+ * `lint` 是 v1.2.20 加的第三项。加在这里而不是让调用方自己拼，是因为**旧版本的界面上
+ * 多出一项会静默不显示** —— 枚举是契约，改了才知道谁受影响。
  */
-export const CheckId = z.enum(['typecheck', 'test'])
+export const CheckId = z.enum(['typecheck', 'test', 'lint'])
 export type CheckId = z.infer<typeof CheckId>
+
+/**
+ * 这些 id 怎么给人看。
+ *
+ * 放在协议里而不是各写一份：agent 的 `formatGateSummary`（写进发布记录
+ * `releases.gate_summary`）与界面的逐项清单都要用。两边各写一遍的后果是
+ * **记录里是「类型检查 ✓ · Lint ✓」而界面上那一行是 `lint ✓`** —— 同一个东西两个名字，
+ * 而且加第三项时只会改到其中一边。
+ */
+export const CHECK_LABELS: Record<CheckId, string> = {
+  typecheck: '类型检查',
+  test: '测试',
+  lint: 'Lint',
+}
 
 export const CheckStatus = z.enum(['pass', 'fail', 'skip'])
 export type CheckStatus = z.infer<typeof CheckStatus>
@@ -79,7 +96,7 @@ export const Release = z.object({
   imageRef: z.string().nullable(),
   notes: z.string().nullable(),
   gateStatus: ReleaseGateStatus.nullable(),
-  /** 门禁摘要（"类型检查 ✓ · 测试 ⏭ 没有 test 脚本"），历史列表里直接显示 */
+  /** 门禁摘要（"类型检查 ✓ · 测试 ⏭ · Lint ⏭"），历史列表里直接显示 */
   gateSummary: z.string().nullable(),
   createdAt: z.number(),
 })

@@ -145,6 +145,18 @@ const TS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../../node_m
 async function makeCheckable(repoDir: string, source: string): Promise<void> {
   await rm(join(repoDir, 'src'), { recursive: true, force: true })
   await rm(join(repoDir, 'vite.config.ts'), { force: true })
+  /*
+   * 模板自 v1.2.20 起带 `lint` 脚本（`eslint .`）与 `eslint.config.mjs`，而这里只软链了
+   * typescript。留着它，门禁会**正确地**报「没跑成：lint 脚本里的命令没装」——
+   * 于是"通过"这个用例根本构造不出来，而它要验的是 typecheck / test 的判据组合，
+   * 不是 lint 本身（那是 `checks.test.ts` 与 `review-tools.test.ts` 的事）。
+   * 所以这里一并摘掉；需要验 lint 拦截的用例在下面单独把脚本换回去。
+   */
+  await rm(join(repoDir, 'eslint.config.mjs'), { force: true })
+  const pkgPath = join(repoDir, 'package.json')
+  const pkg = JSON.parse(await readFile(pkgPath, 'utf8')) as { scripts?: Record<string, string> }
+  if (pkg.scripts !== undefined) delete pkg.scripts['lint']
+  await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
   await writeFile(
     join(repoDir, 'tsconfig.json'),
     JSON.stringify(
@@ -170,7 +182,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((done) => setTimeout(done, ms))
 }
 
-/** 往应用的 package.json 里塞一个 test 脚本（模板本身没有），返回打包后的 JSON 文本 */
+/** 往应用的 package.json 里塞一个 test 脚本（模板只有 lint，没有 test） */
 async function withTestScript(repoDir: string, script: string): Promise<void> {
   const pkg = JSON.parse(await readFile(join(repoDir, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>
@@ -295,7 +307,7 @@ describe('发布（release.publish）', () => {
 
     // 清单随错误一起回去，对话框才画得出"哪一项没过"
     const checks = error.details?.checks ?? []
-    expect(checks.map((check) => check.id)).toEqual(['typecheck', 'test'])
+    expect(checks.map((check) => check.id)).toEqual(['typecheck', 'test', 'lint'])
     expect(checks[0]?.status).toBe('fail')
     expect(checks[0]?.detail).toContain('TS2322')
 
@@ -303,6 +315,40 @@ describe('发布（release.publish）', () => {
     expect(await gitops.listTags(paths.repoDir)).toEqual([])
     const listed = await rpc<{ releases: Release[] }>(server, 'release.list', { appId })
     expect(listed.releases).toEqual([])
+  }, 60_000)
+
+  it('★ lint 没过时同样拒绝发布（第三项判据真的接上了）', async () => {
+    const server = await bootServer()
+    const appId = await createApp(server)
+    const paths = appPaths(resolveHome({ TENON_HOME: dir }), appId)
+    await makeCheckable(paths.repoDir, 'export const answer: number = 42\n')
+    await installTypescript(paths.repoDir)
+
+    /*
+     * `makeCheckable` 把模板的 lint 摘掉了（这里只软链了 typescript，跑不了 eslint）。
+     * 塞一个**必然失败**的 lint 脚本：不装 eslint 也能验"第三项是不是真的在拦"。
+     * 用 `node -e` 而不是真的 eslint，是因为这条用例要验的是**门禁的接线**，
+     * 不是 eslint 能不能跑（那两条模板已经在 e2e 里真跑过了）。
+     */
+    const pkg = JSON.parse(await readFile(join(paths.repoDir, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>
+    }
+    pkg.scripts['lint'] = 'node -e "console.error(\'src/main.ts:1:1 error 未使用变量\');process.exit(1)"'
+    await writeFile(join(paths.repoDir, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`)
+    await gitops.commitAll(paths.repoDir, 'chore: 引入一个 lint 错误')
+
+    const error = await rpcError(server, 'release.publish', { appId })
+    expect(error.code).toBe('RELEASE_CHECKS_FAILED')
+    expect(error.message).toContain('Lint没过')
+
+    const checks = error.details?.checks ?? []
+    expect(checks.map((check) => check.id)).toEqual(['typecheck', 'test', 'lint'])
+    const lint = checks.find((check) => check.id === 'lint')
+    expect(lint?.status).toBe('fail')
+    // 具体错误要跟着回去，否则用户只知道"lint 没过"却不知道改哪
+    expect(lint?.detail).toContain('未使用变量')
+
+    expect(await gitops.listTags(paths.repoDir)).toEqual([])
   }, 60_000)
 
   it('★ 改对之后能发，记录里是 pass，摘要写清哪项过了哪项没得检查', async () => {
@@ -319,7 +365,7 @@ describe('发布（release.publish）', () => {
     // 模板没有 test 脚本 —— 这是 skip，不是"测试通过了"
     expect(result.gate.checks[1]?.status).toBe('skip')
     expect(result.release.gateStatus).toBe('pass')
-    expect(result.release.gateSummary).toBe('类型检查 ✓ · 测试 ⏭')
+    expect(result.release.gateSummary).toBe('类型检查 ✓ · 测试 ⏭ · Lint ⏭')
     expect(await gitops.listTags(paths.repoDir)).toEqual([result.version])
   }, 60_000)
 

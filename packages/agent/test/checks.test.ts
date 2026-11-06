@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { formatGateSummary, runQualityGate, runTestScript, runTypecheck } from '../src/checks.js'
+import { formatGateSummary, runLintScript, runQualityGate, runTestScript, runTypecheck } from '../src/checks.js'
 
 /** 用本仓库自己装的那份 typescript：不联网、不假定临时目录里装过依赖 */
 const TSC_ENTRY = resolve(dirname(fileURLToPath(import.meta.url)), '../../../node_modules/typescript/bin/tsc')
@@ -30,7 +30,9 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await writeFile(join(dir, file), JSON.stringify(value, null, 2))
 }
 
-async function project(options: { source?: string; testScript?: string; withNodeModules?: boolean } = {}): Promise<void> {
+async function project(
+  options: { source?: string; testScript?: string; lintScript?: string; withNodeModules?: boolean } = {},
+): Promise<void> {
   await writeJson('tsconfig.json', {
     compilerOptions: {
       target: 'ES2022',
@@ -42,11 +44,10 @@ async function project(options: { source?: string; testScript?: string; withNode
     include: ['src'],
   })
   await writeFile(join(dir, 'src', 'main.ts'), options.source ?? 'export const answer: number = 42\n')
-  await writeJson('package.json', {
-    name: 'check-fixture',
-    private: true,
-    scripts: options.testScript === undefined ? {} : { test: options.testScript },
-  })
+  const scripts: Record<string, string> = {}
+  if (options.testScript !== undefined) scripts['test'] = options.testScript
+  if (options.lintScript !== undefined) scripts['lint'] = options.lintScript
+  await writeJson('package.json', { name: 'check-fixture', private: true, scripts })
   if (options.withNodeModules === true) await mkdir(join(dir, 'node_modules'), { recursive: true })
 }
 
@@ -150,14 +151,89 @@ describe('test 脚本', () => {
   })
 })
 
+describe('lint 脚本', () => {
+  it('没有 scripts.lint → skip（那是配置性选择，不是失败）', async () => {
+    await project()
+    const result = await runLintScript(dir)
+    expect(result.id).toBe('lint')
+    expect(result.status).toBe('skip')
+    expect(result.summary).toContain('scripts.lint')
+  })
+
+  it('脚本退出 0 → pass', async () => {
+    await project({ lintScript: 'node -e "process.exit(0)"', withNodeModules: true })
+    const result = await runLintScript(dir)
+    expect(result.status).toBe('pass')
+    expect(result.summary).toContain('pnpm run lint')
+  })
+
+  it('脚本退出 1 → fail，detail 里有具体输出', async () => {
+    await project({
+      lintScript: 'node -e "console.error(\'src/a.ts:3:1 error 未使用变量\');process.exit(1)"',
+      withNodeModules: true,
+    })
+    const result = await runLintScript(dir)
+    expect(result.status).toBe('fail')
+    expect(result.summary).toContain('退出码 1')
+    expect(result.detail).toContain('未使用变量')
+  })
+
+  it('★ 命令没装 → 说"没跑成"，不说"没过"（两种处置方式相反）', async () => {
+    /*
+     * 这条是最容易写错的一条：`eslint` 没装时退出码是 127，与"查到 3 个错误"
+     * 只差一个数字。如果都报成"lint 失败"，用户会去改一段本来没问题的代码。
+     */
+    await project({ lintScript: 'definitely-not-a-command-tenon', withNodeModules: true })
+    const result = await runLintScript(dir)
+    expect(result.status).toBe('fail')
+    expect(result.summary).toContain('没跑成')
+    expect(result.summary).toContain('命令没装')
+    expect(result.summary).not.toContain('没过')
+  })
+
+  it('有脚本但依赖没装 → fail，且说的是"依赖还没装"', async () => {
+    await project({ lintScript: 'eslint .' })
+    const result = await runLintScript(dir)
+    expect(result.status).toBe('fail')
+    expect(result.summary).toContain('依赖还没装')
+  })
+
+  it('超时 → fail 并说明已终止', async () => {
+    await project({
+      lintScript: 'node -e "setTimeout(()=>{},60000)"',
+      withNodeModules: true,
+    })
+    const result = await runLintScript(dir, { timeoutMs: 800 })
+    expect(result.status).toBe('fail')
+    expect(result.summary).toContain('超时')
+  })
+
+  it('输出很长时砍尾不砍头，但保留最后那行"共几个问题"', async () => {
+    /*
+     * lint 与测试**相反**：测试的有用信息在尾部（堆栈），lint 的在头部（第一个文件的
+     * 第一个错误）。而最后那行 `✖ N problems` 是"到底多少个"的唯一来源，不能丢。
+     */
+    await project({
+      lintScript:
+        'node -e "for(let i=0;i<120;i++)console.log(\'src/f.ts:\'+i+\':1 error 第\'+i+\'条\');console.log(\'✖ 120 problems (120 errors, 0 warnings)\');process.exit(1)"',
+      withNodeModules: true,
+    })
+    const result = await runLintScript(dir)
+    expect(result.status).toBe('fail')
+    expect(result.detail).toContain('第0条')
+    expect(result.detail).toContain('省略')
+    expect(result.detail).toContain('✖ 120 problems')
+  })
+})
+
 describe('整套门禁', () => {
-  it('★ 两项都 skip 时 ok=true —— "没得检查"不等于"不许发"', async () => {
+  it('★ 三项都 skip 时 ok=true —— "没得检查"不等于"不许发"', async () => {
     await project()
     await rm(join(dir, 'tsconfig.json'))
     const gate = await runQualityGate(dir)
-    expect(gate.checks.map((check) => check.status)).toEqual(['skip', 'skip'])
+    expect(gate.checks.map((check) => check.status)).toEqual(['skip', 'skip', 'skip'])
     expect(gate.ok).toBe(true)
-    expect(formatGateSummary(gate)).toBe('类型检查 ⏭ · 测试 ⏭')
+    expect(formatGateSummary(gate)).toBe('类型检查 ⏭ · 测试 ⏭ · Lint ⏭')
   })
 
   it('任何一项 fail 就 ok=false，且在 check 里点得出是哪一项', async () => {
@@ -173,7 +249,7 @@ describe('整套门禁', () => {
     await project()
     const gate = await runQualityGate(dir, { tscEntry: TSC_ENTRY })
     expect(gate.ok).toBe(true)
-    expect(formatGateSummary(gate)).toBe('类型检查 ✓ · 测试 ⏭')
+    expect(formatGateSummary(gate)).toBe('类型检查 ✓ · 测试 ⏭ · Lint ⏭')
   })
 })
 

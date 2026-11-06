@@ -1877,6 +1877,67 @@ README 删掉那一行（外部读者看不到它，列出来只会困惑），S
 `selector` / `rect` / `text` / `styles` / `elements` / `viewport`）。当初想过"截图给 Agent 看"，
 落地时选了**结构化描述**而不是像素，更省 token 也更准。留着这句会让下一个人去找一个不存在的缺口。
 
+### 4.46 `lint` 进模板与门禁（DESIGN §8.6 那条链第一次完整）
+
+DESIGN §8.6 从 M1 就写着 `tsc → eslint → vitest → build`，但**模板里一直没有 eslint 配置** ——
+所以门禁只有 `typecheck` 与 `test` 两项，`checks.ts` 的 `LABEL` 也只有两个键。这次补上。
+
+**模板侧**（`react-vite` / `nest-api` 各一份 `eslint.config.mjs` + `scripts.lint` + 三个 devDependency）：
+
+| 决定 | 理由 |
+|---|---|
+| **规则只有三条**：`no-unused-vars`（`_` 前缀豁免）、`rules-of-hooks`（error）、`exhaustive-deps`（**warn**） | 开 `recommended` 全家桶的话 Agent 生成一次红一次（`no-explicit-any`、风格规则全在里面）。**红的次数一多，用户会去关掉 lint —— 一个被关掉的检查等于不存在**，还不如不加 |
+| **eslint 装在应用自己的 `devDependencies`** | 配置是**用户应用的资产**：跟着导出走、可以被用户改。代价是每个应用多约 12MB，换来的是"这份配置属于你，不是 Tenon 借给你的" |
+| **`exhaustive-deps` 只 warn** | 生成代码里"我就要用一次当时的值"很常见，语义上未必是 bug。设成 error 会让它成为最常见的发布拦路石 |
+| **不用 `tseslint.configs.recommended`** | 那套预设包含 `no-explicit-any`（error）等，对"Agent 生成的代码"这个场景等于必红。规则要按场景挑，不能按"推荐"抄 |
+
+**门禁侧**（`runLintScript`，第三项，与另两项并行）：
+
+- **只认 `scripts.lint`**，不猜 eslint / biome / oxlint —— 猜错的表现是"跑了个不存在的命令，退出码 1"。
+- **没有 `scripts.lint` → `skip`**（配置性选择，照发不误但要说出来）。
+- **"命令没装"与"代码有问题"必须是两句话**。前者让用户去 `pnpm install`，后者让用户去改代码。
+- **截断取头部**（与 test 相反：测试的有用信息在尾部堆栈，lint 的在第一个文件的第一个错误），
+  但把最后那行 `✖ N problems` 单独补回来 —— 那是"到底多少个"的唯一来源。
+
+**Reviewer 有了第三个工具**（`git_diff` → `typecheck` → `lint`），提示词里加了第 3 步。
+理由：lint 查的是 tsc 看不见的两类问题 —— 未用变量（**往往是改到一半的证据**：旧实现没删干净）
+和条件调 hook（运行时才炸）。只给门禁不给 Reviewer，Agent 只会在发布那一刻才发现。
+
+#### 这轮踩到的两个真问题（都不是测试写错）
+
+**① `kill` 只杀了 pnpm，孙进程握着 stdout → 门禁会一直转圈。**
+`runTestScript` 一直是 `child.kill('SIGKILL')` + 等 `close`。但我们 spawn 的是 `pnpm`，
+它再 spawn `eslint` / `vitest`；**父进程死了管道没关，`close` 永远不来**，
+`await` 就挂着 —— 用户看到"发布检查中…"永不结束。这个 bug 在 test 那半边**存在了很久**，
+只是没有任何用例覆盖超时（我写 lint 超时用例时它才炸出 30s）。
+修法：`detached: true` 进自己的进程组 + 超时用负 pid `killTree()` + **超时立刻 resolve，不等 close**。
+
+**② `MISSING_COMMAND` 一开始把 `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` 当判据 —— 那会把所有真失败误报成"没装依赖"。**
+那行在**任何** pnpm 失败里都会出现（真跑模板时亲眼看到 `ELIFECYCLE  Command failed with exit code 1.`）。
+只看 shell 的 `: command not found` / `is not recognized as an internal or external command` / `Cannot find module 'eslint`。
+
+#### 顺手消掉一处重复定义
+
+`ReleaseDialog.tsx` 有第二份标签表（`{ typecheck, test }`），与 `checks.ts` 的 `LABEL` 重复。
+加第三项时只改一处就会出现"记录里是「Lint ✓」、界面上是 `lint ✓`"。收进 `protocol` 的
+`CHECK_LABELS`，两边都引用它。
+
+#### 验证
+
+**模板是真装依赖真跑的**（不是"配置写对了就行"）：
+
+| 模板 | 干净安装 → `pnpm run lint` | 故意插一个未用变量 |
+|---|---|---|
+| `react-vite` | 退出码 0 | 退出码 1，`src/App.tsx:48:7 error 'tenonUnusedProbe' is assigned a value but never used` |
+| `nest-api` | 退出码 0（NestJS 的构造参数属性没被误报） | 退出码 1，`api/items/items.service.ts:32:7` 同样命中 |
+
+**最后那一列是关键**：只验"退出码 0"的话，`files` 模式写错（一个文件都没匹配到）也会是 0 ——
+那就是典型的假绿。插一个未用变量才算证明它真的在看文件。
+
+单测：`checks.test.ts` 20 项（lint 7 项，含"命令没装不说成没过"、超时、截断取头部）、
+`review-tools.test.ts` 15 项（lint 4 项，含"没跑成绝不带 ✓"）、
+`release.test.ts` 加一条"lint 没过同样拒绝发布且不留 tag"。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -2062,6 +2123,8 @@ README 删掉那一行（外部读者看不到它，列出来只会困惑），S
 | **`postgres:18` 的卷必须挂 `/var/lib/postgresql`** | 18 起 `PGDATA` 挪到 `/var/lib/postgresql/18/docker`，`VOLUME` 也改成 `/var/lib/postgresql`。挂成 17 及以前的 `.../data` 不会报"挂载点不对"，而是入口脚本认定"数据在 unused mount/volume 里"然后拒绝启动 → db 容器 `unhealthy`，而 `app` 因为 `depends_on: service_healthy` **连启动都没有**，看着像整个 compose 坏了 |
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
+| **spawn 出来的 pnpm 被杀掉 ≠ 它的子进程死了** | `child.kill('SIGKILL')` 只杀直接子进程。我们 spawn 的是 `pnpm`，它再 spawn `eslint`/`vitest`，**孙进程握着 stdout** → 管道不关 → `close` 事件永远不来 → `await` 挂着，界面显示"检查中…"永不结束。修法：`detached: true` 进自己的进程组 + 负 pid 杀整组 + **超时立刻 resolve 不等 close** |
+| **不能拿 `ELIFECYCLE` / `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` 判断"命令没装"** | 这两行在**任何** pnpm 失败里都会出现（包括"lint 查到 3 个错误"）。拿它当判据会把所有真失败报成"没装依赖"，用户会去改一段本来没问题的代码。只看 shell 的 `: command not found` / `is not recognized as an internal or external command` |
 | **"不随开源发布"写成注释不等于不在仓库里** | `docs/REVERSE_ENGINEERING.md` 被 README 与 STATUS 两处声明为"仅内部"，但它一直是 tracked 的，公开仓库上直接能打开。判定要看 `git ls-files`，不是看文档怎么写。用 `git rm --cached` + `.gitignore` 移出（本地文件保留），注意**历史里仍在**，彻底清除要重写历史 |
 | **GitHub 建仓时选的 license 会直接变成 `LICENSE` 文件** | 它不会去读你的 README 或设计文档。于是很容易出现"文档写 AGPL、仓库实际是 MIT"，而真正有法律效力的是那份文件。建仓时就该按设计选，或者建完立刻核对一遍 |
 | **本地通过、CI 失败：`~/node_modules` 在替仓库兜底** | 家目录里一份 `node_modules`（160 个包）会被 Node 一路往上解析到。未声明的依赖因此本地永远"能跑"，到干净的 runner 上才炸。判据不是"看 package.json 有没有声明"，而是**逐个 import 真解析、看结果落在哪**。本机解决了 `isomorphic-git`、`@babel/types` 两处 |
@@ -2204,9 +2267,9 @@ e2e 子 Agent 的预览工具 + Reviewer 出风险清单 + CodeAct 的脚本沙�
 ③ 发布只推得动本地备份库，真远端（GitHub 等）要凭据 + 真网络，没验证所以没接；
 ④ ~~没有跨应用总闸~~ → **有汇总（§4.41），但仍没有全局上限**（看得见 ≠ 拦得住）；
 ⑤ 用量答不了“哪个角色花了多少”（聚合层看不见归属）；
-⑥ Reviewer 的 `lint` 未接（模板没有 eslint 配置），清单也只有文本、没有结构化事件/面板；
+⑥ ~~Reviewer 的 `lint` 未接~~ → **已接（§4.46）**，模板有 eslint 配置、门禁有第三项；清单仍只有文本、没有结构化事件/面板；
 ⑦ ~~脚本的 `// @options: timeout_ms` 能放大沙箱默认超时~~ → **已夹住（§4.37）**；
-⑧ 门禁不看 `lint`（模板没有 eslint 配置）；⑨ ~~主界面没有「这个应用现在能不能发」的指示~~
+⑧ ~~门禁不看 `lint`~~ → **已接（§4.46）**；⑨ ~~主界面没有「这个应用现在能不能发」的指示~~
 → **改成了"上次发布之后又改了几版"**（预检太贵，不做常驻），仍缺"门禁结论常驻"；
 ⑩ **真 Hub 还没上线**：`pack:plugin` 与 `e2e:hub` 证明"包与索引生成得出来、客户端装得上"，
 但静态托管、域名、CDN 缓存策略都还没有 —— 换域名必须重新发布（索引里是绝对地址）。

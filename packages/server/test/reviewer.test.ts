@@ -123,7 +123,7 @@ describe('reviewer 子 Agent', () => {
       await session!.harness.conversation(childId as never, agentContext)
     )?.agent(agentContext)
     const childTools = (childAgent?.tools ?? []).map((tool) => tool.name).sort()
-    expect(childTools).toEqual(['git_diff', 'glob', 'grep', 'ls', 'read', 'typecheck'])
+    expect(childTools).toEqual(['git_diff', 'glob', 'grep', 'lint', 'ls', 'read', 'typecheck'])
     for (const forbidden of ['write', 'edit', 'bash', 'subagent']) expect(childTools).not.toContain(forbidden)
 
     // 3. ★ git_diff 看的是工作区：那一行改动还没提交，它就得看得见

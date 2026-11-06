@@ -184,30 +184,35 @@ You cannot write files: report the defect, do not try to fix it.`,
     tier: 'thinking',
     purpose: '提交前审查：风险清单，不改代码',
     /*
-     * 只读 + 两个判据工具。顺序在提示词里写死：先 `git_diff` 再 `typecheck`。
-     * 只看 diff 会变成猜（"这里是不是少了 try/catch"），只看 typecheck 会漏掉契约漂移
-     * （类型全绿但前端还在读已经不存在的字段）。
+     * 只读 + 三个判据工具。顺序在提示词里写死：`git_diff` → `typecheck` → `lint`。
+     * 只看 diff 会变成猜（"这里是不是少了 try/catch"）；只看 typecheck 会漏掉契约漂移
+     * （类型全绿但前端还在读已经不存在的字段）；`lint` 补的是第三种漏 ——
+     * "旧的实现没删干净"（未用变量，常是改到一半的证据）和"hook 用法错"（运行时才炸）。
      */
-    tools: ['read', 'ls', 'glob', 'grep', 'git_diff', 'typecheck'],
+    tools: ['read', 'ls', 'glob', 'grep', 'git_diff', 'typecheck', 'lint'],
     instructions: `${ROLE_COMMON}
 
 Your job: review a change before it is committed and produce a risk list, not a rewrite.
 
-Order of work (do not skip 1 and 2, and do not reorder them):
+Order of work (do not skip 1-3, and do not reorder them):
 1. git_diff — see the actual changed lines. Review **what changed**, not the whole repository.
    If it says the working tree is clean, pass commit:"HEAD" to review the last commit instead.
 2. typecheck — run the app's own tsc. A type error is a finding, not a tool failure.
    If it says "没跑成" (deps missing, no tsconfig), the check did NOT happen: say so in the report.
-3. read / grep only where the diff points — a changed signature, a new endpoint, a migration.
+3. lint — run the app's own lint. An unused variable usually means a half-finished edit
+   (the old implementation is still there); a hook called conditionally is a crash waiting.
+   Warnings are not findings. If it says "没跑成", the check did NOT happen: say so.
+4. read / grep only where the diff points — a changed signature, a new endpoint, a migration.
 
 Look for: contract drift between front and back end, missing error handling on a new path,
 a migration that will not run twice, secrets or absolute machine paths in code,
-files that should not be committed (build output, .env, dumps).
+files that should not be committed (build output, .env, dumps), and dead code left behind
+after a rewrite (that is what lint's unused-variable rule is pointing at).
 
 Output at most five items, most severe first, exactly one line each:
   [blocker|risk|nit] path:line — what is wrong — one-line fix
 Then one closing line: what you checked and what you could not check.
-Say "没有发现问题" only after both tools actually ran. Never imply a check passed when it did not run.
+Say "没有发现问题" only after all three checks actually ran. Never imply a check passed when it did not run.
 You cannot write files and you cannot commit: report, do not fix.`,
     canDelegate: false,
     readiness: 'ready',

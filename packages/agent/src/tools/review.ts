@@ -1,9 +1,10 @@
 /**
- * 评审工具：`git_diff` + `typecheck`（M4 第 5 步，给 Reviewer 子角色用）。
+ * 评审工具：`git_diff` + `typecheck` + `lint`（M4 第 5 步；`lint` 是 v1.2.20 加的）。
  *
- * 这两个工具回答的是同一个问题的两半，**顺序不能反**：
+ * 三个工具回答同一个问题的三面，**顺序不能反**：
  * - `git_diff` 说"这一轮到底改了哪些行"（事实）
- * - `typecheck` 说"这些改动有没有把类型搞坏"（判据）
+ * - `typecheck` 说"这些改动有没有把类型搞坏"（判据其一）
+ * - `lint` 说"有没有半途而废的代码"（判据其二：未用变量、hook 用法）
  *
  * 只看 diff 的评审会变成猜："这里少了 try/catch 吧？"；只看 typecheck 的评审更糟 ——
  * 类型全绿但契约漂移（前端还在读 `res.userId`，后端已经改成 `res.user.id`）它一个字都不会说。
@@ -24,10 +25,10 @@ import type { Extension, ToolRegistration } from '@earendil-works/pi-durable'
 import { defineExtension } from '@earendil-works/pi-durable'
 import { Type } from 'typebox'
 import { gitops } from '@tenon/core'
-import { runTypecheck } from '../checks.js'
+import { runLintScript, runTypecheck } from '../checks.js'
 
 export const REVIEW_EXTENSION = 'tenon.review'
-export const REVIEW_TOOL_NAMES = ['git_diff', 'typecheck'] as const
+export const REVIEW_TOOL_NAMES = ['git_diff', 'typecheck', 'lint'] as const
 
 /** 一次回给模型的 diff 上限。超了就截断并说明 —— 评审不需要读完一份两百行的补丁 */
 const MAX_PATCH_BYTES = 48 * 1024
@@ -163,7 +164,46 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
     },
   }
 
-  return [gitDiff, typecheck]
+  const lint: ToolRegistration = {
+    name: 'lint',
+    description:
+      "Run the app's own lint script (pnpm run lint) and return what it found. " +
+      'Where typecheck catches type errors, lint catches the two things tsc cannot see: ' +
+      'unused variables (usually a half-finished edit — the old implementation was not deleted) and ' +
+      'broken hook usage (a real crash at runtime). Warnings do not fail it. ' +
+      'If it says "没跑成", the check did NOT happen — do not treat it as passing.',
+    parameters: Type.Object({
+      timeoutMs: Type.Optional(Type.Number({ description: 'Timeout in ms (default 90000, max 300000)' })),
+    }),
+    replay: 'safe',
+    async execute(args) {
+      const input = args as { timeoutMs?: number }
+      /*
+       * 刻意**不继承** `options.timeoutMs`：那是 tsc 的预算（60s）。lint 要遍历整个仓库，
+       * 跑得更久，拿 60s 当默认会让一次正常的检查被误判成超时。
+       */
+      const result = await runLintScript(repoDir, {
+        ...(typeof input.timeoutMs === 'number' && input.timeoutMs > 0 ? { timeoutMs: input.timeoutMs } : {}),
+      })
+
+      if (result.status === 'skip') {
+        return ok(
+          `⏭ ${result.summary}\n` +
+            '注意：**这不等于通过**。如果改动里有 .ts/.tsx，请在风险清单里写一句"这个应用没有配置 lint"。',
+        )
+      }
+      if (result.status === 'fail') {
+        const body = result.detail === null ? '' : `\n${result.detail}\n`
+        return ok(
+          `✗ ${result.summary}\n${body}` +
+            '这是一条发现，不是工具错误。如果上面说的是"没跑成"，在报告里写清是哪一步没跑成。',
+        )
+      }
+      return ok(`✓ ${result.summary}`)
+    },
+  }
+
+  return [gitDiff, typecheck, lint]
 }
 
 /** 评审扩展：两个工具，不带 section（工作顺序写在角色的 instructions 里） */
