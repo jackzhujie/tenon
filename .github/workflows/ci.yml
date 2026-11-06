@@ -1,0 +1,65 @@
+## 质量门禁：类型检查 + 测试 + 前端构建
+##
+## 为什么只有这三步：
+## - **不跑 `e2e:*`**（docker / 真 PG / Electron）：runner 未必有容器运行时，而且那些脚本
+##   本来就是"在真机上手动跑"的（`pnpm e2e:docker` / `e2e:postgres` / `shot:*`）。
+##   把它们塞进 CI 会得到一堆需要 sudo / GUI / 大镜像的步骤，失效时没人愿意修。
+## - **不做三平台打包**：mac 不签名会被 Gatekeeper 拦，要 Apple 账号（$99/年）。
+##   这件事单独做，别和质量门禁混在一起 —— 门禁要快、要稳、要能天天绿。
+##
+## pnpm 版本从 `package.json` 的 `packageManager` 读（pnpm/action-setup 自己认），
+## 不在这里再写一遍：写两遍就会出现"CI 用 9、本机用 10"这类只在 CI 复现的问题。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支连推两次时，把还在跑的旧那次取消：门禁的价值是"最新这一次绿不绿"
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck + test + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 pnpm（版本来自 packageManager）
+        uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      # frozen-lockfile：lock 与 package.json 不一致时**当场失败**，
+      # 而不是在 CI 里悄悄装出另一套依赖
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      # 先跑最快的：类型错了就不必等测试
+      - name: 类型检查（18 个 project）
+        run: pnpm typecheck
+
+      - name: 测试
+        run: pnpm test
+
+      # 前端构建放最后：它证明 web 真的能打出产物（不只是 tsc 通过）
+      - name: 构建前端
+        run: pnpm build:web
+
+      - name: 留存前端产物（排障用，不进 artifact 长期库）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 3
+          if-no-files-found: ignore

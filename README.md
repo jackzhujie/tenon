@@ -1,5 +1,7 @@
 # Tenon（榫）
 
+[![CI](https://github.com/jackzhujie/tenon/actions/workflows/ci.yml/badge.svg)](https://github.com/jackzhujie/tenon/actions/workflows/ci.yml)
+
 > 本地优先、开源、可自托管的**对话式 AI 全栈应用搭建平台**（桌面端 + Web 端同构）。
 > 用自然语言把应用从 0 做到上线：React + NestJS + PostgreSQL 全栈 + Git 版本 + Docker 部署，且这个应用能被 Agent 持续迭代。
 
