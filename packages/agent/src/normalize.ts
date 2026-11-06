@@ -27,6 +27,8 @@ interface RawMessage {
   timestamp?: number
   usage?: { input?: number; output?: number; cost?: { total?: number } }
   model?: string
+  /** 工具结果那条 entry 上挂的 details（工具自己写的结构化信息） */
+  details?: unknown
 }
 
 export interface RawEntry {
@@ -40,10 +42,33 @@ const KIND_USER = 'pi.user'
 const KIND_ASSISTANT = 'pi.assistant'
 const KIND_TOOL_RESULT = 'pi.tool-result'
 
-/** 一条工具结果：状态 + 文本，按 toolCallId 回填到对应的调用上 */
+/**
+ * 一次工具调用自己的花费。目前只有 `subagent` 会带（它把子会话的账读出来写进 details）。
+ *
+ * 为什么挂在工具调用上而不是"按角色累计"：累计会被历史稀释，指导不了"下次还该不该派";
+ * 单次数字直接可用，而且没有旧数据缺归属的问题。
+ */
+interface ToolSpend {
+  readonly totalTokens: number
+  readonly costUsd: number
+}
+
+/** 一条工具结果：状态 + 文本 + （可选）这次调用花了多少，按 toolCallId 回填到对应的调用上 */
 interface ToolOutcome {
   readonly status: 'ok' | 'error'
   readonly output: string
+  readonly spend?: ToolSpend
+}
+
+/** 从 details 里挑出 spend。形状不对就当没有 —— 这里不该因为一个字段而抛 */
+function spendOf(details: unknown): ToolSpend | undefined {
+  if (typeof details !== 'object' || details === null) return undefined
+  const raw = (details as { spend?: unknown }).spend
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const { totalTokens, costUsd } = raw as { totalTokens?: unknown; costUsd?: unknown }
+  if (typeof totalTokens !== 'number' || !Number.isFinite(totalTokens)) return undefined
+  if (typeof costUsd !== 'number' || !Number.isFinite(costUsd)) return undefined
+  return { totalTokens, costUsd }
 }
 
 function textOfBlocks(content: string | RawBlock[] | undefined): string {
@@ -68,6 +93,7 @@ function blocksToParts(blocks: readonly RawBlock[], outcomes: Map<string, ToolOu
         type: 'tool',
         toolCallId: block.id,
         name: block.name ?? 'tool',
+        ...(outcome?.spend === undefined ? {} : { spend: outcome.spend }),
         /*
          * 状态与输出**来自工具结果那条 entry**，不是"有调用就算成功"。
          * 早先这里写死 'ok'：工具失败（路径越界、装不上组件、命令非零退出）
@@ -133,9 +159,11 @@ export function normalizeEntries(entries: readonly RawEntry[]): NormalizedMessag
     for (const message of entry.model ?? []) {
       const id = message.toolCallId
       if (id === undefined || id === '') continue
+      const spend = spendOf(message.details)
       outcomes.set(id, {
         status: message.isError === true ? 'error' : 'ok',
         output: textOfBlocks(message.content),
+        ...(spend === undefined ? {} : { spend }),
       })
     }
   }

@@ -40,6 +40,13 @@ export interface ToolActivity {
   args: Record<string, unknown> | undefined
   output: string
   status: 'running' | 'ok' | 'error'
+  /**
+   * 这一次工具调用自己花了多少（v1.2.19，目前只有 `subagent` 会带）。
+   *
+   * 只来自历史消息：实时事件（`tool.start` / `tool.end`）里没有这个数，
+   * 要等工具结果落进 transcript 才读得到。所以它只出现在已落定的那条上。
+   */
+  spend?: { totalTokens: number; costUsd: number }
 }
 
 export interface LiveTurn {

@@ -25,7 +25,14 @@ const boot = (): Promise<RunningServer> => bootServer(dir)
 interface ToolResultModel {
   toolName?: string
   content?: { type: string; text?: string }[]
-  details?: { role?: string; conversationId?: string; reused?: boolean; tools?: string[] }
+  details?: {
+    role?: string
+    conversationId?: string
+    reused?: boolean
+    tools?: string[]
+    /** 这一次派活花了多少（v1.2.19）。没有就是没读出来，不是 0 */
+    spend?: { totalTokens: number; costUsd: number }
+  }
   isError?: boolean
 }
 
@@ -128,6 +135,31 @@ describe('subagent 工具', () => {
     )
     expect(subagentResult?.details?.role).toBe('explore')
     expect([...(subagentResult?.details?.tools ?? [])].sort()).toEqual(['glob', 'grep', 'ls', 'read'])
+
+    /*
+     * 3b. **这次派活花了多少**（v1.2.19）。
+     *
+     * 子会话的花费不经过父会话的 `pi.usage`，所以只能按会话 id 去读它自己的账本
+     * （`subagent` 工具在派活结束后做这件事，写进 details）。
+     * 这里同时验两条：账本真的读到（> 0），以及它到了**界面能看到的那一层**
+     * （`chat.history` 的工具 part 上），而不只是藏在 details 里。
+     */
+    expect(subagentResult?.details?.spend?.totalTokens ?? 0).toBeGreaterThan(0)
+
+    const { messages } = await rpc<{ messages: NormalizedMessage[] }>(running, 'chat.history', {
+      appId: app.id,
+      limit: 200,
+    })
+    const parts = messages.flatMap((message) => message.parts)
+    const subagentPart = parts.find((part) => part.type === 'tool' && part.name === 'subagent')
+    expect(subagentPart?.type).toBe('tool')
+    if (subagentPart?.type === 'tool') {
+      expect(subagentPart.spend?.totalTokens ?? 0).toBeGreaterThan(0)
+    }
+    // 别的工具不该凭空带这个字段（只有 subagent 会去读子会话账本）
+    expect(
+      parts.filter((part) => part.type === 'tool' && part.name !== 'subagent' && part.spend !== undefined),
+    ).toEqual([])
 
     // 4. 两个会话：根 + 一个任务所有的子会话
     const list = await conversations(app.id)

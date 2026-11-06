@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MessagePart, NormalizedMessage } from '@tenon/protocol'
 // 只从零依赖子路径拿：主入口会把整张 zod 校验表拖进前端产物
-import { stripSelectionBlock } from '@tenon/protocol/browser'
+import { formatCost, formatTokens, stripSelectionBlock } from '@tenon/protocol/browser'
 import { TextBlock } from '../../components/TextBlock.js'
 import { cn } from '../../lib/cn.js'
 import type { LiveTurn, ToolActivity } from '../../hooks/useWorkspace.js'
@@ -53,7 +53,27 @@ function ToolCard({ activity }: { activity: ToolActivity }) {
         {summary !== '' && (
           <span className="truncate font-mono text-[11px] text-faint">{summary}</span>
         )}
-        <span className="ml-auto shrink-0 text-[10px] text-faint">{open ? '收起' : '详情'}</span>
+        {/*
+         * 派活花了多少。放在"详情"左边、用弱色：它是解释性信息，不该抢结论的位置。
+         * 成本为 0 时不显示（`faux` 不报价，写 `$0` 会被读成"很便宜"）。
+         */}
+        {activity.spend !== undefined && activity.spend.totalTokens > 0 && (
+          <span
+            className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-faint"
+            title="这一次派活消耗的用量（不是这个角色的累计）"
+          >
+            {formatTokens(activity.spend.totalTokens)}
+            {activity.spend.costUsd > 0 ? ` · ${formatCost(activity.spend.costUsd)}` : ''}
+          </span>
+        )}
+        <span
+          className={cn(
+            'shrink-0 text-[10px] text-faint',
+            activity.spend === undefined || activity.spend.totalTokens === 0 ? 'ml-auto' : 'ml-2',
+          )}
+        >
+          {open ? '收起' : '详情'}
+        </span>
       </button>
       {open && activity.output !== '' && (
         <pre className="max-h-56 overflow-auto border-t border-line-soft bg-[#0a0908] p-3 font-mono text-[11px] leading-[1.65] text-[#bfb6ae]">
@@ -71,6 +91,7 @@ function partToActivity(part: Extract<MessagePart, { type: 'tool' }>): ToolActiv
     args: part.args,
     output: part.output ?? '',
     status: part.status,
+    ...(part.spend === undefined ? {} : { spend: part.spend }),
   }
 }
 

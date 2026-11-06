@@ -146,6 +146,13 @@ export const MessagePart = z.discriminatedUnion('type', [
     status: z.enum(['running', 'ok', 'error']),
     args: z.record(z.string(), z.unknown()).optional(),
     output: z.string().optional(),
+    /**
+     * 这次**这一次**工具调用自己的花费（v1.2.19）。
+     *
+     * 目前只有 `subagent` 会带：它派出去一个子会话，跑完读那个会话的账本。
+     * 为什么不做"按角色累计"：累计会被历史稀释，而用户要判断的是"下次还该不该派"。
+     */
+    spend: z.object({ totalTokens: z.number(), costUsd: z.number() }).optional(),
   }),
 ])
 export type MessagePart = z.infer<typeof MessagePart>

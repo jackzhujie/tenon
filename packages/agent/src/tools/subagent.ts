@@ -27,7 +27,8 @@ import type {
   ToolExecutionApi,
   ToolRegistration,
 } from '@earendil-works/pi-durable'
-import { defineExtension, section } from '@earendil-works/pi-durable'
+import { UsageDoc, defineExtension, section } from '@earendil-works/pi-durable'
+import { sumUsage } from '@tenon/core'
 import { Type } from 'typebox'
 import type { RawEntry } from '../normalize.js'
 import { normalizeEntries } from '../normalize.js'
@@ -188,10 +189,20 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
         )
       }
 
-      await api.details(
-        { role: spec.id, conversationId: String(child.id), reused, tools: tools.map((tool) => tool.name) },
-        context,
-      )
+      /*
+       * 先把"派给谁"写下来再干活：工具中途崩了，这条记录仍然有用（谁派的、派到哪个会话）。
+       * 花多少要等跑完才知道，所以在下面再写一次（`details()` 是"最后一次覆盖"）。
+       */
+      const detailOf = (
+        spend: Spend | null,
+      ): { role: string; conversationId: string; reused: boolean; tools: string[]; spend?: Spend } => ({
+        role: spec.id,
+        conversationId: String(child.id),
+        reused,
+        tools: tools.map((tool) => tool.name),
+        ...(spend === null ? {} : { spend }),
+      })
+      await api.details(detailOf(null), context)
 
       // 3. 派活。requestId 固定 → 重跑时拿回同一次提交，不会把同一件事做两遍
       const submission = await child.submit(
@@ -200,6 +211,16 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
       )
       const settled = await submission.wait(context)
       const answer = await readAnswer(child, context)
+      /*
+       * **这次派活花了多少**（v1.2.19）。
+       *
+       * 为什么是"单次"而不是"按角色累计"：累计会被历史稀释，指导不了"下次还该不该派"；
+       * 而这一次的数字直接可用。代价只有一次文档读（`pi.usage` 本来就在子会话里）。
+       *
+       * 失败也要记 —— 派出去但没给出结论的那次同样烧了钱，用户更需要看见。
+       */
+      const spend = await readSpend(harness, child, context)
+      await api.details(detailOf(spend), context)
 
       if (settled.status !== 'done') {
         return errorResult(`${spec.label} 没有给出结论（${settled.status}）${answer === '' ? '' : `：${answer}`}`)
@@ -216,6 +237,37 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
         ],
       }
     },
+  }
+}
+
+type Spend = {
+  totalTokens: number
+  costUsd: number
+}
+
+/**
+ * 读一个子会话自己的账本。
+ *
+ * 为什么不从父会话的 `usage()` 里减：父会话的账本只统计自己那条会话，子会话的花费
+ * 根本不经过它的 `pi.usage`（这是"嵌套调用不进父会话事件流"的另一面）。
+ * 而每个会话的用量是一个独立的文档（`UsageDoc`），按会话 id 直接读得到 —— 公开 API，
+ * 不需要改宿主。
+ *
+ * 读不到就返回 `null`（不抛、也不写一个 0）：工具结果不该因为一段统计而失败，
+ * 而 `0 tokens` 会被读成"这次派活不要钱"，那是错的。
+ */
+async function readSpend(
+  harness: Harness,
+  child: Conversation,
+  context: typeof ctx,
+): Promise<Spend | null> {
+  try {
+    const state = await harness.snapshot(UsageDoc, child.id, context)
+    if (state === undefined) return null
+    const { totals } = sumUsage(state)
+    return { totalTokens: totals.totalTokens, costUsd: totals.costUsd }
+  } catch {
+    return null
   }
 }
 
