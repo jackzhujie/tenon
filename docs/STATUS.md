@@ -1715,6 +1715,39 @@ timestamptz 是 Date、NULL 仍是 NULL、树搬得过去 → 新建记录 id �
 得先解决"按月"—— 账本是累计值，没有时间维度。先不做，比做一个看起来像上限、
 实际不拦的开关好。
 
+### 4.42 质量门禁进了 CI（第一次跑就抓到两个真问题）
+
+之前一直没做，理由很实在：**仓库没有远端**，workflow 写了也不会跑，等于写一份不执行的配置。
+接上 `github.com/jackzhujie/tenon` 之后它才有意义，第一次跑（4 分钟）就抓到了本地永远抓不到的东西。
+
+**只做三步**，理由写在 workflow 文件头：
+
+| 跑 | 不跑 | 为什么 |
+|---|---|---|
+| `typecheck` / `test` / `build:web` | `e2e:*`（docker、真 PG、Electron） | runner 未必有容器运行时，而且那些脚本本来就是"手动在真机上跑"的；塞进来会得到一堆需要 sudo / GUI / 大镜像的步骤，失效时没人愿意修 |
+| — | 三平台打包 | mac 不签名会被 Gatekeeper 拦，要 Apple 账号（$99/年）。单独做，别和质量门禁混在一起 —— 门禁要快、要稳、要能天天绿 |
+
+两个细节：pnpm 版本不写在 workflow 里（交给 `pnpm/action-setup` 读 `packageManager`，
+写两遍就会出现"CI 用 9、本机用 10"）；`--frozen-lockfile` 让 lock 与 `package.json`
+不一致时**当场失败**，而不是在 CI 里悄悄装出另一套依赖。
+
+**第一次跑就抓到的两个真问题**（同一个病）：
+
+| 报错 | 真因 |
+|---|---|
+| `Cannot find module 'isomorphic-git'`（`release.test.ts`） | 该包只声明在 `@tenon/core` 里，server 的测试直接 import 了它 |
+| `Cannot find module '@babel/types'` + `Parameter 'a' implicitly has an 'any' type`（`babel-plugin-tenon-loc.ts`） | 只声明了 `@babel/core`（那是传递依赖），直接 import 的类型没声明。后面那个 any 是它的并发症 |
+
+**为什么本地一直通过**：`/Users/mac/node_modules/` 里恰好有一份（家目录里不知什么时候装的，
+160 个包）。Node 解析会一路往上找，找到了就"通过"；CI 在 `/home/runner/...`，没有这个目录。
+**这类问题本地永远自测不出来 —— 这就是要有 CI 的理由。** 两处都补成了显式 devDependency
+（版本与已有的一致：`isomorphic-git` 1.44.8、`@babel/types` 8.0.10，避免同仓两份）。
+
+排查手法值得记：**逐个 import 做真实解析，只看结果落在哪**（落在 `~/node_modules` 就是未声明）。
+比"看 package.json 里有没有"可靠 —— 传递依赖、模板目录、ESM-only 包都会误报，必须看解析结果。
+
+**现在的基线**：GitHub Actions `ubuntu-latest` + Node 22，4 分钟绿（`Test Files 77 / Tests 700`）。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -1900,6 +1933,7 @@ timestamptz 是 Date、NULL 仍是 NULL、树搬得过去 → 新建记录 id �
 | **`postgres:18` 的卷必须挂 `/var/lib/postgresql`** | 18 起 `PGDATA` 挪到 `/var/lib/postgresql/18/docker`，`VOLUME` 也改成 `/var/lib/postgresql`。挂成 17 及以前的 `.../data` 不会报"挂载点不对"，而是入口脚本认定"数据在 unused mount/volume 里"然后拒绝启动 → db 容器 `unhealthy`，而 `app` 因为 `depends_on: service_healthy` **连启动都没有**，看着像整个 compose 坏了 |
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
+| **本地通过、CI 失败：`~/node_modules` 在替仓库兜底** | 家目录里一份 `node_modules`（160 个包）会被 Node 一路往上解析到。未声明的依赖因此本地永远"能跑"，到干净的 runner 上才炸。判据不是"看 package.json 有没有声明"，而是**逐个 import 真解析、看结果落在哪**。本机解决了 `isomorphic-git`、`@babel/types` 两处 |
 | **快照还原不能"按行数组前 N 个值"取值** | 快照之后如果 `drop column` 过，保留的列不再是行数组的前 N 个 —— 按位置取会让整行**往前错一位**。类型相容时是**静默写进错误的列**，类型不容才报 `malformed array literal: "12.50"`（score 被写进了 labels）。必须按**列名取下标** |
 | **迁移的校验不能是"源行数 == 目标行数"** | 目标库里有迁移之后新写的数据时（或只是重跑），这个比较会把一次**正确**的迁移判成失败，提示还是"先清空目标表再迁" —— 等于建议用户删数据。正确判据是「目标(后) == 目标(前) + 实写」，`on conflict` 跳过的行数如实进报告 |
 
