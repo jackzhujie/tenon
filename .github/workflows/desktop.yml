@@ -226,6 +226,9 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          # 这个 job 不 checkout（只要产物），所以 `gh` 需要显式告诉它仓库是哪个 ——
+          # 否则报 `failed to run git: fatal: not a git repository`
+          REPO: ${{ github.repository }}
         run: |
           shopt -s nullglob
           TAG="${GITHUB_REF_NAME}"
@@ -235,13 +238,13 @@ jobs:
           extra=()
           case "$TAG" in *-*) extra+=(--prerelease);; esac
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，改为覆盖上传（重跑同一 tag 是常见操作）"
-            gh release upload "$TAG" "${files[@]}" --clobber
+            gh release upload "$TAG" "${files[@]}" -R "$REPO" --clobber
           else
-            gh release create "$TAG" "${files[@]}" \
+            gh release create "$TAG" "${files[@]}" -R "$REPO" \
               --title "Tenon $TAG" \
               --notes-file NOTES.md \
               "${extra[@]}"
           fi
-          gh release view "$TAG" --json url,assets --jq '"URL: \(.url)\n" + (.assets[] | "  \(.name)  \(.size/1024/1024|floor)MB")'
+          gh release view "$TAG" -R "$REPO" --json url,assets --jq '"URL: \(.url)\n" + (.assets[] | "  \(.name)  \(.size/1024/1024|floor)MB")'
