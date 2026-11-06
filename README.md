@@ -132,8 +132,20 @@ pnpm build:web              # 前端产物（server 启动时把它读进内存�
 | `pnpm shot:usage` | — | 人眼验收：用量面板三个应用 → 截图看「全部应用」那一行 |
 | `pnpm shot:release` | — | 人眼验收：发布对话框（故意不装依赖 → 门禁真红）→ 截图看三项清单与"同一版代码"那句 |
 
-打包：`pnpm pack:desktop` → `apps/desktop/release/mac/Tenon.app`（`electron-builder --dir`，
-不做签名公证 —— 那要 Apple 账号）。安装包默认路径上不带任何需按平台编译的原生模块，打包脚本会审计并打印清单。
+打包有两个档位：
+
+```bash
+pnpm pack:desktop   # electron-builder --dir → apps/desktop/release/mac/Tenon.app（快，给冒烟用）
+pnpm dist:desktop   # 同上 + dmg / zip（要分发给别人时用；macOS 上产出 .dmg 与 .zip）
+```
+
+**产物不自带签名与公证**（`identity: null`）。所以拷到别人 Mac 上会被 Gatekeeper 拦：
+右键「打开」一次、或 `xattr -dr com.apple.quarantine /Applications/Tenon.app`。
+要真正"双击就开"需要 Apple Developer 账号（$99/年）。
+
+**不需要任何外部运行环境**：Node 不用装（用 Electron 二进制 + `ELECTRON_RUN_AS_NODE` 跑
+`server.mjs`）、pnpm 随包（`Resources/server/node_modules/pnpm`）、数据库是 PGlite 的 WASM
+（`pglite.wasm` 也在包里）。`pack:desktop` 会审计并按平台列出包内的 `.node` 文件。
 
 实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 

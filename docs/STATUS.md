@@ -2293,6 +2293,75 @@ CI 里另起一步用 `git ls-files --eol` 断言索引里没有 crlf/mixed。
 - **没出过 Windows 安装包**：`electron-builder` 只在本机打过 `--dir`（mac）。这条仍在欠账里。
 - **`e2e:*` 一个都不在 CI**（要容器 / GUI / 大镜像），维持原判。
 
+### 4.51 安装包其实一直能出：dmg / zip 都出来了，卡的是下载镜像
+
+盘点里一直写着"没出过 `.dmg`（只有 `--dir` 的 unpacked）"。有人问"打包是什么问题，
+没有运行环境是吗" —— 查下来**跟运行环境完全无关**，也跟配置无关：
+
+#### 一、运行环境全在包里
+
+| 需要的东西 | 怎么解决的 |
+|---|---|
+| Node | **不需要**。`process.execPath` 是 Electron 二进制，带 `ELECTRON_RUN_AS_NODE=1` 当 node 用 |
+| pnpm | **随包**：`Resources/server/node_modules/pnpm`（`build.mjs` 从 pnpm 的直接依赖里 resolve 真目录） |
+| 数据库 | PGlite 的 WASM 跟包：`@electric-sql/pglite/dist/pglite.wasm` |
+| 原生模块 | `pack:desktop` 会扫 `.node` / `binding.gyp` / 平台动态库并按平台列出来（扫到不失败，列清单） |
+
+实测包内结构（`release/mac/Tenon.app/Contents/Resources/`）：`server/{server.mjs,node_modules}`
+`web/` `templates/` `plugins/` `hub.json` `app.asar`。`.app` 353MB。
+
+#### 二、`--dir` 与 `dist` 是两件事
+
+`pack:desktop` 是 `electron-builder --dir`：**只解包不封装**，产出 `release/mac/Tenon.app`，
+给冒烟用（快）。安装包要跑 `electron-builder` 不带 `--dir` —— 目标在
+`electron-builder.yml` 里早就配好了（mac: `dmg` + `zip`，win: `nsis`，linux: `AppImage`），
+只是**从来没有人跑过那一步**。新增 `pnpm dist:desktop` 补上这个档位。
+
+#### 三、第一次跑失败，原因不是配置
+
+第一次 `dist` 跑到 DMG 那一步，`600000ms` 后超时：
+
+```
+⨯ Timeout awaiting 'request' for 600000ms
+```
+
+zip 那一半已经成功（125MB），所以镜像、asar、extraResources 全都是对的。
+查到超时发生在下载 `dmgbuild-bundle-x86_64-75c8a6c.tar.gz`（23MB，dmg-builder 的构建工具）。
+拿 `curl` 分别打两个源（同一台机器、同一个代理）：
+
+| 源 | 拿 2KB 的耗时 |
+|---|---|
+| GitHub release asset | **10.7 秒** |
+| `registry.npmmirror.com` 镜像 | **0.43 秒** |
+
+23MB 走前者必然超过 600 秒。所以不是"打包坏了"，是**这台机器到 GitHub 资产域名的链路太慢**。
+换镜像重打：`ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/`
+→ **1 分 15 秒出 dmg**（129MB）。`hdiutil verify` 校验通过，挂载后是标准的
+`Tenon.app` + `Applications` 符号链接。
+
+#### 四、真启动验过
+
+`pnpm smoke:desktop:packaged` 对**打包产物**跑 9 项：主进程加载界面并回报探针 / 首屏有内容 /
+有交互控件 / 没落错误页 / `window.__TENON__` 里有 token / 没停在"正在连接本地服务" /
+主进程正常退出 / **server 已停止（没有孤儿进程占端口）**。全过。
+
+#### 五、真正阻碍"发给别人"的只有签名
+
+`identity: null` → 未签名、未公证。别人机器上 Gatekeeper 会拦（"无法验证开发者"）。
+绕法：右键「打开」一次，或 `xattr -dr com.apple.quarantine /Applications/Tenon.app`。
+要做到"双击就开"必须 Apple Developer 账号（$99/年）—— 这是**钱的问题，不是技术问题**。
+
+#### 六、Windows / Linux 还差什么
+
+- **Windows**：`nsis` 目标配了，但要在 Windows 机器上打（macOS 上打 Windows 安装包要 wine），
+  而且**从来没有人启动过 Windows 上的打包产物**。CI 只覆盖核心与 Web 模式（§4.50）。
+- **Linux**：`AppImage` 同理，桌面壳整体是 M7 的事。
+
+#### 结论
+
+**Hub 与安装包都不是"技术债"**：Hub 是分发渠道（本地 bundled 组件已经能用，商店在未配置时
+明确显示"未配置"而不是坏掉）；安装包现在**能出**，卡的是签名（钱）与跨平台验证（机器）。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -2479,6 +2548,8 @@ CI 里另起一步用 `git ls-files --eol` 断言索引里没有 crlf/mixed。
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
 | **"打开就自动跑"的对话框里，"上次结论"永远没机会显示** | 想加"预检结论常驻"时第一版是"在旁边多显示一块"，结果对话框一打开就真跑预检（`checking` 立刻为真），那块 UI 永远不渲染。正确的做法是**能复用就不跑**（判据：存档在 + HEAD 没变 + 工作区干净），而不是多显示一块 |
+| **`electron-builder` 的 dmg 步骤会下载 23MB 构建工具，慢网下 600 秒超时** | 报错是 `Timeout awaiting 'request' for 600000ms`，看着像配置坏，其实 zip 那一半已经成功了。设 `ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/` 即可（GitHub 资产在这台机器上 2KB 要 10.7 秒，镜像 0.43 秒） |
+| **`--dir` 不是打包，`dist` 才是** | `electron-builder --dir` 只解包（产出 `.app`，给冒烟用）；安装包要去掉 `--dir`。两个档位分别叫 `pack:desktop` 与 `dist:desktop` |
 | **用字符串拼 `file://` 去和 `import.meta.url` 比，在 Windows 上永远为假** | macOS 是 `file:///Users/…`，Windows 是 `file:///D:/…` 而拼出来是 `file://D:\…`（盘符、反斜杠、少一个斜杠）。后果是**静默什么都不做**：脚本不干活、不打印、退出码 0。一律用 `pathToFileURL(argv[1]).href` |
 | **Windows 上 `spawn('pnpm')` 是 ENOENT，`spawn('pnpm.cmd')` 还要 `shell: true`** | spawn 不做 PATHEXT 补全；且 Node ≥18.20 起不允许直接 spawn `.cmd`/`.bat`（CVE-2024-27980）。代价：**参数里不能有需要引用才安全的空格**（路径一律走 `cwd`）。另加 `windowsHide: true`，否则每跑一次闪一个黑框 |
 | **路径护栏不能在后面硬拼一个正斜杠** | Windows 上前缀是 `...\apps/`，永远不匹配 `...\apps\app_x` → **删应用永远失败**，报的是一句看不懂的"拒绝删除越界路径"。用 `relative()`：按平台分隔符算，且天然处理 `..` |

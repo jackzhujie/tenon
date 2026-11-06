@@ -35,7 +35,7 @@ M5 = 组件体系：chord 宿主 → `@tenon/component-host`（清单/装配/覆
 三个官方组件（AI 小助手 / 导出 CSV / 审批流，契约形状一致）→ 网关注入 + WS 链路 →
 `install_component`/`remove_component`/插件页 → 真 Chromium 端到端。
 **欠账**（M1–M6 计划内已清）：真远端 push、**真 Hub 未上线**（静态托管/域名/缓存）、
-额度无跨应用总闸、没出过 `.dmg`（只有 `--dir` 的 unpacked）、
+额度无跨应用总闸、**无签名/公证**（`.dmg` 能出了，见 §4.51）、Windows 安装包未产出、
 DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§4.49）。
 
 ## 已定的架构选择（推翻要重做很多）
@@ -114,6 +114,15 @@ DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§
   盘体积先跑 `esbuild --metafile` 看 `bytesInOutput`
 - **`build:plugins` 用 `minify + keepNames`**：3.4MB→1.6MB（−53%）。全 minify 只多省 40KB
   但抹掉函数名 → 组件异常堆栈没法看。不做 sourcemap（.map 会打进 Hub 包）
+- **`electron-builder --dir` 不是打包**：它只解包出 `.app`（给冒烟用）。安装包要去掉 `--dir`
+  （目标在 `electron-builder.yml` 里早配好：dmg/zip/nsis/AppImage）。两个档位：
+  `pack:desktop`（--dir）与 `dist:desktop`
+- **dmg 步骤会现下 23MB 的 `dmgbuild-bundle`，慢网下 600 秒超时**（`Timeout awaiting 'request'`），
+  看着像配置坏，其实 zip 那半已经成功。设
+  `ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/`
+  （GitHub 资产在这台机器 2KB 要 10.7 秒，镜像 0.43 秒）
+- **打包产物不需要外部运行环境**：Node 不用装（Electron 二进制 + `ELECTRON_RUN_AS_NODE`）、
+  pnpm 随包（`Resources/server/node_modules/pnpm`）、PGlite 的 `pglite.wasm` 也在包里。.app 353MB
 - **`import.meta.url === 'file://' + argv[1]` 在 Windows 永远为假** → 脚本**静默不干活、
   退出码 0**。`build:plugins` 就这么在 Windows 上一直空跑（于是所有组件测试报"facet 文件不存在"）。
   一律 `pathToFileURL(argv[1]).href`

@@ -24,6 +24,7 @@
     "build:desktop": "pnpm build:web && pnpm build:plugins && node apps/desktop/build.mjs",
     "dev:desktop": "pnpm build:desktop && pnpm --filter @tenon/desktop start",
     "pack:desktop": "pnpm build:desktop && pnpm --filter @tenon/desktop exec electron-builder --dir",
+    "dist:desktop": "pnpm build:desktop && pnpm --filter @tenon/desktop exec electron-builder --publish never",
     "smoke:desktop": "pnpm build:desktop && tsx scripts/smoke-desktop.ts",
     "smoke:desktop:packaged": "tsx scripts/smoke-desktop.ts --packaged",
     "test": "vitest run",
