@@ -157,8 +157,15 @@ try {
   check('检查没过时拒绝发布', blocked.code === 'RELEASE_CHECKS_FAILED', blocked.message)
   check('错误里说清是哪一项没过', blocked.message.includes('类型检查'), blocked.message)
   check(
-    '清单随错误一起回来（对话框靠它画三行）',
-    blocked.details?.checks?.length === 2,
+    '清单随错误一起回来（三项都在，对话框逐行画）',
+    /*
+     * 不只数个数：`lint` 是 v1.2.20 加的第三项，长度对了但漏了它、或者多了个别的，
+     * 都是界面画不出来的那种坏。逐个 id 点名。
+     */
+    blocked.details?.checks?.length === 3 &&
+      ['typecheck', 'test', 'lint'].every((id) =>
+        (blocked.details?.checks ?? []).some((check) => check.id === id),
+      ),
     JSON.stringify(blocked.details ?? {}),
   )
   check('被拒时不消耗版本号（仓库里没有 tag）', (await gitops.listTags(repo)).length === 0)
