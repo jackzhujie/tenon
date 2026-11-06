@@ -177,7 +177,12 @@ jobs:
             echo "::error::一个产物都没有，先看 package 那几个 job"
             exit 1
           fi
-          sha256sum "${files[@]}" | sort -k2 > SHA256SUMS.txt
+          # ★ 只写**文件名**，不写 `tenon-mac-x64/...` 这样的下载目录前缀：
+          # Release 里的资产是平铺的，用户把三个文件下到同一个文件夹后要能直接
+          # `shasum -a 256 -c SHA256SUMS.txt`。带前缀的路径会"文件不存在"。
+          for f in "${files[@]}"; do
+            ( cd "$(dirname "$f")" && sha256sum "$(basename "$f")" )
+          done | sort -k2 > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: 写 Release 说明

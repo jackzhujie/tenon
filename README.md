@@ -160,7 +160,14 @@ pnpm dist:desktop   # 同上 + dmg / zip（要分发给别人时用；macOS 上�
 | `tenon-linux-x64` | `Tenon-<ver>.AppImage` |
 
 macOS 那份会在 CI 里**真启动一次**（`smoke:desktop:packaged`）；Windows / Linux 的
-runner 没有 GUI 会话，那边只验"打得出来"。产物保留 14 天，不进 Release。
+runner 没有 GUI 会话，那边只验"打得出来"。
+
+推 `v*` tag 时会把这些产物挂成一个 **GitHub Release**（含 `SHA256SUMS.txt`），
+这样不用登录、链接也不会过期。最近的预览版：
+**[v0.0.0-alpha.1](https://github.com/jackzhujie/tenon/releases/tag/v0.0.0-alpha.1)**。
+
+> 未签名：mac 首次打开要右键 →「打开」（或 `xattr -dr com.apple.quarantine`），
+> Windows 会弹 SmartScreen「未知发布者」→ 更多信息 → 仍要运行。
 
 实测数据见 [SPIKES.md](docs/SPIKES.md)，路线图见 [DESIGN.md §17](docs/DESIGN.md)。
 

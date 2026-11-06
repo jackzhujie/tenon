@@ -2405,14 +2405,42 @@ Intel 是 `mac`、Apple Silicon 是 `mac-arm64`、交叉编译是 `mac-x64`。�
 所以这个假设从没被验证过 —— CI 上产物在 `mac-arm64/`，冒烟找不到。
 **失败的是测量工具，不是产物。** 改成按候选列表找，都没有时报错并列出找过的路径。
 
+#### 推 tag → 挂成 Release（这一步是给"明天真想装一遍"准备的）
+
+artifact **14 天过期、下载要登录**，当不了"给人试"的渠道。所以加了一个 `release` job：
+`needs: package`，只在 `push tags: v*` 时跑（Release 是"我决定发一版"，不该由手点打包触发），
+用 `gh release create` 把 6 个安装包 + `SHA256SUMS.txt` 挂上去；tag 里带 `-` 的标 `prerelease`。
+重跑同一 tag 走 `gh release upload --clobber`（重跑是常见操作，不该报"已存在"）。
+
+`v0.0.0-alpha.1` 是第一次真跑，一口气暴露三个小事：
+
+1. **`gh release create` 需要 git 上下文** —— 那个 job 只下载产物、没有 checkout，报
+   `failed to run git: fatal: not a git repository`。改成显式 `-R "$GITHUB_REPOSITORY"`
+   （省一次 checkout）。
+2. **GitHub 会把资产名里的空格换成点**：`Tenon Setup 0.0.0.exe` → `Tenon.Setup.0.0.0.exe`，
+   于是"文档写的名字"和"下到的名字"对不上。在 `win.artifactName` 里定死
+   `Tenon-<version>-setup.exe`，从源头解决。
+3. **校验和不能带下载目录前缀**：第一版写的是 `tenon-mac-x64/Tenon-0.0.0.dmg`，
+   而 Release 资产是**平铺**的 —— 用户把文件下到同一个文件夹后 `shasum -c` 会报"文件不存在"。
+   改成只写文件名。
+
+产物（`v0.0.0-alpha.1`，prerelease）：
+
+| 资产 | 大小 |
+|---|---|
+| `Tenon-0.0.0-arm64.dmg` / `-arm64-mac.zip` | 123MB / 119MB |
+| `Tenon-0.0.0.dmg` / `-mac.zip`（Intel） | 128MB / 124MB |
+| `Tenon-0.0.0-setup.exe` | 111MB |
+| `Tenon-0.0.0.AppImage` | 124MB |
+| `SHA256SUMS.txt` | 6 行（纯文件名） |
+
 #### 仍然没做的（如实记）
 
 - **未签名**：mac 上 Gatekeeper 会拦、Windows 上 SmartScreen 提示"未知发布者"。
   只影响信任，不影响能不能装上试用。要做成"双击就装"需要 Apple $99/年 + Windows 代码签名证书。
 - **Windows / Linux 的产物没被启动过**：CI 上没有 GUI 会话，只有 macOS 那份跑了
   `smoke:desktop:packaged`（真启动、有 token、退出不留孤儿）。
-- **产物只到 artifact，不进 Release**：14 天后过期。要长期归档得在 tag 上建 Release
-  （需要 `contents: write`）—— 那属于"决定发一版"的动作，等真发版时再做。
+- ~~产物只到 artifact，不进 Release~~ → **推 tag 会自动建 Release**（见上一节）。
 - **这台机器下载 111MB 的 artifact 会 EOF**（和 §4.51 那个 GitHub 资产慢是同一个链路问题），
   所以"下载下来的文件是不是有效 PE / AppImage"没有在这里验过。
 

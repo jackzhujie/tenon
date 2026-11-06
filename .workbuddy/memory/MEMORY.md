@@ -119,6 +119,12 @@ DCO 不在 CI、商业授权无联系入口。组件体积已 3.4MB→1.6MB（§
   file paths`。mac/win 用 productName 所以看不出来 → `linux.executableName: tenon`
 - **打包产物目录带架构后缀**：Intel `release/mac`、Apple Silicon `mac-arm64`、交叉 `mac-x64`。
   写死 `release/mac` 在本地永远绿、到 arm64 runner 上报"没有打包产物"
+- **推 tag 才建 Release**（`needs: package`）：artifact 14 天过期且要登录，Release 才是"给人试"
+  的渠道。`gh release create -R "$GITHUB_REPOSITORY"` —— 那个 job 不 checkout，不传 `-R`
+  会报 `fatal: not a git repository`。重跑同一 tag 走 `upload --clobber`
+- **GitHub 会把资产名的空格换成点**（`Tenon Setup 0.0.0.exe` → `Tenon.Setup.0.0.0.exe`）→
+  在 `win.artifactName` 里定死；**校验和只写文件名**（Release 资产是平铺的，带目录前缀
+  `shasum -c` 会"文件不存在"）
 - **安装包走单独一条 workflow**（`desktop.yml`，tag 或手点）：打包慢且重（每台下 100MB
   Electron），不该塞进每次 push 的门禁。macOS runner 是 arm64 → 用 `--x64` 交叉再出一份
 - **`electron-builder --dir` 不是打包**：它只解包出 `.app`（给冒烟用）。安装包要去掉 `--dir`
