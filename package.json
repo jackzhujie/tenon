@@ -50,6 +50,7 @@
     "shot:export": "tsx scripts/shot-export.ts",
     "shot:usage": "tsx scripts/shot-usage.ts",
     "shot:release": "tsx scripts/shot-release.ts",
+    "shot:chat": "tsx scripts/shot-chat.ts",
     "e2e:docker": "tsx scripts/export-docker.ts",
     "e2e:postgres": "tsx scripts/e2e-postgres.ts",
     "e2e:packaged": "tsx scripts/e2e-packaged-gate.ts",

@@ -6,7 +6,6 @@ import { LogPanel } from '../features/logs/LogPanel.js'
 import { NewAppDialog } from '../features/apps/NewAppDialog.js'
 import { DiffPanel } from '../features/diff/DiffPanel.js'
 import { ReleaseDialog } from '../features/release/ReleaseDialog.js'
-import { TaskGraphPanel } from '../features/tasks/TaskGraphPanel.js'
 import { useWorkspace } from '../hooks/useWorkspace.js'
 import { useInspectorSelection } from '../hooks/useInspectorSelection.js'
 import { cn } from '../lib/cn.js'
@@ -110,6 +109,7 @@ export function App() {
         >
           <ChatPanel
             prefill={composerPrefill}
+            graph={state.graph}
             app={workspace.activeApp}
             status={state.status}
             messages={state.messages}
@@ -149,8 +149,6 @@ export function App() {
               onClose={() => setDiffOpen(false)}
             />
           )}
-          {/* 任务图在日志上面：它讲的是"现在"，日志讲的是"刚才发生了什么" */}
-          <TaskGraphPanel graph={state.graph} />
           {/* 日志在预览下方：它解释的正是"上面这块为什么不动" */}
           {state.activeAppId !== null && (
             <LogPanel

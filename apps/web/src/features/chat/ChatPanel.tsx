@@ -1,4 +1,11 @@
-import type { App, AppStatus, GitCommit, NormalizedMessage, SelectionContext } from '@tenon/protocol'
+import type {
+  App,
+  AppStatus,
+  GitCommit,
+  NormalizedMessage,
+  SelectionContext,
+  TaskGraph,
+} from '@tenon/protocol'
 import { Composer, type ComposerPrefill } from './Composer.js'
 import { MessageList } from './MessageList.js'
 import type { LiveTurn } from '../../hooks/useWorkspace.js'
@@ -58,6 +65,11 @@ export interface ChatPanelProps {
   onClearSelection(): void
   /** 日志面板「发送给 Agent」塞进来的文本，透传给 Composer */
   prefill?: ComposerPrefill | null
+  /**
+   * 任务图（v1.2.27）。**不再是页面底部那块独立面板** —— 子 Agent 的步骤要显示在
+   * 对话里（派它的那一步旁边），所以图从这一路透到消息列表。
+   */
+  graph?: TaskGraph | null
 }
 
 export function ChatPanel({
@@ -75,6 +87,7 @@ export function ChatPanel({
   onCreate,
   onClearSelection,
   prefill = null,
+  graph = null,
 }: ChatPanelProps) {
   if (!hasApps) return <EmptyState onCreate={onCreate} />
   if (app === null) return <NoAppSelected />
@@ -115,6 +128,7 @@ export function ChatPanel({
       <MessageList
         messages={messages}
         live={live}
+        graph={graph}
         empty={
           <div className="mt-10 space-y-2 px-2 text-center">
             <p className="text-[13px] text-muted">工作区已就绪</p>
