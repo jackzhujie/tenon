@@ -128,6 +128,7 @@ pnpm build:web              # 前端产物（server 启动时把它读进内存�
 | `pnpm e2e:postgres` ★ | 31 | 起真 `postgres:18-alpine`，验跨档迁移与纯 JS 快照（没有 docker 就 skip） |
 | `pnpm e2e:real` ★ | 12 | 真模型验收（要真 key）：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问 |
 | `pnpm e2e:provider` | — | BYOK 接线（真模型验收的前置）：本地假 OpenAI 服务走完整条路 —— profile 加密存库 → resolveModel → 流式 SSE → 工具落盘 → 收尾 → commit。**它证明我们这一侧没坏**，于是接真 key 后若不对，问题只可能在模型或提示词 |
+| `pnpm e2e:packaged` ★ | — | **打包版运行时**：用 Electron 二进制跑 `dist/server/server.mjs`，PATH 里没有 node → 建应用 → 门禁 lint 真跑 → 导出静态包。这条修的是"装上之后发布/导出全挂"那类只在包里出现的故障 |
 | `pnpm spike:chord` | 10 | chord 宿主回归网（契约 / 变体 / 跨 host / 热重载 / 打包） |
 | `pnpm smoke:desktop` | 8 | 桌面冒烟：`build:desktop` → 真起窗口 |
 | `pnpm smoke:desktop:packaged` | 8 | 打包产物冒烟：真的起 `.app`、加载界面、退出后不留孤儿进程 |

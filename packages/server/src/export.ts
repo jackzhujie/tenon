@@ -35,7 +35,7 @@ import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { invokePnpm, resolvePnpm } from '@tenon/core'
+import { invokePnpm, resolvePnpm, withNodeShim } from '@tenon/core'
 import { ensureDeps, nodeRunEnv } from '@tenon/gateway'
 import { TenonError } from '@tenon/protocol'
 
@@ -129,7 +129,8 @@ async function runOnce(options: {
   const code = await new Promise<number | null>((resolve) => {
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
-      env: options.env,
+      // 应用自己的 `.bin/*` 是 `exec node` 的 shim —— 打包版里得给它一个 node
+      env: withNodeShim(options.env),
       shell: options.shell === true,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],

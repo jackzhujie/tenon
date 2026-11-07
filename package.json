@@ -52,6 +52,7 @@
     "shot:release": "tsx scripts/shot-release.ts",
     "e2e:docker": "tsx scripts/export-docker.ts",
     "e2e:postgres": "tsx scripts/e2e-postgres.ts",
+    "e2e:packaged": "tsx scripts/e2e-packaged-gate.ts",
     "shot:plugins": "tsx scripts/shot-plugins.ts"
   },
   "devDependencies": {

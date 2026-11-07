@@ -2444,6 +2444,81 @@ artifact **14 天过期、下载要登录**，当不了"给人试"的渠道。�
 - **这台机器下载 111MB 的 artifact 会 EOF**（和 §4.51 那个 GitHub 资产慢是同一个链路问题），
   所以"下载下来的文件是不是有效 PE / AppImage"没有在这里验过。
 
+### 4.53 打包版里没有 node：发布门禁与导出全挂（用户装上之后第一天就撞到）
+
+用户装上 `v0.0.0-alpha.1` 的 Intel 版，建了应用，然后：
+
+```
+lint 没过（pnpm run lint 退出码 1）
+  node_modules/.bin/eslint: line 16: exec: node: not found
+导出静态包 / 导出 Docker → 构建失败（pnpm run build 退出码 1）
+```
+
+**同一个根因。** 而"类型检查通过"—— 因为它走的是另一条路。
+
+#### 一、为什么会这样
+
+打包版的机器上**没有 Node**，这是我们刻意的设计（`ELECTRON_RUN_AS_NODE=1` 时 Electron 二进制
+就是 Node，所以安装包不要求用户装任何东西）。
+
+但是**应用自己的 `node_modules/.bin/*` 是 `exec node` 的 shim**：
+
+```sh
+if [ -x "$basedir/node" ]; then exec "$basedir/node" ...; else exec node ...; fi
+```
+
+`pnpm run lint` / `pnpm run build` 都会落到最后那个 `exec node`。
+
+**为什么"一半能跑"**：`tsc` 那一项是我们**直接用 `process.execPath` 跑 tsc 的入口**，
+绕过了 `.bin` shim —— 于是门禁里三项，一项绿、两项红。这种"一半好"最容易让人以为是
+代码问题（用户第一反应也是"lint 错误发大模型修不了"，其实模型怎么改都没用）。
+
+#### 二、修法：给子进程一个 `node`
+
+新增 `@tenon/core` 的 `node-shim.ts`（v1.2.25）：在临时目录放一个薄壳，把自己伪装成 `node`，
+实际转调 `process.execPath` 并设上 `ELECTRON_RUN_AS_NODE=1`（`.bin` 脚本不会设这个变量），
+把这个目录放到子进程 `PATH` 最前面。
+
+四条链路都接上（它们各自 spawn 子进程）：
+
+| 位置 | 什么时候用到 |
+|---|---|
+| `agent/checks.ts` 的 `childEnv` | 发布门禁跑应用的 `test` / `lint` |
+| `server/export.ts` 的 `runOnce` | 导出静态包 / Docker 上下文时跑 `build` 与 `pnpm install --prod` |
+| `gateway/child.ts` 的 `nodeRunEnv` | 起 vite / nest 开发服务器 |
+| `gateway/deps.ts` | 装依赖时 pnpm 拉起的 lifecycle 脚本 |
+
+只在实际跑在 Electron 里时启用（开发态 `node` 本来就在 PATH 上，不该覆盖它）；
+目录名带 `execPath` 的哈希（不同安装路径不互相踩）；同步创建、进程内缓存一次。
+
+#### 三、"在单测里测不出来"这件事
+
+`vitest` 跑在 node 里 → `process.versions.electron` 是空的 → 薄壳返回 `null`。
+**也就是说这个 bug 在单元测试层永远测不出来**，而它只在"用户装完之后"暴露。
+
+所以加了一条专门的回归：`pnpm e2e:packaged`（`scripts/e2e-packaged-gate.ts`）——
+**用 Electron 二进制跑 `dist/server/server.mjs`，并把 `PATH` 设成 `/usr/bin:/bin`（里面没有 node）**，
+然后建应用、等依赖装上、跑 `release.check`、再跑 `export.static`。
+
+实测（macOS Intel，Electron 39）：
+
+```
+1) 用 Electron 二进制起 server（PATH=/usr/bin:/bin，里面没有 node）
+2) 建应用（react-vite），等依赖装上
+  ✅ 依赖装好了（repo/node_modules/vite 存在）
+3) 跑发布门禁：lint 必须真跑
+   lint: pass — 通过（pnpm run lint，5.2s）
+  ✅ ★ lint 不是"node 找不到"
+4) 导出静态包：build 也必须真跑
+  ✅ 有 start.sh / 有 dist/index.html（说明 vite build 真的跑完了）
+```
+
+#### 四、这暴露的设计问题（值得记）
+
+"不要求用户装 Node"这句话，过去只对**我们自己**的进程成立（server 用 Electron 当 Node）。
+一旦子进程要跑**用户工作区里的脚本**，那条链路上就有第三方工具的 `.bin` shim，
+它们只认 `node` 这个名字。所以"零依赖"不是一句声明，而是**每一条 spawn 路径都要给的东西**。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -2630,6 +2705,7 @@ artifact **14 天过期、下载要登录**，当不了"给人试"的渠道。�
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
 | **"打开就自动跑"的对话框里，"上次结论"永远没机会显示** | 想加"预检结论常驻"时第一版是"在旁边多显示一块"，结果对话框一打开就真跑预检（`checking` 立刻为真），那块 UI 永远不渲染。正确的做法是**能复用就不跑**（判据：存档在 + HEAD 没变 + 工作区干净），而不是多显示一块 |
+| **打包版没有 `node`，而应用自己的 `.bin/*` 是 `exec node` 的 shim** | 表现：发布门禁的 `lint` 永远红（`exec: node: not found`）、导出静态包/Docker 在 `pnpm run build` 失败；但 `tsc` 那项是绿的（它直接用 `process.execPath` 跑，绕过 shim）。修法：给子进程 PATH 塞一个伪装成 `node` 的薄壳（`core/node-shim.ts`）+ `ELECTRON_RUN_AS_NODE=1`。**单测测不出来**（vitest 里没有 electron），要跑 `pnpm e2e:packaged` |
 | **Linux AppImage 的可执行名不能带 `@`** | `package.json` 的 name 是 `@tenon/desktop` 时，electron-builder 拼出 `@tenondesktop`，AppImage 直接报 `executableName contains characters that cannot be safely used in file paths`。mac/win 用 productName 所以看不出来。在 `linux:` 下显式 `executableName` |
 | **打包产物的目录名带架构后缀** | Intel 是 `release/mac`、Apple Silicon 是 `release/mac-arm64`、交叉编译是 `mac-x64`。写死 `release/mac` 在本地永远绿，到 arm64 runner 上报"没有打包产物"（而包其实在）。用候选列表 + `existsSync` |
 | **`electron-builder` 的 dmg 步骤会下载 23MB 构建工具，慢网下 600 秒超时** | 报错是 `Timeout awaiting 'request' for 600000ms`，看着像配置坏，其实 zip 那一半已经成功了。设 `ELECTRON_BUILDER_BINARIES_MIRROR=https://registry.npmmirror.com/-/binary/electron-builder-binaries/` 即可（GitHub 资产在这台机器上 2KB 要 10.7 秒，镜像 0.43 秒） |

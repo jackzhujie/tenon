@@ -30,7 +30,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CHECK_LABELS } from '@tenon/protocol'
 import type { CheckOutcome, CheckStatus, GateOutcome } from '@tenon/protocol'
-import { formatTscReport, invokePnpm, parseTscOutput, resolvePnpm, scrubEnv } from '@tenon/core'
+import { formatTscReport, invokePnpm, parseTscOutput, resolvePnpm, scrubEnv, withNodeShim } from '@tenon/core'
 
 const MAX_TSC_BYTES = 128 * 1024
 const DEFAULT_TSC_TIMEOUT_MS = 60_000
@@ -96,7 +96,12 @@ function looksLikeMissingCommand(repoDir: string, script: string, output: string
 function childEnv(): NodeJS.ProcessEnv {
   const env = scrubEnv(process.env)
   if (process.versions.electron !== undefined) env.ELECTRON_RUN_AS_NODE = '1'
-  return env
+  /*
+   * **打包版必须给一个 `node`**：应用自己的 `node_modules/.bin/*` 是 `exec node` 的 shim
+   * （见 `@tenon/core` 的 `node-shim.ts`）。没有它，`pnpm run lint` 报
+   * `exec: node: not found`，`pnpm run build` 同理 —— 发布与导出都会挂。
+   */
+  return withNodeShim(env)
 }
 
 interface RunResult {

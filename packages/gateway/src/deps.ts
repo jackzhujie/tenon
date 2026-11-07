@@ -12,7 +12,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { TenonError } from '@tenon/protocol'
-import { invokePnpm, resolvePnpm } from '@tenon/core'
+import { invokePnpm, resolvePnpm, withNodeShim } from '@tenon/core'
 import { nodeRunEnv } from './child.js'
 
 export interface EnsureDepsOptions {
@@ -91,7 +91,8 @@ export async function ensureDeps(options: EnsureDepsOptions): Promise<DepsResult
     const call = invokePnpm(pnpm, args)
     const child = spawn(call.command, call.args, {
       cwd: options.repoDir,
-      env: pnpm.isScript ? nodeRunEnv(env) : env,
+      // pnpm 自己跑在 node 上；但它拉起的 lifecycle 脚本用 `.bin` shim，同样需要一个 node
+      env: withNodeShim(pnpm.isScript ? nodeRunEnv(env) : env),
       shell: call.shell,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],

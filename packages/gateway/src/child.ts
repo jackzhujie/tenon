@@ -10,6 +10,7 @@
  */
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import { withNodeShim } from '@tenon/core'
 
 export interface ExitInfo {
   code: number | null
@@ -57,7 +58,9 @@ export function nodeRunEnv(
   env: NodeJS.ProcessEnv,
   electronVersion: string | undefined = process.versions.electron,
 ): NodeJS.ProcessEnv {
-  return electronVersion === undefined ? env : { ...env, ELECTRON_RUN_AS_NODE: '1' }
+  const withElectron = electronVersion === undefined ? env : { ...env, ELECTRON_RUN_AS_NODE: '1' }
+  // 打包版没有 node：vite / nest / tsc 这些 `.bin` 脚本全靠这个薄壳（见 core/node-shim.ts）
+  return withNodeShim(withElectron)
 }
 
 /**
