@@ -49,6 +49,11 @@ export function App() {
   const [fullscreen, setFullscreen] = useState(false)
   const [diffOpen, setDiffOpen] = useState(false)
   const [releaseOpen, setReleaseOpen] = useState(false)
+  /**
+   * 从日志面板塞进输入框的文本。`seq` 递增而不是存字符串：
+   * 同一行日志被点两次也要有反应（见 `Composer` 的 `prefill`）。
+   */
+  const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null)
   // 预览里"按住 Alt 点一下"选中的东西，从 iframe 发回来（跨源，靠 origin + token 认）
   const inspectorToken = useInspectorSelection(state.preview, workspace.setSelection)
   /* 顶栏那个数字：上次发布之后又改了几版（算法与边界见 lib/release-hint.ts） */
@@ -104,6 +109,7 @@ export function App() {
           )}
         >
           <ChatPanel
+            prefill={composerPrefill}
             app={workspace.activeApp}
             status={state.status}
             messages={state.messages}
@@ -151,6 +157,13 @@ export function App() {
               appId={state.activeAppId}
               logs={state.logs}
               onClear={() => void workspace.clearLogs()}
+              /*
+               * 把错误日志交给对话去修。**只塞进输入框、不自动发送** ——
+               * 用户往往要补一句"只修这个，别动样式"。seq 保证同一行点两次也有反应。
+               */
+              onAskFix={(text) =>
+                setComposerPrefill((current) => ({ text, seq: (current?.seq ?? 0) + 1 }))
+              }
             />
           )}
         </section>

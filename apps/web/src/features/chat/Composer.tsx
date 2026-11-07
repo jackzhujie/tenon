@@ -4,6 +4,16 @@ import type { SelectionContext } from '@tenon/protocol'
 import { selectionLabel } from '../../lib/selection.js'
 import type { StreamState } from '../../lib/stream.js'
 
+/**
+ * 从外面（比如日志面板的「发给 Agent」）塞进输入框的一段文本。
+ *
+ * 带 `seq` 是必须的：同一段文字可能被点两次，靠字符串比较会"第二次没反应"。
+ */
+export interface ComposerPrefill {
+  text: string
+  seq: number
+}
+
 export interface ComposerProps {
   disabled: boolean
   submitting: boolean
@@ -13,6 +23,8 @@ export interface ComposerProps {
   onSend(content: string): void
   onStop(): void
   onClearSelection(): void
+  /** 非空时把 `text` 追加到输入框（不自动发送：用户通常还要补一句） */
+  prefill?: ComposerPrefill | null
 }
 
 export function Composer({
@@ -23,6 +35,7 @@ export function Composer({
   onSend,
   onStop,
   onClearSelection,
+  prefill = null,
 }: ComposerProps) {
   const [value, setValue] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -41,6 +54,20 @@ export function Composer({
   useEffect(() => {
     if (!submitting && !disabled) ref.current?.focus()
   }, [submitting, disabled])
+
+  /*
+   * 外部塞进来的文本（日志面板的「发给 Agent」）。
+   *
+   * 用 `seq` 去重而不是比较字符串：同一段日志被点两次也要有反应。
+   * 已经写了一半就追加在下面 —— 不能覆盖用户正在打的字。
+   */
+  const lastPrefill = useRef<number | null>(null)
+  useEffect(() => {
+    if (prefill === null || prefill.seq === lastPrefill.current) return
+    lastPrefill.current = prefill.seq
+    setValue((current) => (current.trim() === '' ? prefill.text : `${current}\n\n${prefill.text}`))
+    requestAnimationFrame(() => ref.current?.focus())
+  }, [prefill])
 
   const connected = stream === 'open'
   const canSend = value.trim() !== '' && !submitting && !disabled && connected

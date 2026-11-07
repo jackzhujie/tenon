@@ -1,5 +1,5 @@
 import type { App, AppStatus, GitCommit, NormalizedMessage, SelectionContext } from '@tenon/protocol'
-import { Composer } from './Composer.js'
+import { Composer, type ComposerPrefill } from './Composer.js'
 import { MessageList } from './MessageList.js'
 import type { LiveTurn } from '../../hooks/useWorkspace.js'
 import type { StreamState } from '../../lib/stream.js'
@@ -56,6 +56,8 @@ export interface ChatPanelProps {
   onStop(): void
   onCreate(): void
   onClearSelection(): void
+  /** 日志面板「发送给 Agent」塞进来的文本，透传给 Composer */
+  prefill?: ComposerPrefill | null
 }
 
 export function ChatPanel({
@@ -72,6 +74,7 @@ export function ChatPanel({
   onStop,
   onCreate,
   onClearSelection,
+  prefill = null,
 }: ChatPanelProps) {
   if (!hasApps) return <EmptyState onCreate={onCreate} />
   if (app === null) return <NoAppSelected />
@@ -124,6 +127,7 @@ export function ChatPanel({
       />
 
       <Composer
+        prefill={prefill}
         disabled={app === null}
         submitting={submitting || status === 'running'}
         stream={stream}

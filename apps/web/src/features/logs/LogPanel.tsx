@@ -18,6 +18,7 @@ import type { LogEntry, LogLevel, LogSource } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import { ChevronDownIcon } from '../../components/icons.js'
 import { cn } from '../../lib/cn.js'
+import { buildLogPrompt } from '../../lib/log-prompt.js'
 
 const SOURCE_LABEL: Record<LogSource, string> = {
   web: '前端',
@@ -67,9 +68,16 @@ export interface LogPanelProps {
   appId: string | null
   logs: LogEntry[]
   onClear(): void
+  /**
+   * 把一条错误日志（含前后几行上下文）交给对话去修。
+   *
+   * 为什么是"塞进输入框"而不是直接发送：用户往往想补一句"别动样式，只修这个"。
+   * 拼好的文本见 `lib/log-prompt.ts`，面板只负责搬运。
+   */
+  onAskFix?(text: string): void
 }
 
-export function LogPanel({ appId, logs, onClear }: LogPanelProps) {
+export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
   const [open, setOpen] = useState(false)
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all')
   const [hiddenSources, setHiddenSources] = useState<LogSource[]>([])
@@ -219,15 +227,24 @@ export function LogPanel({ appId, logs, onClear }: LogPanelProps) {
             const expanded = expandedId === entry.id
             const hasDetail = entry.detail !== null
             return (
-              <div key={entry.id} className="border-b border-line-soft/40 last:border-0">
+              <div
+                key={entry.id}
+                className={cn(
+                  'group flex items-start gap-1 border-b border-line-soft/40 pr-2 last:border-0',
+                  entry.level === 'error' && 'bg-bad/[0.06]',
+                )}
+              >
+                {/*
+                 * 可点区是**里面的 button**，不是整行：右侧还要放一个「发给 Agent」，
+                 * button 里不能套 button（HTML 不允许，点了也不会有预期的行为）。
+                 */}
                 <button
                   type="button"
                   disabled={!hasDetail}
                   onClick={() => setExpandedId(expanded ? null : entry.id)}
                   className={cn(
-                    'flex w-full items-start gap-2 px-3 py-1 text-left',
+                    'flex min-w-0 flex-1 items-start gap-2 py-1 pl-3 text-left',
                     hasDetail ? 'hover:bg-panel-2/70' : 'cursor-default',
-                    entry.level === 'error' && 'bg-bad/[0.06]',
                   )}
                 >
                   <span className="shrink-0 pt-px text-[10px] tabular-nums text-faint">
@@ -254,6 +271,21 @@ export function LogPanel({ appId, logs, onClear }: LogPanelProps) {
                     <span className="shrink-0 leading-5 text-faint">×{entry.repeat}</span>
                   )}
                 </button>
+
+                {entry.level === 'error' && onAskFix !== undefined && (
+                  <button
+                    type="button"
+                    onClick={() => onAskFix(buildLogPrompt(logs, entry))}
+                    /*
+                     * **常显**，不做 hover 才出现：错误行的价值就是"这一下能点"，
+                     * 藏起来等于没有（用户第一反应就是"点了没反应"）。
+                     */
+                    className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-4 text-faint transition-colors hover:bg-bad/15 hover:text-bad"
+                    title="把这条（含前后几行）发给 Agent 修"
+                  >
+                    发给 Agent
+                  </button>
+                )}
 
                 {expanded && entry.detail !== null && (
                   <pre className="mx-3 mb-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded border border-line-soft bg-[#0a0908] px-2 py-1.5 text-[10.5px] leading-relaxed text-faint">
