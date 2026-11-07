@@ -42,7 +42,7 @@ import type { ComponentRuntime } from './components.js'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { exportStamp, exportStatic } from './export.js'
-import { listTemplates } from '@tenon/generator'
+import { applyApiFeature, listTemplates } from '@tenon/generator'
 import type {
   ComponentProblem,
   InstalledComponent,
@@ -298,6 +298,83 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     /* 改名只动库里的 `name`：目录与 slug 不变（见 `core.apps.rename` 的注释） */
     'app.rename': async (input) => ({ app: core.apps.rename(input.id, input.name) }),
+
+    /*
+     * 给已有应用加后端。
+     *
+     * 顺序是有讲究的，反过来每一步都会坏：
+     * 1. 写文件（含 package.json 的 tenon.api）—— 之后网关才认为这个应用"有后端"
+     * 2. 装依赖 —— Nest/TypeORM 都是新依赖，不装的话预览起来就报"找不到 @nestjs/core"
+     * 3. 提交一次 —— 用户看得见"加了什么"，回滚也有落点（这不是 Agent 的一轮对话，
+     *    没人会替它提交）
+     * 4. 如果预览正开着就重启 —— 后端进程只在 `start` 时按 tenon.api 决定起不起，
+     *    不重启的话用户看到的是"加了后端但 /api 还是 502"
+     */
+    'app.addBackend': async (input) => {
+      const app = core.apps.require(input.id)
+      const paths = appPaths(core.home, app.id)
+      const result = await applyApiFeature({ repoDir: paths.repoDir })
+
+      if (!result.applied) {
+        return {
+          applied: false,
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+          files: [],
+          addedScripts: [],
+          addedDependencies: [],
+          notes: [],
+          deps: null,
+        }
+      }
+
+      for (const note of result.notes) pushTenonLog(bus, app.id, 'info', '加后端', note)
+
+      let depsResult: { installed: boolean; command: string; durationMs: number } | null = null
+      if (input.installDeps) {
+        depsResult = await deps.preview.ensureDeps(app.id).catch((error: unknown) => {
+          // 装不上不该回滚文件：代码是对的，网络/镜像的事修好之后重装就行
+          pushTenonLog(
+            bus,
+            app.id,
+            'warn',
+            '后端依赖没装好（代码已写入，重装一次即可）',
+            error instanceof Error ? error.message : String(error),
+          )
+          return null
+        })
+      }
+
+      const committed = await gitops.commitAll(paths.repoDir, 'chore: 加上后端（NestJS + PostgreSQL）')
+      if (committed !== undefined) {
+        bus.publish({ type: 'git.commit', appId: app.id, sha: committed.sha, message: committed.message })
+      }
+
+      /*
+       * 只在预览**本来就在跑**时重启。用户没开预览就不用起 —— 加个后端不该让界面
+       * 突然弹出一个预览窗口（`start` 会占端口、起 vite 和 nest，代价不小）。
+       */
+      const state = preview.status(app.id).state
+      if (state === 'ready' || state === 'starting') {
+        await preview.start(app.id, { restart: true }).catch((error: unknown) => {
+          pushTenonLog(
+            bus,
+            app.id,
+            'warn',
+            '重启预览失败，请手动点一次启动',
+            error instanceof Error ? error.message : String(error),
+          )
+        })
+      }
+
+      return {
+        applied: true,
+        files: [...result.files],
+        addedScripts: [...result.addedScripts],
+        addedDependencies: [...result.addedDependencies],
+        notes: [...result.notes],
+        deps: depsResult,
+      }
+    },
 
     'app.delete': async (input) => {
       // 只停这一个应用的 watcher。这里**不能**调 `chat.close()` ——

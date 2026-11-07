@@ -39,6 +39,10 @@ export const ErrorCode = z.enum([
   'TEMPLATE_VAR_MISSING',
   'TEMPLATE_VAR_LEFT',
   'TEMPLATE_DIR_NOT_EMPTY',
+  // 功能包（给已有应用加后端）用。与模板分开是因为失败原因完全不同：
+  // 前者是"这个工作区没有 package.json / package.json 坏了"，后者是"铺不进去"
+  'FEATURE_NO_PACKAGE',
+  'FEATURE_BAD_JSON',
 
   'PREVIEW_PORT_EXHAUSTED',
   'PREVIEW_NOT_RUNNING',
@@ -113,6 +117,8 @@ const STATUS_BY_PREFIX: ReadonlyArray<readonly [string, number]> = [
   ['TEMPLATE_VAR_MISSING', 500],
   ['TEMPLATE_VAR_LEFT', 500],
   ['TEMPLATE_DIR_NOT_EMPTY', 409],
+  ['FEATURE_NO_PACKAGE', 400],
+  ['FEATURE_BAD_JSON', 500],
   ['PREVIEW_PORT_EXHAUSTED', 503],
   ['PREVIEW_NOT_RUNNING', 409],
   ['PREVIEW_START_FAILED', 500],

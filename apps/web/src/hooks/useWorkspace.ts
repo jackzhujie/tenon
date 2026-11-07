@@ -448,7 +448,7 @@ export interface Workspace {
   state: State
   activeApp: App | null
   selectApp(appId: string | null): void
-  createApp(name: string, templateId: string): Promise<void>
+  createApp(name: string, templateId: string, brief?: string): Promise<void>
   /** 改显示名（不动目录与 slug） */
   renameApp(appId: string, name: string): Promise<void>
   deleteApp(appId: string): Promise<void>
@@ -683,9 +683,15 @@ export function useWorkspace(): Workspace {
   }, [])
 
   const createApp = useCallback(
-    async (name: string, templateId: string) => {
+    async (name: string, templateId: string, brief?: string) => {
       try {
-        const created = await rpc('app.create', { name, templateId, styleId: null })
+        const created = await rpc('app.create', {
+          name,
+          templateId,
+          styleId: null,
+          // 一句话需求存进 description：Agent 读得到（也让"这应用是干嘛的"不至于丢失）
+          ...(brief === undefined || brief.trim() === '' ? {} : { description: brief.trim() }),
+        })
         const apps = await rpc('app.list', { includeArchived: false })
         dispatch({ kind: 'apps', apps: apps.apps })
         dispatch({ kind: 'select', appId: created.app.id })

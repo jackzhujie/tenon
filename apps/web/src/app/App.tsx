@@ -173,7 +173,17 @@ export function App() {
         open={creating}
         templates={state.templates}
         onClose={() => setCreating(false)}
-        onCreate={workspace.createApp}
+        onCreate={async (name, templateId, brief) => {
+          await workspace.createApp(name, templateId, brief)
+          /*
+           * 把"要做什么"塞进输入框，**不自动发送**：
+           * - 用户可能想先改两句（"先只做列表页"）
+           * - 自动发送会在用户没准备好的时候开始烧用量
+           * `seq` 递增保证同一句话点两次也有反应（与日志「发给 Agent」同一套机制）。
+           */
+          if (brief.trim() === '') return
+          setComposerPrefill((current) => ({ text: brief.trim(), seq: (current?.seq ?? 0) + 1 }))
+        }}
       />
 
       <ReleaseDialog

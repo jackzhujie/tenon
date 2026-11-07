@@ -110,7 +110,7 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 435 项单测 + 集成测试（约 190s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                       # 756 项单测 + 集成测试（约 190s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -2546,6 +2546,98 @@ if [ -x "$basedir/node" ]; then exec "$basedir/node" ...; else exec node ...; fi
 写单测时才发现的一个边界：`repeat > 1` 的日志必须写"（重复 12 次）"，
 否则 Agent 会当成偶发问题只改表面。
 
+### 4.55 技术栈由「要做什么」决定：加后端变成一条能力，建应用只问一句话
+
+用户的反馈原话：**"技术栈选择应该根据要构建的应用来决定，而不是让用户决定"**。
+
+这句话不是"把下拉框换成另一个下拉框"。当时的模板是**整包铺**的（`react-vite` 一整套 /
+`nest-api` 一整套），所以"按应用决定"意味着一个当时还不存在的能力：
+**在一个已经跑起来的应用上补后端**。没有它，用户想要后端就只能重建一个全栈应用，
+而他写的前端代码会一起没掉。
+
+所以这一步做了两块：先补能力，再把建应用降级成「名字 + 一句话」。
+
+#### 一、`app.addBackend`：加后端是一条独立的路径
+
+模板解决的是"从零铺一份"，会写 `package.json` / `vite.config.ts` / `src/App.tsx` ——
+在已有应用上重铺等于把用户的代码冲掉。所以做成了**功能包**（`templates/api-feature/`，
+清单里 `kind: "feature"` + `hidden: true`，不出现在建应用对话框）：
+
+只写新文件（`api/`、`shared/`、`src/api.ts`、`tsconfig.server.json`、`scripts/mark-cjs.mjs`），
+`package.json` **只补缺**（用户改过的 `build` 一个字符都不动），然后就地改三处：
+
+| 就地改 | 漏了会怎样 |
+|---|---|
+| `package.json` 的 `tenon.api` | 网关认为这是纯前端，`/api` 永远 502 |
+| `tsconfig.json` 的 `include` 加 `shared` | 前端 `tsc` 报"不在项目里"，报错位置在 `src/api.ts`，看着像后端的错 |
+| `eslint.config.mjs` 忽略 `dist-server` | lint 去扫编译产物，几百条"错误" |
+| `docs/AGENTS.md` 加一节 | 下次改页面 Agent 又用 localStorage 存数据 —— 同一份状态两个来源 |
+
+三条入口走**同一个** `applyApiFeature`：RPC（`app.addBackend`）、Agent 工具（`add_backend`）、
+以及生成器自己的单测。这不是洁癖 —— 装配声明与组件安装都各错过一次"两条路各写一份"。
+
+顺序也是有讲究的（反过来每一步都会坏）：写文件 → 装依赖 → **提交一次** → 预览开着就重启。
+"提交一次"是因为这不是 Agent 的一轮对话，没人会替它提交；"预览开着才重启"是因为
+`start` 要占端口、起 vite 与 nest，用户没开预览时加个后端不该弹出一个窗口。
+
+#### 二、这一步最值钱的发现：`"type": "module"` 的应用加后端会启动即崩
+
+`react-vite` 模板的 `package.json` 有 `"type": "module"`（ESM）。而 Nest 的编译产物是
+CommonJS —— **Node 判定一个 `.js` 是 ESM 还是 CJS，只看离它最近的 `package.json` 的 `type`**。
+于是 `dist-server/api/main.js` 被当成 ESM 跑，第一行就：
+
+```
+ReferenceError: require is not defined
+```
+
+这个坑只在「ESM 前端 + 后来加的后端」这个组合里出现：`nest-api` 模板**没有** `type: module`，
+所以从零建的全栈应用碰不到 —— 换句话说，**手写代码的人是发现不了的**，只有"给已有应用加后端"
+这条新路径会撞上。
+
+修法是给产物目录放一个 `{"type":"commonjs"}`（它是最近的 package.json，作用域只覆盖
+`dist-server/`，不影响应用自己的 ESM）。两处写：`scripts/mark-cjs.mjs`（`build:api` 调它，
+导出/独立跑时用）与网关的 `pinOutputModule`（预览是 `tsc --watch`，不走 `build:api`，
+所以那一侧必须自己钉）。
+
+#### 三、建应用只问「要做什么」
+
+- 对话框主字段变成「要做什么」（一句话，可空），技术栈默认**由 Agent 决定**
+- 想自己选的人点「我要自己选」才展开模板列表（默认收起）
+- 这句话存进 `app.description`，建完**塞进输入框、不自动发送** ——
+  用户常常要先补一句"先只做列表页"，而且自动发送会在人没准备好的时候开始烧用量
+- Agent 那边多一个 `add_backend` 工具：需要持久化 / 服务端逻辑 / 多人共享时自己调，
+  不需要用户知道什么叫 NestJS
+
+#### 四、验证
+
+- `packages/generator/test/features.test.ts` **11 项**：幂等、只补缺、`include` 加 `shared`、
+  eslint 加 `dist-server`、AGENTS.md 有后端一节、ESM 应用拿到 mark-cjs、
+  **依赖版本与 `nest-api` 模板不漂移**（两处各写一份版本号，必须有测试钉住）
+- `packages/server/test/add-backend.test.ts` **4 项**：RPC 加后端后
+  `resolveApiEntry()` 真的认得（不看声明，看解析函数）、用户改过的 `build` 原样保留、
+  第二次调用 `applied: false`、不存在的应用是 404 而不是 500、工具与 RPC 同一条路径
+- 一次性真机验证（`scripts/verify-api-feature.ts`，要联网装 NestJS，不进测试套件）：
+  在临时应用里 `pnpm install` → `pnpm run lint` → `pnpm run build:api` → `pnpm run build`，
+  并检查 `dist-server/package.json` 是否钉成 commonjs（实测 4 步全绿，7.3s / 3.0s / 2.8s / 5.1s）
+- ★ **`pnpm e2e:backend`（`scripts/e2e-add-backend.ts`，14 项）**：真起一次预览 ——
+  建 react-vite 应用 → `app.addBackend`（含装依赖 4.1s）→ `preview.start` → 4.6s 就绪 →
+  经网关 `GET /api/health` 回 200、`poolMax: 1`、版本号是 PGlite 的 PostgreSQL、
+  迁移计数可读 = 0 → **产物目录被网关钉成 commonjs**（预览走 `tsc --watch`，那条路
+  不经过 `build:api`，所以这一步只有网关能做）→ 前端页面照常开 → 未定义的
+  `/api/items` 回 404（不是 500、也不是挂着不回）
+
+这两条合起来才叫"验过"：`verify-api-feature` 说明**代码能编译**，
+`e2e:backend` 说明**它真的跑起来了**。只验前者的话，`require is not defined` 这类
+运行期错误一条都抓不到。
+
+#### 五、没做的（如实记）
+
+- **没有"删后端"**：退回去要收拾 `api/`、`shared/`、三个脚本、两条 tsconfig、AGENTS.md，
+  而真实需求率极低（很少有人说"我不要后端了，但请留着我的迁移"）。先不做。
+- **技术栈只有两种**（纯前端 / Nest 全栈）。选 Next / SvelteKit 之类要先把模板与网关的
+  端口分流、dev 脚本约定一起改，那是另一个量级的改动。
+- **`brief` 不自动发送**（见上），所以"说一句就长出应用"还差用户按一次回车。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -2732,6 +2824,10 @@ if [ -x "$basedir/node" ]; then exec "$basedir/node" ...; else exec node ...; fi
 | **colima 的虚拟机会话 `resolv.conf` 是悬空符号链接** | 它是 `-> ../run/systemd/resolve/stub-resolv.conf`，而 `systemd-resolved` 在这个镜像里**没装**（`systemctl is-enabled` = `not-found`）→ 任何域名都解析不了。**而且坏得不明显**：只要 dockerd 配着 HTTP 代理，域名是代理那边解析的，`docker pull` 照样成功 —— 等代理失效（WorkBuddy 的代理每个会话端口都不同）才一起崩，症状是 `proxyconnect ... connection refused` 与 `could not resolve host` 混着出现。想修还得先 `rm` 掉那个链接（直接写会报 `Directory nonexistent`） |
 | **colima 每次 `start` 都重写 `/etc/docker/daemon.json`** | 手工加的 `registry-mirrors` **活不过一次重启**（`exec-opts` / `features` 保留，自定义键不保留）。它还会从宿主环境读代理写进这个文件（`127.0.0.1:PORT` 会被换成虚拟机看得见的宿主地址），那个代理一停所有 pull 全挂。持久做法是挂 `docker.service` 的 `ExecStartPre`（本机是 `/usr/local/bin/tenon-vm-fix.sh` + `docker.service.d/10-tenon-vm-fix.conf`），别直接改文件 |
 | **"打开就自动跑"的对话框里，"上次结论"永远没机会显示** | 想加"预检结论常驻"时第一版是"在旁边多显示一块"，结果对话框一打开就真跑预检（`checking` 立刻为真），那块 UI 永远不渲染。正确的做法是**能复用就不跑**（判据：存档在 + HEAD 没变 + 工作区干净），而不是多显示一块 |
+| **ESM 应用（`"type": "module"`）+ CommonJS 后端产物 = 启动即 `require is not defined`** | Node 判定 `.js` 是 ESM 还是 CJS 只看**最近的 package.json 的 `type`**。Nest 产物是 CJS，于是 `dist-server/api/main.js` 被当 ESM 跑。修法：产物目录放 `{"type":"commonjs"}`。两处都要写 —— `build:api` 走脚本、预览走 `tsc --watch`（不经过 build 脚本），网关得自己钉 |
+| **"给已有应用加能力"不能复用"铺模板"** | 模板会写 `package.json`/`src/App.tsx`，在已有应用上重铺等于删用户代码。拆出「功能包」：只写新文件 + package.json **只补缺** + 就地改几处（tsconfig include、eslint ignores、AGENTS.md） |
+| **`tenon.api` 是后端存在的唯一开关** | 只写 `api/` 目录不起作用（网关确实有目录兜底，但导出那条路只看声明）。加后端漏写它 = 前端正常、`/api` 永远 502 |
+| **新建工具要同时进 `extensions` 与 `registry.install()`** | 只 `registry.install` 不够（会话解析不到），只加进 `rootTools` 也不够。这次加 `add_backend` 时又差点漏 —— `tools` 数组、`extensions`、`registry` 三处都要有 |
 | **打包版没有 `node`，而应用自己的 `.bin/*` 是 `exec node` 的 shim** | 表现：发布门禁的 `lint` 永远红（`exec: node: not found`）、导出静态包/Docker 在 `pnpm run build` 失败；但 `tsc` 那项是绿的（它直接用 `process.execPath` 跑，绕过 shim）。修法：给子进程 PATH 塞一个伪装成 `node` 的薄壳（`core/node-shim.ts`）+ `ELECTRON_RUN_AS_NODE=1`。**单测测不出来**（vitest 里没有 electron），要跑 `pnpm e2e:packaged` |
 | **Linux AppImage 的可执行名不能带 `@`** | `package.json` 的 name 是 `@tenon/desktop` 时，electron-builder 拼出 `@tenondesktop`，AppImage 直接报 `executableName contains characters that cannot be safely used in file paths`。mac/win 用 productName 所以看不出来。在 `linux:` 下显式 `executableName` |
 | **打包产物的目录名带架构后缀** | Intel 是 `release/mac`、Apple Silicon 是 `release/mac-arm64`、交叉编译是 `mac-x64`。写死 `release/mac` 在本地永远绿，到 arm64 runner 上报"没有打包产物"（而包其实在）。用候选列表 + `existsSync` |

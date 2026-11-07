@@ -14,10 +14,11 @@
     "@earendil-works/pi-codemode": "1.4.0",
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@earendil-works/pi-durable": "1.4.0",
+    "@tenon/component-host": "workspace:*",
     "@tenon/core": "workspace:*",
+    "@tenon/generator": "workspace:*",
     "@tenon/protocol": "workspace:*",
-    "typebox": "1.3.27",
-    "@tenon/component-host": "workspace:*"
+    "typebox": "1.3.27"
   },
   "license": "AGPL-3.0-only"
 }

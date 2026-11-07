@@ -27,11 +27,72 @@
  * 猜错的表现是「预览就绪、页面能开、所有 /api 请求 502」，比直接失败难查十倍，
  * 所以这里声明优先、目录约定兜底、两者都没有就当纯前端应用。
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { scrubEnv } from '@tenon/core'
 import { TenonError } from '@tenon/protocol'
 import { groupLaunched, nodeRunEnv, spawnLogged, type Launched } from './child.js'
+
+/**
+ * 把编译产物的模块格式钉住。
+ *
+ * Nest 的产物是 CommonJS（`tsconfig.server.json` 里 `module: CommonJS`，因为装饰器元数据
+ * 要走那条老路）。而 Node 判定一个 `.js` 是 ESM 还是 CJS，**只看离它最近的 package.json
+ * 的 `type`** —— `react-vite` 模板的应用根 package.json 里有 `"type": "module"`，
+ * 于是 `dist-server/api/main.js` 被当成 ESM 跑，启动第一行就是
+ * `ReferenceError: require is not defined`。
+ *
+ * 现象很像"后端代码写错了"，其实一行代码都没跑起来 —— 这种坑只会在
+ * 「ESM 前端 + 后来加的后端」这个组合里出现（`nest-api` 模板没有 `type: module`，
+ * 所以从零建的全栈应用碰不到）。加后端时必踩，所以在这里兜住。
+ *
+ * 只在真的会冲突时动手：根 package.json 有 `"type": "module"` 且 tsconfig 的
+ * module 是 CJS 系。用户自己在产物目录放了 package.json 就不覆盖（那是他的意图）。
+ */
+function pinOutputModule(repoDir: string, tsconfigRel: string, outRel: string): void {
+  try {
+    const root = JSON.parse(readFileSync(join(repoDir, 'package.json'), 'utf8')) as { type?: unknown }
+    if (root.type !== 'module') return
+    // tsconfig 允许注释与尾逗号，`JSON.parse` 可能失败；那种情况下按最保守的判断来
+    let moduleKind = 'commonjs'
+    try {
+      const raw = readFileSync(join(repoDir, tsconfigRel), 'utf8')
+      const stripped = raw
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '')
+        .replace(/,(\s*[}\]])/g, '$1')
+      const parsed = JSON.parse(stripped) as { compilerOptions?: { module?: unknown } }
+      const value = parsed.compilerOptions?.module
+      if (typeof value === 'string') moduleKind = value.toLowerCase()
+    } catch {
+      /* 解析失败就走保守判断 */
+    }
+    if (!['commonjs', 'node16', 'nodenext'].includes(moduleKind)) return
+    const outDir = join(repoDir, outRel)
+    if (!existsSync(outDir)) return
+    const marker = join(outDir, 'package.json')
+    if (existsSync(marker)) return
+    writeFileSync(marker, `${JSON.stringify({ type: 'commonjs' }, null, 2)}\n`, 'utf8')
+  } catch {
+    // 钉不住不是致命问题：真正的报错会在后端起不来时原样进日志面板
+  }
+}
+
+/** tsconfig 里的 `outDir`（默认 `dist-server`） */
+function outDirOf(repoDir: string, tsconfigRel: string): string {
+  try {
+    const raw = readFileSync(join(repoDir, tsconfigRel), 'utf8')
+    const stripped = raw
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/,(\s*[}\]])/g, '$1')
+    const parsed = JSON.parse(stripped) as { compilerOptions?: { outDir?: unknown } }
+    const value = parsed.compilerOptions?.outDir
+    return typeof value === 'string' && value !== '' ? value : 'dist-server'
+  } catch {
+    return 'dist-server'
+  }
+}
 
 export interface ApiEntry {
   /** 源码入口（相对 repoDir） */
@@ -199,6 +260,9 @@ export const launchApi: ApiLauncher = async (spec) => {
       { stage: 'server', output: compiler.output() },
     )
   }
+
+  // ★ 在起运行器**之前**把产物目录的模块格式钉住（见 pinOutputModule 的注释）
+  pinOutputModule(spec.repoDir, tsconfig, outDirOf(spec.repoDir, tsconfig))
 
   // 2) 运行器：node 自己的 watcher 盯的是**已加载的编译产物**，
   //    所以 tsc 一改写文件它就重启 —— 不需要我们自己写文件监听

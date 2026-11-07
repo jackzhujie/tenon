@@ -198,6 +198,36 @@ export const rpcMethods = {
     output: z.object({ app: App }),
   },
 
+  /**
+   * 给已有应用加后端（NestJS + PostgreSQL）。
+   *
+   * 为什么是 RPC 而不是"让用户重新建一个全栈应用"：技术栈该由**这个应用要做什么**决定，
+   * 而"要做什么"往往是在前端跑起来之后才清楚的。这时候把工作区推倒重来不可接受。
+   *
+   * 幂等：已经有 `tenon.api` 的应用会返回 `applied: false`（`reason: 'already'`），
+   * 不会重写文件、也不会产生空 commit。
+   */
+  'app.addBackend': {
+    input: z.object({
+      id: Id,
+      /** 加完是否重装依赖（默认 true：Nest/TypeORM 都是新依赖，不装起不来） */
+      installDeps: z.boolean().default(true),
+    }),
+    output: z.object({
+      applied: z.boolean(),
+      /** `already` = 本来就有后端 */
+      reason: z.string().optional(),
+      /** 写进应用的文件（相对路径） */
+      files: z.array(z.string()),
+      addedScripts: z.array(z.string()),
+      addedDependencies: z.array(z.string()),
+      /** 需要人看一眼的事：就地改失败、版本被保留之类 */
+      notes: z.array(z.string()),
+      /** 依赖装的结果；`installDeps: false` 时为 null */
+      deps: z.object({ installed: z.boolean(), command: z.string(), durationMs: z.number() }).nullable(),
+    }),
+  },
+
   'chat.submit': {
     input: ChatSubmitInput,
     output: z.object({

@@ -1,0 +1,14 @@
+{
+  "id": "api-feature",
+  "kind": "feature",
+  "hidden": true,
+  "label": "后端（NestJS + PostgreSQL）",
+  "description": "给已有应用补上后端：api/ 入口、TypeORM 数据源、健康检查、迁移目录、前后端共用的 shared/ 契约。这是「功能包」而不是模板 —— 由 addApiFeature() 应用到**已经存在**的应用上，不出现在建应用对话框里。",
+  "entry": null,
+  "variables": [],
+  "notes": [
+    "为什么是功能包而不是模板：模板解决「从零铺一份」，而用户装上之后真正需要的是「这个应用现在需要一个后端」。后者必须能在**已有代码**上加，且不能覆盖 package.json 里用户改过的脚本。",
+    "package.fragment.json 是要合并进应用 package.json 的片段，AGENTS.section.md 是要写进 docs/AGENTS.md 的一段说明 —— 这两个文件本身**不会**被写进应用（见 registry 的 ALWAYS_SKIP）。",
+    "这里刻意不带 items 那种示例 CRUD：用户的应用会有自己的表，多一张 items 只会让人困惑「这张表哪来的」。要示例就看 nest-api 模板（它是从零建全栈应用的样板）。"
+  ]
+}

@@ -17,6 +17,15 @@ export interface TemplateManifest {
   readonly id: string
   readonly label: string
   readonly description?: string
+  /**
+   * `template` = 从零铺一份应用；`feature` = 给**已有**应用补一块能力（见 `features.ts`）。
+   *
+   * 两者共用同一套「真实文件 + 占位符渲染」的机制，因为要写的都是文件；
+   * 区别只在于谁来应用、以及是否出现在建应用对话框里。
+   */
+  readonly kind?: 'template' | 'feature'
+  /** 不列进建应用对话框（功能包都是 hidden） */
+  readonly hidden?: boolean
   /** 相对路径：预览默认打开哪个文件（`index.html`） */
   readonly entry?: string
   /** 需要调用方提供的变量名。缺一个就抛错，绝不让 `{{x}}` 漏进应用里 */
@@ -38,8 +47,22 @@ export interface TemplateSummary {
   readonly files: readonly string[]
 }
 
-/** 模板自身的东西，永远不写进应用 */
-const ALWAYS_SKIP = new Set(['template.json', 'node_modules', 'dist', '.DS_Store', '.git'])
+/**
+ * 模板自身的东西，永远不写进应用。
+ *
+ * `package.fragment.json` / `AGENTS.section.md` 是**功能包专用的元文件**：
+ * 前者要合并进 package.json、后者要写进 docs/AGENTS.md，都不是应用该有的独立文件
+ * （多一个 `package.fragment.json` 在应用根目录只会让人困惑"这是干嘛的"）。
+ */
+const ALWAYS_SKIP = new Set([
+  'template.json',
+  'package.fragment.json',
+  'AGENTS.section.md',
+  'node_modules',
+  'dist',
+  '.DS_Store',
+  '.git',
+])
 
 export function templatesRoot(env: NodeJS.ProcessEnv = process.env): string {
   const override = env['TENON_TEMPLATES_DIR']
@@ -115,6 +138,9 @@ export async function listTemplates(
   const out: TemplateSummary[] = []
   for (const id of ids.sort()) {
     const { manifest, files } = await loadTemplate(id, env)
+    // 功能包（api-feature 之类）不是"从零建应用"的选项：列出来只会让用户以为
+    // 可以"建一个后端应用"——那不是一个能打开的应用
+    if (manifest.hidden === true || manifest.kind === 'feature') continue
     out.push({
       id: manifest.id,
       label: manifest.label,

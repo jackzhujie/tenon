@@ -124,6 +124,9 @@ importers:
       '@tenon/core':
         specifier: workspace:*
         version: link:../core
+      '@tenon/generator':
+        specifier: workspace:*
+        version: link:../generator
       '@tenon/protocol':
         specifier: workspace:*
         version: link:../protocol

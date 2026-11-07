@@ -171,6 +171,22 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
        */
       hub: { config: hubConfig, dir: hubDir },
     },
+    /*
+     * 加完后端之后谁接手：装依赖，预览开着就重启。
+     *
+     * 为什么是"开着才重启"：`start` 会占端口、起 vite 与 nest，用户没开预览时
+     * 加个后端不该弹出一个窗口。而不装依赖的后果更直接 —— 模型下一步跑 `tsc`
+     * 会看到一堆"找不到 @nestjs/core"，然后开始修一个不存在的类型错误。
+     */
+    backend: {
+      onApplied: async (appId) => {
+        await preview.ensureDeps(appId)
+        const state = preview.status(appId).state
+        if (state === 'ready' || state === 'starting') {
+          await preview.start(appId, { restart: true })
+        }
+      },
+    },
   })
   /** 每个应用的组件链路：进程退出/预览重起时要能收干净（wss 不会自己关） */
   const bridges = new Map<string, AppComponentBridge>()

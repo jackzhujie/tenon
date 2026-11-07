@@ -10,14 +10,22 @@ export interface NewAppDialogProps {
   open: boolean
   templates: TemplateInfo[]
   onClose(): void
-  onCreate(name: string, templateId: string): Promise<void>
+  /** `brief` = 用户的一句话需求，建完会塞进对话框（技术栈交给 Agent 决定） */
+  onCreate(name: string, templateId: string, brief: string): Promise<void>
 }
 
 export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialogProps) {
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState('')
+  const [brief, setBrief] = useState('')
+  /**
+   * 技术栈默认**不让用户选**：要建什么应用决定用什么栈，而这件事 Agent 比用户清楚
+   * （用户不该被要求先知道 "Vite 还是 Next"）。展开只是给"我知道我要什么"的人留个口子。
+   */
+  const [advanced, setAdvanced] = useState(false)
   const [pending, setPending] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const briefRef = useRef<HTMLTextAreaElement>(null)
 
   // 每次打开都重置：上次输了一半的名字留着只会让人误建
   useEffect(() => {
@@ -30,6 +38,8 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
         templates[0]?.id ??
         DEFAULT_TEMPLATE_ID,
     )
+    setBrief('')
+    setAdvanced(false)
     setPending(false)
     // 等隐藏态切完再聚焦，否则 Safari 会把焦点吞掉
     const timer = setTimeout(() => inputRef.current?.focus(), 20)
@@ -52,7 +62,7 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
     if (trimmed === '' || pending) return
     setPending(true)
     try {
-      await onCreate(trimmed, templateId === '' ? 'react-vite' : templateId)
+      await onCreate(trimmed, templateId === '' ? 'react-vite' : templateId, brief.trim())
       onClose()
     } finally {
       setPending(false)
@@ -76,7 +86,9 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
           <h2 id="new-app-title" className="text-[13.5px] text-ink">
             新建应用
           </h2>
-          <p className="mt-0.5 text-[11.5px] text-faint">先铺一个能跑起来的骨架，之后让 Agent 在上面改。</p>
+          <p className="mt-0.5 text-[11.5px] text-faint">
+            说一句要做什么就行。技术栈由 Agent 按需求决定，需要后端时它会自己加上。
+          </p>
         </div>
 
         <div className="space-y-4 px-4 py-3.5">
@@ -99,7 +111,44 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
             />
           </label>
 
-          <div className="space-y-1.5">
+          <label className="block space-y-1.5">
+            <span className="text-[11.5px] text-muted">
+              要做什么 <span className="text-faint">（可选，建完直接发给 Agent）</span>
+            </span>
+            <textarea
+              ref={briefRef}
+              value={brief}
+              rows={3}
+              maxLength={600}
+              placeholder="例如：一个报销单审批工具，能提交、审批、看历史；数据要能存下来"
+              disabled={pending}
+              onChange={(event) => setBrief(event.target.value)}
+              onKeyDown={(event) => {
+                // Enter 提交、Shift+Enter 换行 —— 与对话输入框保持一致
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  void submit()
+                }
+              }}
+              className="w-full resize-none rounded-lg border border-line bg-panel px-2.5 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-faint focus:border-brand/50 disabled:opacity-60"
+            />
+          </label>
+
+          <div className="flex items-center justify-between">
+            <span className="text-[11.5px] text-faint">
+              技术栈：<span className="text-muted">由 Agent 决定</span>
+            </span>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => setAdvanced((current) => !current)}
+              className="text-[11px] text-faint underline-offset-2 hover:text-muted hover:underline"
+            >
+              {advanced ? '收起' : '我要自己选'}
+            </button>
+          </div>
+
+          <div className={cn('space-y-1.5', advanced ? '' : 'hidden')}>
             <span className="text-[11.5px] text-muted">模板</span>
             <div className="grid gap-1.5">
               {templates.map((template) => (

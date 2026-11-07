@@ -24,6 +24,7 @@ export * from './checks.js'
 export * from './roles.js'
 export * from './taskgraph.js'
 export * from './usage.js'
+export * from './tools/backend.js'
 export * from './tools/coding.js'
 export * from './tools/search.js'
 export * from './tools/subagent.js'
@@ -49,6 +50,11 @@ export interface AgentRuntimeOptions {
   getPageDriver?: PageDriverProvider
   /** 组件工具（M5 第 4 步）：不给就没有 install_component */
   components?: HarnessPoolOptions['components']
+  /**
+   * 后端工具（v1.2.26）：工具本身总是给（见 HarnessPool），这里只决定"加完之后谁接手"。
+   * 不给就只有文件写入，依赖得下一轮自己装。
+   */
+  backend?: HarnessPoolOptions['backend']
 }
 
 export interface AgentRuntime {
@@ -121,6 +127,8 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
        * 类型检查抓不到，因为两侧都没错，只是没连起来。
        */
       ...(options.components === undefined ? {} : { components: options.components }),
+      // 与上面同一类坑：声明了不接就是"工具在真实运行时里不存在"。这里一直连着。
+      ...(options.backend === undefined ? {} : { backend: options.backend }),
     })
     usage = new UsageService({ pool, core: options.core, publish: options.publish })
     chat = new ChatService({

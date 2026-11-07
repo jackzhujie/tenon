@@ -21,6 +21,7 @@ import { codingExtension } from './tools/coding.js'
 import { codeactExtension } from './tools/codeact.js'
 import { previewExtension, type PageDriverProvider } from './tools/preview.js'
 import { reviewExtension } from './tools/review.js'
+import { backendExtension } from './tools/backend.js'
 import { componentsExtension } from './tools/components.js'
 import { subagentExtension } from './tools/subagent.js'
 
@@ -63,6 +64,16 @@ export interface HarnessPoolOptions {
      * 未配置时是 `{config: null}`：退化成只装本机，不报错。
      */
     readonly hub?: { readonly config: HubConfig | null; readonly dir: string } | undefined
+  }
+  /**
+   * 后端工具（`add_backend`）：给已有应用补后端。
+   *
+   * 只给主角色 —— 子角色是只读调查的，"给这个应用加个后端"是设计决策，属于 Builder。
+   * `onApplied` 由 server 接到「装依赖 + 预览开着就重启」，不给也能用（只是模型下一步
+   * 跑 tsc 会看到一堆找不到 @nestjs/core）。
+   */
+  backend?: {
+    readonly onApplied?: (appId: string) => void | Promise<void>
   }
   /**
    * 页面通道的提供者（M4 第 4 步）：由 server 接到 `PreviewManager.pages`。
@@ -220,6 +231,19 @@ export class HarnessPool {
       // 子会话默认继承父会话的扩展；CodeAct 还要额外一个（它的工具在那个扩展里）
       getExtensions: () => [codeact.extension],
     })
+    /*
+     * 后端工具（v1.2.26）：**总是给**（不看 options.backend 有没有 onApplied）。
+     * 理由：技术栈由这个应用要做什么决定，而"要做什么"往往在前端跑起来之后才清楚。
+     * 少了这个工具，模型只能自己手写 api/ 然后漏掉 tenon.api（然后后端永远不起）。
+     */
+    const backend = backendExtension({
+      appId,
+      repoDir: paths.repoDir,
+      ...(this.options.backend?.onApplied === undefined
+        ? {}
+        : { onApplied: this.options.backend.onApplied }),
+    })
+    tools.push(...(backend.tools ?? []))
     if (components !== undefined) tools.push(...(components.tools ?? []))
     tools.push(...(subagent.tools ?? []))
     /*
@@ -229,6 +253,8 @@ export class HarnessPool {
      */
     const rootTools: ToolRegistration[] = [
       ...(coding.tools ?? []),
+      // 加后端是设计决策，只给主角色（子角色按白名单从 tools 里挑，不给它们这条）
+      ...(backend.tools ?? []),
       ...(subagent.tools ?? []),
       ...(components?.tools ?? []),
     ]
@@ -242,6 +268,7 @@ export class HarnessPool {
      */
     const extensions: Extension[] = [
       coding,
+      backend,
       subagent,
       preview,
       review,
@@ -250,6 +277,7 @@ export class HarnessPool {
 
     const registry = createRegistry()
     registry.install(coding)
+    registry.install(backend)
     registry.install(preview)
     registry.install(review)
     registry.install(codeact.extension)

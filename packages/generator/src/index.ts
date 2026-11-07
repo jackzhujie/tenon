@@ -14,6 +14,12 @@ export {
   type ScaffoldResult,
 } from './scaffold.js'
 export {
+  applyApiFeature,
+  API_FEATURE,
+  type ApplyApiFeatureInput,
+  type ApplyApiFeatureResult,
+} from './features.js'
+export {
   collectFiles,
   listTemplates,
   loadTemplate,

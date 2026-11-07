@@ -1,0 +1,29 @@
+{
+  "_comment": "要合并进应用 package.json 的片段。本身不会写进应用（registry 的 ALWAYS_SKIP）。scripts 只补缺失的键，绝不覆盖用户改过的；dependencies 同理。",
+  "scripts": {
+    "dev:web": "vite",
+    "dev:api": "pnpm run build:api && node --watch dist-server/api/main.js",
+    "build:api": "tsc -p tsconfig.server.json && node scripts/mark-cjs.mjs",
+    "start:api": "node dist-server/api/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json"
+  },
+  "tenon": {
+    "api": "api/main.ts",
+    "apiOut": "dist-server/api/main.js",
+    "apiTsconfig": "tsconfig.server.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.8",
+    "@nestjs/core": "11.2.8",
+    "@nestjs/platform-express": "11.2.8",
+    "@nestjs/typeorm": "12.0.2",
+    "pg": "8.23.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "typeorm": "1.1.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6"
+  }
+}

@@ -153,7 +153,7 @@ describe('工具层（write / edit / bash）', () => {
     const session = await running.agent.pool?.acquire(app.id)
     /*
      * 主角色拿到的工具是**显式列举**的：四个写工具 + 三个只读检索（ls/glob/grep）
-     * + 编排（subagent）+ 组件三件（M5 第 4/5 步）。看 rootTools 而不是 tools：
+     * + 编排（subagent）+ 组件三件（M5 第 4/5 步）+ 加后端（v1.2.26）。看 rootTools 而不是 tools：
      * 后者含只给子角色用的 preview_*。
      *
      * 这条例用"逐字相等"而不是"包含"：新增工具必须在这里显式登记 —— 否则
@@ -161,6 +161,7 @@ describe('工具层（write / edit / bash）', () => {
      * install_component 一直没被挂上，见 component-wiring.test.ts）。
      */
     expect(session?.rootTools.map((tool) => tool.name).sort()).toEqual([
+      'add_backend',
       'bash',
       'edit',
       'glob',
