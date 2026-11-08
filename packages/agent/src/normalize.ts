@@ -58,6 +58,8 @@ export interface ToolOutcome {
   readonly status: 'ok' | 'error'
   readonly output: string
   readonly spend?: ToolSpend
+  /** `subagent` 的子会话 id：卡片据此自证"派给了谁" */
+  readonly childConversationId?: string
 }
 
 /** 从 details 里挑出 spend。形状不对就当没有 —— 这里不该因为一个字段而抛 */
@@ -69,6 +71,14 @@ function spendOf(details: unknown): ToolSpend | undefined {
   if (typeof totalTokens !== 'number' || !Number.isFinite(totalTokens)) return undefined
   if (typeof costUsd !== 'number' || !Number.isFinite(costUsd)) return undefined
   return { totalTokens, costUsd }
+}
+
+/** 从 details 里挑出子会话 id。同样"形状不对就当没有"，不为一个字段抛 */
+function childConversationOf(details: unknown): string | undefined {
+  if (typeof details !== 'object' || details === null) return undefined
+  const raw = (details as { conversationId?: unknown }).conversationId
+  if (typeof raw !== 'string' || raw === '') return undefined
+  return raw
 }
 
 function textOfBlocks(content: string | RawBlock[] | undefined): string {
@@ -94,6 +104,9 @@ function blocksToParts(blocks: readonly RawBlock[], outcomes: Map<string, ToolOu
         toolCallId: block.id,
         name: block.name ?? 'tool',
         ...(outcome?.spend === undefined ? {} : { spend: outcome.spend }),
+        ...(outcome?.childConversationId === undefined
+          ? {}
+          : { childConversationId: outcome.childConversationId }),
         /*
          * 状态与输出**来自工具结果那条 entry**，不是"有调用就算成功"。
          * 早先这里写死 'ok'：工具失败（路径越界、装不上组件、命令非零退出）
@@ -159,10 +172,12 @@ export function toolOutcomesOf(entry: RawEntry): Map<string, ToolOutcome> {
     const id = message.toolCallId
     if (id === undefined || id === '') continue
     const spend = spendOf(message.details)
+    const childConversationId = childConversationOf(message.details)
     outcomes.set(id, {
       status: message.isError === true ? 'error' : 'ok',
       output: textOfBlocks(message.content),
       ...(spend === undefined ? {} : { spend }),
+      ...(childConversationId === undefined ? {} : { childConversationId }),
     })
   }
   return outcomes

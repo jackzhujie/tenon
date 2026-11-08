@@ -189,6 +189,17 @@ export const MessagePart = z.discriminatedUnion('type', [
      * 为什么不做"按角色累计"：累计会被历史稀释，而用户要判断的是"下次还该不该派"。
      */
     spend: z.object({ totalTokens: z.number(), costUsd: z.number() }).optional(),
+    /**
+     * `subagent` 派出去的那个子会话 id（v1.2.29）。
+     *
+     * 这是"派活留痕"的那根线：一张工具卡片从此能自证"我把活派给了会话 #2654"，
+     * 而不是跑完之后只剩一句"派了 Explore · 3.2k"。
+     *
+     * 工具本来就在 `details` 里写了它（`normalize` 以前把它丢了），
+     * 所以这里只是把它送到前端 —— 没有新的采集逻辑。
+     * 只有 `subagent` 会带，其它工具没有子会话。
+     */
+    childConversationId: z.string().optional(),
   }),
 ])
 export type MessagePart = z.infer<typeof MessagePart>

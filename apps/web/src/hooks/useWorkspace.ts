@@ -47,6 +47,8 @@ export interface ToolActivity {
    * 要等工具结果落进 transcript 才读得到。所以它只出现在已落定的那条上。
    */
   spend?: { totalTokens: number; costUsd: number }
+  /** `subagent` 的子会话 id。与 `spend` 同源（都来自落定的工具结果） */
+  childConversationId?: string
 }
 
 export interface LiveTurn {

@@ -170,12 +170,17 @@ async function run() {
     await sleep(400)
     const probe = await frame.executeJavaScript(\`(() => {
       const all = [...document.querySelectorAll('button')].map((n) => (n.textContent || '').trim())
-      // 两条都踩过：① 正则穿两层模板字符串会被煮坏 ② 只看前 12 个按钮会漏掉排在后面的卡片
-      const dbg = globalThis.__tenonDebug || null
-      return { has: all.some((text) => text.includes(' 步')), dbg: dbg ? { nodes: (dbg.graph && dbg.graph.nodes || []).length, active: String(dbg.active) } : null, buttons: all.slice(0, 12).map((t) => t.slice(0, 40)) }
+      /*
+       * 判据是「派活卡在动」而不是「N 步」：v1.2.29 起跑的时候标题写"运行中"，
+       * 步数挪进了展开区。探针跟着产品文案走，就会一直变成"修探针"的活 ——
+       * 所以判宽一点，抓到的那一帧人眼再看。
+       */
+      const isDelegation = (text) => (text.includes('Explore') || text.includes('子 Agent'))
+        && (text.includes('运行中') || text.includes('已结束'))
+      return { has: all.some(isDelegation), buttons: all.slice(0, 12).map((t) => t.slice(0, 40)) }
     })()\`)
     lastButtons = JSON.stringify(probe.buttons)
-    const snapshot = probe.buttons.join(' | ') + ' ### ' + JSON.stringify(probe.dbg)
+    const snapshot = probe.buttons.join(' | ')
     if (!history.includes(snapshot)) history.push(snapshot)
     if (probe.has) {
       await shot(win, '2-子代理运行中')
@@ -205,6 +210,16 @@ async function run() {
   await sleep(700)
   await shot(win, '3-展开探索')
 
+  // 派活卡：跑完之后点开要有结论，页脚要有"子会话 #xxx"
+  const delegation = await frame.executeJavaScript(\`(() => {
+    const btn = [...document.querySelectorAll('button')].find((n) => /已结束|失败/.test(n.textContent || ''))
+    if (!btn) return false
+    btn.click()
+    return true
+  })()\`)
+  await sleep(700)
+  await shot(win, '5-派活展开')
+
   // 滚到底看 Markdown 回答
   await frame.executeJavaScript(\`(() => {
     const scroller = [...document.querySelectorAll('div')].find((n) => n.scrollHeight > n.clientHeight + 80 && /overflow-y-auto/.test(n.className || ''))
@@ -215,7 +230,7 @@ async function run() {
   await shot(win, '4-markdown')
 
   await win.close()
-  return { submitStatus: status, captured, opened, lastButtons, history: history.slice(0, 6) }
+  return { submitStatus: status, captured, delegation, opened, lastButtons, history: history.slice(0, 6) }
 }
 
 app.whenReady().then(async () => {
