@@ -50,3 +50,10 @@ spikes/*/work/
 docs/reverse/
 *.har
 docs/REVERSE_ENGINEERING.md
+
+# 工作区记忆（Agent 的草稿本）：这是**本地**文件，不是项目文档
+#
+# 它曾经入库过，代价是别的会话写的笔记（磁盘盘点、别的项目的路径、
+# 桌面目录里有什么）一起进了公开仓库 —— 一个人的草稿本不该是仓库的一部分。
+# 项目本身的知识都在 docs/STATUS.md 与 docs/TRAPS.md，那两个该入库。
+.workbuddy/
