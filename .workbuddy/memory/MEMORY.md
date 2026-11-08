@@ -49,3 +49,8 @@ Node v22.22.2 / pnpm 10.x。**所有命令都要** `env -u NODE_OPTIONS -u ELECT
 docker = colima（不自启，先 `colima start`）；别把 `/usr/local/bin` 放 PATH 前面（brew Node 20 顶掉 Node 22）。
 本机 bash 的 `grep` 常返回空 → 用 Grep 工具。`docs/PI-CHEATSHEET.md` 写代码前必查。
 `docs/reverse/`、`*.har` 仅研究，**clean-room 红线：不得搬代码/文案/提示词**。改完前端必须重启 server 再截图。
+
+## 协作方式（2026-11-08 用户明确要求）
+- 新产品类任务必须**分步骤、每步确认**：先出方案 → 用户确认 → 才动手；不要一口气把分析+设计+实现全做完
+- 未确认前不写文件、不跑会改状态的命令
+- 进行中：AI 电脑管家（桌面 App 带面板）；一期 = 诊断三件套（断网修复/软件分析/存储诊断），先只做只读诊断；Step 1 范围已确认，当前停在 Step 2 闸门前

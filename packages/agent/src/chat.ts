@@ -8,7 +8,7 @@
  * - 每次提交结束**自动 git 提交**（一轮一 commit），无改动则不产生空提交。
  */
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
-import type { AgentEvent, AgentEventStream } from '@earendil-works/pi-durable'
+import type { AgentEvent, AgentEventStream, Cursor } from '@earendil-works/pi-durable'
 import { watchEvents } from '@earendil-works/pi-durable'
 import type { ChatSubmitInput, SseEventInput } from '@tenon/protocol'
 import { budgetMessage, composeWithSelection, TenonError } from '@tenon/protocol'
@@ -19,14 +19,22 @@ import type { PlanDocTask } from './docs.js'
 import { PlanDoc } from './docs.js'
 import type { ResolvedModel } from './models.js'
 import type { UsageService } from './usage.js'
-import { assistantText, normalizeEntries, normalizeEntry, usageOf, type RawEntry } from './normalize.js'
+import {
+  KIND_TOOL_RESULT,
+  assistantText,
+  normalizeEntries,
+  normalizeEntry,
+  toolOutcomesOf,
+  usageOf,
+  type RawEntry,
+  type ToolOutcome,
+} from './normalize.js'
 
 const ctx = BACKGROUND_CONTEXT
 const DELTA_FLUSH_MS = 40
 const LIVE_MESSAGE_ID = 'live'
 
 type SubmissionHandle = Awaited<ReturnType<RootConversation['submit']>>
-type ViewState = Awaited<ReturnType<RootConversation['viewState']>>
 
 export interface ChatServiceOptions {
   pool: HarnessPool
@@ -121,6 +129,62 @@ export class ChatService {
     this.watchers.set(appId, stream)
   }
 
+  /**
+   * `appId:entryId` → 这条 assistant 消息与它已收到的工具结果。
+   *
+   * 只留"还在等结果"的那几条：一条消息的工具结果全部到齐后就删掉，
+   * 否则地图会随会话长度一直长（长会话上千条）。
+   */
+  private readonly awaitingTools = new Map<string, { entry: RawEntry; outcomes: Map<string, ToolOutcome>; total: number }>()
+
+  /** 记下这条 assistant 消息发起了哪些工具调用，等结果回来时能找回来 */
+  private rememberToolCalls(appId: string, entry: RawEntry, message: { parts: Array<{ type: string; toolCallId?: string }> }): void {
+    const ids = message.parts.filter((part) => part.type === 'tool' && part.toolCallId !== undefined)
+    if (ids.length === 0) return
+    this.awaitingTools.set(`${appId}:${String(entry.id)}`, { entry, outcomes: new Map(), total: ids.length })
+  }
+
+  /** 工具结果到了：合进发起它的那条消息，然后按同一个 id 重推一次（前端按 id 替换） */
+  private patchToolOutcomes(appId: string, resultEntry: RawEntry): void {
+    const outcomes = toolOutcomesOf(resultEntry)
+    if (outcomes.size === 0) return
+
+    for (const key of [...this.awaitingTools.keys()]) {
+      if (!key.startsWith(`${appId}:`)) continue
+      const waiting = this.awaitingTools.get(key)
+      if (waiting === undefined) continue
+
+      // 这条结果是不是它的？（一个 assistant 消息可能发起多个工具调用）
+      const owned = [...outcomes.keys()].filter((id) => this.toolCallsOf(waiting.entry).includes(id))
+      if (owned.length === 0) continue
+
+      for (const id of owned) {
+        const outcome = outcomes.get(id)
+        if (outcome !== undefined) waiting.outcomes.set(id, outcome)
+      }
+      if (waiting.outcomes.size >= waiting.total) this.awaitingTools.delete(key)
+
+      const updated = normalizeEntry(waiting.entry, waiting.outcomes)
+      if (updated !== undefined && updated.role === 'assistant') {
+        this.options.publish({ type: 'message.end', appId, message: updated })
+      }
+    }
+  }
+
+  /** 一条 assistant entry 发起了哪些 toolCallId（从原始 entry 读，不依赖 parts 的类型） */
+  private toolCallsOf(entry: RawEntry): string[] {
+    const ids: string[] = []
+    for (const message of entry.model ?? []) {
+      for (const block of message.content ?? []) {
+        if (typeof block === 'object' && block !== null && 'type' in block) {
+          const candidate = block as { type?: string; id?: string }
+          if (candidate.type === 'toolCall' && typeof candidate.id === 'string') ids.push(candidate.id)
+        }
+      }
+    }
+    return ids
+  }
+
   private handleEvent(appId: string, event: AgentEvent): void {
     switch (event.type) {
       case 'message_update': {
@@ -132,9 +196,27 @@ export class ChatService {
       case 'message_end': {
         this.deltas.flushNow(appId)
         const entry = event.entry as unknown as RawEntry
+
+        /*
+         * ★ 工具结果到了：把**发起它的那条 assistant 消息重推一遍**。
+         *
+         * 为什么必须重推：一条工具调用在日志里是两条 entry（assistant + tool-result），
+         * 而 `message.end` 是按 entry 发的 —— assistant 那条发出时结果还不存在，
+         * 所以它带出去的工具 part **没有 output**。以前没有任何人回头更新它，于是：
+         * 界面上那张卡片点开永远是空的，**直到重启应用读一次历史**才正常。
+         *
+         * 用户的原话是"左边所有的命令都没有返回吗？"—— 数据一直在库里，
+         * 只是实时这条路上没人把结果贴回去。
+         */
+        if (entry.kind === KIND_TOOL_RESULT) {
+          this.patchToolOutcomes(appId, entry)
+          return
+        }
+
         const message = normalizeEntry(entry)
         // 只推 assistant：用户刚发出的那条前端本来就有，回推一遍会让气泡闪一下
         if (message !== undefined && message.role === 'assistant') {
+          this.rememberToolCalls(appId, entry, message)
           this.options.publish({ type: 'message.end', appId, message })
         }
         const usage = usageOf(entry)
@@ -408,15 +490,36 @@ export class ChatService {
   async history(appId: string, limit = 200): Promise<{ messages: ReturnType<typeof normalizeEntries>; nextCursor: null }> {
     this.options.apps.require(appId)
     const session = await this.options.pool.acquire(appId)
-    const view: ViewState = await session.root.viewState(ctx)
-    try {
-      const entries = view.value.entries as unknown as RawEntry[]
-      const messages = normalizeEntries(entries)
-      const sliced = messages.length > limit ? messages.slice(messages.length - limit) : messages
-      return { messages: sliced, nextCursor: null }
-    } finally {
-      await view.dispose?.()
+
+    /*
+     * 读**完整日志**，不读 `viewState`。
+     *
+     * `viewState` 是"给模型看的视图"：按上下文预算裁过（压缩之后只留模型还需要的部分），
+     * 而历史要回答的是"发生过什么"—— 用户往上翻的时候，被压缩掉的工具结果应该还在。
+     * 实测两者在没压缩的会话里结果一致，压缩之后视图会缺；所以这里换成日志。
+     *
+     * 一条工具调用在日志里是两条 entry（assistant + tool-result），所以条目数要比消息数宽裕：
+     * 按 3 倍取，取够再按消息数截尾。分页是为了长会话（上千条）别把内存一次拉满。
+     *
+     * 注意：这只是"历史"这条路。"这一轮里卡片永远是空的"是另一处 bug（实时链路没有回填
+     * 工具结果），修在 `handleEvent` 的 `patchToolOutcomes`。
+     */
+    const wanted = Math.max(limit, 1) * 3
+    const collected: RawEntry[] = []
+    let cursor: Cursor | undefined
+    while (collected.length < wanted) {
+      // 默认是**倒序**（新的在前），取回来之后再翻正
+      // `entries` 在 Conversation 上（不是 Harness）；`conversationId` 由它自己带着
+      const page = await session.root.entries({}, Math.min(wanted - collected.length, 500), cursor, ctx)
+      collected.push(...(page.items as unknown as RawEntry[]))
+      if (page.next === undefined || page.items.length === 0) break
+      cursor = page.next
     }
+    collected.reverse()
+
+    const messages = normalizeEntries(collected)
+    const sliced = messages.length > limit ? messages.slice(messages.length - limit) : messages
+    return { messages: sliced, nextCursor: null }
   }
 
   /**

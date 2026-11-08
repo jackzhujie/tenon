@@ -234,6 +234,25 @@ const COPY_ENTRIES = ['dist', 'dist-server', 'package.json', 'pnpm-lock.yaml', '
  * 按版本号会让第二次覆盖第一次，而用户手上那份可能已经在服务器上跑着了。
  * 本地时间而不是 UTC：这是给人看的目录名，用户会拿它跟"我刚才那次"对。
  */
+/**
+ * 失败消息里带**最后几行**输出。
+ *
+ * 原来只有一句"构建失败（退出码 1）"，用户既看不出原因，也不知道去哪儿看
+ * （完整输出在日志面板里，但要自己翻）。把尾巴贴进消息，对话框里就能判断是
+ * 类型错误、还是并发/磁盘/网络。
+ */
+function tailOf(output: string, lines = 6, max = 400): string {
+  const tail = output
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== '')
+    .slice(-lines)
+    .join('\n')
+  if (tail === '') return ''
+  const clipped = tail.length > max ? `…${tail.slice(-max)}` : tail
+  return `\n${clipped}`
+}
+
 export function exportStamp(now: Date = new Date()): string {
   const pad = (value: number): string => String(value).padStart(2, '0')
   const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
@@ -241,7 +260,38 @@ export function exportStamp(now: Date = new Date()): string {
   return `${date}-${time}`
 }
 
+/**
+ * 同一个仓库同时只允许一次导出。
+ *
+ * 两次导出都调 `pnpm run build`，而 vite build 会**先清空 `dist/`** ——
+ * 并发跑的时候后一个把前一个的产物删掉，前一个就报"构建失败（退出码 1）"。
+ * 用户看到的是"导出静态包成功、导出 Docker 失败"这种莫名其妙的不一致
+ * （两个按钮点得快就会这样），而代码本身完全没问题。
+ */
+const running = new Map<string, true>()
+
+/** 互斥本身抽出来：它没有 I/O，可以直接单测（导出真跑一次要几十秒） */
+export async function withExportLock<T>(repoDir: string, task: () => Promise<T>): Promise<T> {
+  if (running.has(repoDir)) {
+    throw new TenonError(
+      'EXPORT_FAILED',
+      '这个应用正在导出（上一次还没结束）。等它跑完再点 —— 两次同时构建会互相清 dist/，报出来像是"构建失败"。',
+      { phase: 'busy' },
+    )
+  }
+  running.set(repoDir, true)
+  try {
+    return await task()
+  } finally {
+    running.delete(repoDir)
+  }
+}
+
 export async function exportStatic(options: StaticExportOptions): Promise<StaticExportResult> {
+  return withExportLock(options.repoDir, () => runExport(options))
+}
+
+async function runExport(options: StaticExportOptions): Promise<StaticExportResult> {
   const env = options.env ?? process.env
   const pkg = await readPackageJson(options.repoDir)
   const scripts = pkg.scripts ?? {}
@@ -281,10 +331,11 @@ export async function exportStatic(options: StaticExportOptions): Promise<Static
     ...(options.onLog === undefined ? {} : { onLog: options.onLog }),
   })
   if (front.code !== 0) {
-    throw new TenonError('EXPORT_FAILED', `构建失败（pnpm run build 退出码 ${front.code ?? 'null'}）`, {
-      phase: 'build',
-      output: front.output,
-    })
+    throw new TenonError(
+      'EXPORT_FAILED',
+      `构建失败（pnpm run build 退出码 ${front.code ?? 'null'}）：${tailOf(front.output)}`,
+      { phase: 'build', output: front.output },
+    )
   }
 
   if (hasApi) {
@@ -304,10 +355,11 @@ export async function exportStatic(options: StaticExportOptions): Promise<Static
       ...(options.onLog === undefined ? {} : { onLog: options.onLog }),
     })
     if (back.code !== 0) {
-      throw new TenonError('EXPORT_FAILED', `后端编译失败（pnpm run build:api 退出码 ${back.code ?? 'null'}）`, {
-        phase: 'build:api',
-        output: back.output,
-      })
+      throw new TenonError(
+        'EXPORT_FAILED',
+        `后端编译失败（pnpm run build:api 退出码 ${back.code ?? 'null'}）：${tailOf(back.output)}`,
+        { phase: 'build:api', output: back.output },
+      )
     }
   }
 

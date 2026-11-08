@@ -39,8 +39,8 @@ export interface RawEntry {
 }
 
 const KIND_USER = 'pi.user'
-const KIND_ASSISTANT = 'pi.assistant'
-const KIND_TOOL_RESULT = 'pi.tool-result'
+export const KIND_ASSISTANT = 'pi.assistant'
+export const KIND_TOOL_RESULT = 'pi.tool-result'
 
 /**
  * 一次工具调用自己的花费。目前只有 `subagent` 会带（它把子会话的账读出来写进 details）。
@@ -54,7 +54,7 @@ interface ToolSpend {
 }
 
 /** 一条工具结果：状态 + 文本 + （可选）这次调用花了多少，按 toolCallId 回填到对应的调用上 */
-interface ToolOutcome {
+export interface ToolOutcome {
   readonly status: 'ok' | 'error'
   readonly output: string
   readonly spend?: ToolSpend
@@ -145,6 +145,29 @@ export function normalizeEntry(
   return undefined
 }
 
+/**
+ * 从一个 tool-result entry 里取出「toolCallId → 结果」。
+ *
+ * 两处要用同一份判断：离线归一化（历史）与**实时**（工具跑完时把发起它的那条
+ * assistant 消息重推一遍）。实时那条链路原先没有这个能力，于是界面上那张工具卡片
+ * 永远是空的 —— 明明结果几秒后就到了。
+ */
+export function toolOutcomesOf(entry: RawEntry): Map<string, ToolOutcome> {
+  const outcomes = new Map<string, ToolOutcome>()
+  if (entry.kind !== KIND_TOOL_RESULT) return outcomes
+  for (const message of entry.model ?? []) {
+    const id = message.toolCallId
+    if (id === undefined || id === '') continue
+    const spend = spendOf(message.details)
+    outcomes.set(id, {
+      status: message.isError === true ? 'error' : 'ok',
+      output: textOfBlocks(message.content),
+      ...(spend === undefined ? {} : { spend }),
+    })
+  }
+  return outcomes
+}
+
 export function normalizeEntries(entries: readonly RawEntry[]): NormalizedMessage[] {
   /*
    * 两遍：先收工具结果，再拼消息。
@@ -155,17 +178,7 @@ export function normalizeEntries(entries: readonly RawEntry[]): NormalizedMessag
    */
   const outcomes = new Map<string, ToolOutcome>()
   for (const entry of entries) {
-    if (entry.kind !== KIND_TOOL_RESULT) continue
-    for (const message of entry.model ?? []) {
-      const id = message.toolCallId
-      if (id === undefined || id === '') continue
-      const spend = spendOf(message.details)
-      outcomes.set(id, {
-        status: message.isError === true ? 'error' : 'ok',
-        output: textOfBlocks(message.content),
-        ...(spend === undefined ? {} : { spend }),
-      })
-    }
+    for (const [id, outcome] of toolOutcomesOf(entry)) outcomes.set(id, outcome)
   }
 
   const messages: NormalizedMessage[] = []

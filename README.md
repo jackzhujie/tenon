@@ -52,7 +52,7 @@ GLM / Kimi / Ollama…），保存即生效，不用重启。Key 本地加密存
 | 平台 | 状态 |
 |---|---|
 | macOS（Apple Silicon / Intel） | 首发。有 `.app`（未签名公证） |
-| Windows x64 | **核心 + Web 模式已在 CI 里跑通**（lint / 类型 / 803 项测试 / 前端构建）。桌面安装包还没产出 —— `electron-builder` 只在 macOS 上打过 `--dir` |
+| Windows x64 | **核心 + Web 模式已在 CI 里跑通**（lint / 类型 / 809 项测试 / 前端构建）。桌面安装包还没产出 —— `electron-builder` 只在 macOS 上打过 `--dir` |
 | Linux | 桌面端 M7 后置；**核心测试在 CI 的 ubuntu 里跑**（服务端本身没问题，缺的是桌面壳的打包与验证） |
 
 CI 是**三平台矩阵**（ubuntu / macOS / Windows）。这不是为了好看：这套东西到处在
@@ -72,7 +72,7 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 
 ## 状态
 
-**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**803 项单测 + 26 个端到端/验收脚本**绿（三个平台各跑一遍）。
+**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**809 项单测 + 26 个端到端/验收脚本**绿（三个平台各跑一遍）。
 九个包（`protocol` / `component-host` / `core` / `agent` / `generator` / `gateway` /
 `db-provisioner` / `runtime-sdk` / `server`）+ 两个 app（渲染器 `apps/web`，浏览器与窗口共用一套代码；
 壳 `apps/desktop`，只做生命周期）。
@@ -106,7 +106,7 @@ Windows / Linux 的产物还没被真启动过（CI 上没有 GUI）、
 ```bash
 pnpm lint                   # eslint（约 3 秒）：0 error / 10 warning（那 10 条是 effect 里 setState 的性能建议）
 pnpm typecheck              # 18 个 tsconfig（含 scripts 与 spikes）
-pnpm test                   # 803 项单测/集成，约 210s（含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 809 项单测/集成，约 210s（含 PGlite 冷启动与真 QuickJS）
 pnpm build:web              # 前端产物（server 启动时把它读进内存）
 ```
 
