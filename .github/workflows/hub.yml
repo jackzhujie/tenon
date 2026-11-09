@@ -88,38 +88,58 @@ jobs:
           echo "HUB_URL=$HUB_URL" >> "$GITHUB_ENV"
           TENON_HUB_URL="$HUB_URL" pnpm pack:hub
 
-      - name: 产物自检（签名在不在、包齐不齐）
+      - name: 产物自检（用客户端自己的验签器）
         run: |
           set -euo pipefail
-          cat > /tmp/check-index.cjs <<'JS'
-          const fs = require('node:fs')
-          const dir = 'dist/hub'
-          const index = JSON.parse(fs.readFileSync(`${dir}/index.json`, 'utf8'))
-          const fail = (message) => {
-            console.error(`::error::${message}`)
+          # ★ 这里不再手写字段断言。上一版就是这么错的：把签名当成了 `signature`，
+          #   而实际字段叫 `sig` —— 自检判"索引没有签名"，产物其实完全正常。
+          #   现在直接调 `verifyHubIndex`：与用户机器上 `hub:check`、以及客户端装组件时
+          #   跑的是**同一段代码**，字段名改了它也会跟着改。
+          cat > .hub-check.ts <<'TS'
+          import { existsSync, readFileSync } from 'node:fs'
+          import { verifyHubIndex } from './packages/component-host/src/hub.js'
+
+          const defaults = JSON.parse(readFileSync('apps/desktop/hub.defaults.json', 'utf8')) as {
+            publicKey: string
+          }
+          const parsed = JSON.parse(readFileSync('dist/hub/index.json', 'utf8')) as unknown
+          const result = verifyHubIndex(parsed, defaults.publicKey)
+          if (!result.ok) {
+            console.error(`::error::索引验签失败：${result.problem.message}`)
             process.exit(1)
           }
-          if (typeof index.signature !== 'string' || index.signature === '') fail('索引没有签名')
-          if (!Array.isArray(index.components) || index.components.length === 0) fail('索引里没有组件')
+
           let versions = 0
-          for (const component of index.components) {
+          for (const component of result.value.index.components) {
             for (const version of component.versions) {
               versions += 1
-              // 索引里是绝对地址，本地文件取最后一段；漏一个包的表现是"用户点更新 404"
-              const file = `${dir}/${version.url.split('/').pop()}`
-              if (!fs.existsSync(file)) fail(`索引引用了不存在的包：${version.url}`)
+              // 索引里写的是绝对地址，本地文件取最后一段；漏一个包的表现是"用户点更新 404"
+              const file = `dist/hub/${version.url.split('/').pop()}`
+              if (!existsSync(file)) {
+                console.error(`::error::索引引用了不存在的包：${version.url}`)
+                process.exit(1)
+              }
             }
           }
-          console.log(`索引签名 ✓ · ${index.components.length} 个组件 · ${versions} 个版本`)
-          JS
-          node /tmp/check-index.cjs
-          echo "### 本次构建" >> "$GITHUB_STEP_SUMMARY"
-          node -e '
-            const i = require("./dist/hub/index.json")
-            for (const c of i.components) {
-              console.log(`- \`${c.id}\` → ${c.versions.map((v) => v.version).join(", ")}`)
-            }
-          ' >> "$GITHUB_STEP_SUMMARY"
+          console.log(
+            `索引验签 ✓ 指纹 ${result.value.keyFingerprint.slice(0, 16)} · ` +
+              `${result.value.index.components.length} 个组件 · ${versions} 个版本`,
+          )
+          TS
+          pnpm exec tsx .hub-check.ts
+          rm -f .hub-check.ts
+
+          {
+            echo "### 本次构建"
+            echo ""
+            echo "| 组件 | 版本 |"
+            echo "|---|---|"
+            node -p '
+              require("./dist/hub/index.json").components
+                .map((c) => `| \`${c.id}\` | ${c.versions.map((v) => v.version).join(", ")} |`)
+                .join("\n")
+            '
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 留一份产物（不发布时也能拿到）
         uses: actions/upload-artifact@v4
