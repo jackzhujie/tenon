@@ -110,7 +110,7 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 809 项单测 + 集成测试（约 190s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                       # 827 项单测 + 集成测试（约 280s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -199,6 +199,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 文件 | 管什么 | 什么时候读 |
 |---|---|---|
 | **`docs/STATUS.md`**（本文件） | 现状、下一步、陷阱 | **每次开工先读** |
+| **`docs/BACKLOG.md`** | **还差什么**：缺口清单（P0/P1/P2 + 每项的 DoD 与落点） | 决定"下一步做什么"时读；它才是"欠账"的唯一事实来源 |
 | `docs/DESIGN.md` | **唯一事实来源**，v1.2.9，1700+ 行 | 写涉及架构的代码前，按需读对应章节 |
 | **`docs/SPIKES.md`** | 五个 spike 的实测数字与结论（含被推翻的假设）| 碰 DB / pi / 网关 / 定位插件 / chord 前必读 |
 | `docs/ARCHITECTURE.md` | 一分钟速览 + 四条原则 | 给别人介绍时 |
@@ -300,7 +301,7 @@ pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界
 | 5 | **卸载即清理**（声明 + `AGENTS.md` + 仓库零残留引用，幂等；DoD ②） | ✅ 见 §4.23 | `packages/component-host/src/install.ts`（`uninstallComponent`）、`packages/agent/src/tools/components.ts`（`remove_component`）、`packages/server/test/component-uninstall.test.ts` |
 | 6 | **插件页**：列表 / 独立开关 / 来源标识 / "官方 Hub 筹备中"占位（DoD ④） | ✅ 见 §4.24 | `apps/web/src/features/plugins/PluginsPanel.tsx`、`component.setEnabled`（protocol + server + `setComponentEnabled`） |
 | 7 | 另两个官方插件（**导出 CSV** / 审批流）+ L1 内置积木清单 | ✅ 见 §4.25 | `plugins/bundled/tenon.official.{csv-export,approval}/`、`plugins/bundled/README.md`（L1 清单） |
-| 8 | 组件热重载不丢状态（DoD ③）+ 端到端验收（DoD ①） | 🚧 脚本就位（`pnpm e2e:component`），卡在真页面里球没出现，见 §4.26 | `scripts/e2e-component.ts` |
+| 8 | 组件热重载不丢状态（DoD ③）+ 端到端验收（DoD ①） | ✅ 见 §4.26（`pnpm e2e:component` 5/5） | `scripts/e2e-component.ts` |
 
 ### 4.3 M1 验收（DoD）
 
@@ -2899,6 +2900,70 @@ git log --all -S"<那段里独有的字符串>" --oneline   # → 0
 
 顺带修了截图脚本的一个坑：探针判断用" 步"字样，而这一版跑的时候标题改成了"运行中"，
 于是永远抓不到 —— **探针跟着产品文案走，就会一直变成"修探针"的活**。现在判宽了。
+
+### 4.60 自动更新：壳里加一条"能换掉安装包"的通道（BACKLOG §1.1 第一半）
+
+之前的状态很尴尬：修好的 bug 只有**重新下载安装包**的人才拿得到。M6 收口后盘点（`docs/BACKLOG.md`）
+把它列成 P0 第一条，这一版把**壳侧**做完了。
+
+#### 一、为什么只能在壳里做，以及为什么要有 preload
+
+换安装包的动作（Squirrel / NSIS）只有 Electron 主进程能触发，`@tenon/*` 一个都不该认识它（铁律 1）。
+但界面是 `http://127.0.0.1:<port>` 上的普通网页：`contextIsolation` + `sandbox` 都开着，
+它连"有新版本"这件事都无从知道。于是加了一层**只有四个方法**的桥
+（`apps/desktop/src/preload.ts` → `window.__TENON_UPDATE__`：`state / check / download / install / onState`）。
+浏览器里打开同一份页面时这个对象不存在，于是更新横幅**整块不渲染**——不是渲染一个点了没反应的按钮。
+
+preload 必须是单独一份 **CJS**（`dist/preload.cjs`）：沙箱化 preload 不吃 ESM，且只允许
+`require('electron')`。它跑在页面之前，任何异常就是整个窗口白屏，所以它只有 60 行、零依赖。
+
+#### 二、三个刻意的选择
+
+1. **不自动下载**（`autoDownload = false`）。自动下载会在用户不知道的情况下吃掉几十 MB；
+   这个产品到处在讲"用量看得见"，更新流量也该是用户点的。下载完 `autoInstallOnAppQuit = true`
+   ——那时他已经点过下载，再要求点一次"重启"是多余仪式。
+2. **失败绝不影响应用**。所有入口 try/catch 到底，只写状态。连不上 GitHub 的机器照样能干活。
+   另外 `checkForUpdates` 外面套了 20s 超时：DNS 能解析但不回包的网络上，
+   界面那个"检查中"会一直转圈，看起来像死机。
+3. **"开发态 / 没配更新源"不算 error**。算 `unavailable`，界面不出现入口。
+   报成 error 会让用户去点重试，而重试永远失败 —— 最招人烦的一种假故障。
+
+#### 三、事件乱序是真会发生的
+
+`download-progress` 可能在 `update-downloaded` **之后**才到（网络乱序 + 我们的 await 也在切状态）。
+无条件覆盖会把"已下载完"打回"下载中"，界面于是永远不给那个"重启安装"按钮。
+所以每条事件都先做阶段检查，`apps/desktop/test/updater.test.ts` 有一条专门钉住它。
+
+#### 四、安装顺序：先收 server，再 quitAndInstall
+
+直接 `quitAndInstall()` 是当场杀进程，而那个进程正在写 `tenon.db` 与应用的 git 仓库 ——
+用户下次打开就是"库需要恢复"。所以 `beforeInstall` 是 `createUpdater` 的**必填参数**：
+先把 `supervisor` 置空（让 `before-quit` 那条钩子知道"已经在收了"）再 `stop()`，然后才装。
+收尾失败也照装，但状态里会写"本地服务没能正常关闭，仍然继续安装"（不静默）。
+
+#### 五、macOS 上会遇到的那条英文
+
+未签名时 Squirrel.Mac 拒绝安装，错误是 `Could not get code signature for running application`。
+直接抛给用户等于让他看天书，所以翻译成「这个版本没有签名，macOS 不允许自动更新」，
+并给出**能走的那条路**（去 Releases 手动下载）。这条与 BACKLOG §1.2 是同一笔证书账。
+
+#### 六、验证
+
+- `apps/desktop/test/updater.test.ts` **10 项**：开发态不打扰 feed、没配源算 unavailable、
+  有新版带版本号、进度取整与夹紧、**乱序事件不打回下载中**、检查抛错不冒泡、
+  未签名错误翻译、安装顺序（先停 server 后装）、收尾失败仍继续、并发检查只打一次
+- `pnpm build:desktop`：`main.mjs` 608KB（含 `electron-updater`）、新增 `preload.cjs` 1KB
+- `pnpm smoke:desktop` 8 项全绿：真 Electron 起窗口、界面是渲染器、
+  **preload 没把页面搞白**、退出后 server 收干净
+- **还欠**：`pack:desktop` 后的真机"检查到新版本 → 下载 → 重启换版本"。mac 上这一步
+  需要签名（§1.2）才能走完；Windows 的 NSIS 不需要签名，装好机器后可以单独验
+
+#### 七、发布链要多给一样东西
+
+`electron-builder.yml` 加了 `publish: github`（owner/repo）。**没有这段，包里就没有
+`Resources/app-update.yml`**，`electron-updater` 不知道去哪儿问，而它不报错——只说"已是最新"。
+同时按 provider 生成 `latest.yml` / `latest-mac.yml`，Flows 里跟着产物一起发。
+`TENON_UPDATE_FEED` 可以把 feed 指到自建静态目录（`generic`），用于端到端测试与将来自托管。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
