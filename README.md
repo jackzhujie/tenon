@@ -111,12 +111,22 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 ```bash
 pnpm lint                   # eslint（约 3 秒）：0 error / 10 warning（那 10 条是 effect 里 setState 的性能建议）
 pnpm typecheck              # 18 个 tsconfig（含 scripts 与 spikes）
-pnpm test                   # 841 项单测/集成，约 305s（含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 844 项单测/集成，约 305s（含 PGlite 冷启动与真 QuickJS）
 pnpm build:web              # 前端产物（server 启动时把它读进内存）
 ```
 
 端到端脚本按链路分组。**多数要联网装依赖**；标 ★ 的是真机全链路（真进程 / 真 Chromium / 真容器）。
 下表 26 条；另有三个**人眼截图验收**脚本不在表内：`pnpm shot:settings` / `shot:export` / `shot:plugins`。
+
+**其中 10 条每次 CI 都跑**（见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)）：
+
+- **三平台都跑**（macOS / Ubuntu / Windows）：`e2e:hub` / `e2e:diff` / `e2e:release` / `e2e:provider`。
+  四条合计约 22 秒，不联网、不开浏览器、不要 docker —— 而它们恰好专挑跨平台差异（系统 git、
+  退出码、路径拼法），只在 mac 上跑等于没跑。
+- **Ubuntu 跑**：`e2e:preview` / `e2e:fullstack` / `e2e:backend` / `e2e:auth`（要联网装 React / NestJS），
+  以及 `e2e:postgres` / `e2e:docker`（runner 自带 docker，所以这两条**不再 skip**）。
+- **仍手动跑**：GUI 类（`e2e:apps` / `component` / `inspector` / `e2e` / `real` / `packaged`）。
+  它们验的是"人看得见对不对"，失败时得有人盯着截图才有意义。
 
 | 命令 | 项数 | 验什么 |
 |---|---|---|

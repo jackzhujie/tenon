@@ -129,7 +129,7 @@
 | 3.4 | 崩溃 / 错误遥测 | 无 sentry / posthog；只有本地日志面板 | M | 可选开启的匿名崩溃上报（默认关，附开关与说明） |
 | 3.5 | i18n | 界面文案硬编码中文（`apps/web/src` 无 i18n 层）；DESIGN M6 列过 | M | 至少 en 一份，文案走同一张表 |
 | 3.6 | 文档站 | DESIGN M6 列过；现在只有 `docs/*.md` | M | 静态站可直接从 md 生成，链回仓库 |
-| 3.7 | e2e 不在 CI | `ci.yml` 注释：GUI / 容器跑不了，靠手动；841 项单测兜不住预览链路 | M | 至少一条"能跑 e2e 的 CI 车道"（self-hosted runner 或 xvfb + docker） |
+| 3.7 | ✅ **e2e 不在 CI** —— 已完成（2026-11-09） | 现在 10 条真机链路进 CI：零依赖那四条（`hub` / `diff` / `release` / `provider`，合计 22s）**三平台都跑**；要联网装 React/NestJS 的四条与 docker 两条跑在 ubuntu runner（自带 docker，所以 `postgres` / `docker` 不再 skip）。**上 CI 当天就抓到第一个只在慢盘出现的 bug**：`commitAll` 的「列目录 → 读文件」竞态，macOS runner 上 4/4 复现、本机一次不现（见 STATUS §5） | ✅ | ① 至少一条能跑 e2e 的车道 ② 门禁不因 e2e 变慢变脆（`needs: check`，先修平台问题）③ GUI 类明确写出"为什么不进" |
 | 3.8 | Agent 命令无沙箱 | `SECURITY.md` 自己列为"当前最大信任边界" | L | 分阶段：先做可审计（命令白名单/确认弹窗），再谈隔离 |
 | 3.9 | 真远端 push | 欠账③：只推本地裸库；GitHub 要凭据 + 真网络 | S | 配好凭据后能推真远端，失败信息能指路 |
 | 3.10 | Linux 桌面端 | README：M7 后置；CI 出 AppImage 但无 GUI 验证 | M | 真机启动 + 冒烟；或明确宣布不做 |

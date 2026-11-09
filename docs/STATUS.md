@@ -110,7 +110,7 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 841 项单测 + 集成测试（约 305s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                       # 844 项单测 + 集成测试（约 305s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -121,6 +121,13 @@ pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁
 pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界面、退出后不留孤儿进程
 ```
+
+**e2e 里哪 10 条每次 CI 都跑**（`ci.yml` 按依赖成本分三档，不是"进不进"一个开关）：
+`hub` / `diff` / `release` / `provider` 四条合计 22 秒、零网络零 GUI → **三平台都跑**；
+`preview` / `fullstack` / `backend` / `auth` 要联网装 React/NestJS → ubuntu；
+`postgres` / `docker` 要容器（runner 自带 docker，所以不再 skip）→ ubuntu 独立 job。
+GUI 类（`apps` / `component` / `inspector` / `e2e` / `real` / `packaged`）**仍手动** —— 验的是人眼该看的东西。
+上面那四个 ★ 是历史遗留标记，别拿它当"进 CI"的依据。
 
 - `packages/{protocol,core,agent,server,generator,gateway,db-provisioner}` 七个包已建；`pnpm typecheck` 全绿（15 个项目）
 - 服务真起来了：Fastify 5 / 随机端口绑 `127.0.0.1` / Bearer Token / `/api/health` / `TENON_READY` 握手行
@@ -3538,6 +3545,9 @@ DoD 写的是「快照保留策略」。真去量发现**大头不是快照**：
 | **加了 RPC 之后必须重启 server，vite 的 HMR 不会帮你** | dev 形态下 server 是独立子进程（`dev-web.ts` 起的），改 `handlers.ts` 只触发 tsx 的 watch（如果有），页面那边 HMR 一刷新就以为好了 —— 表现是面板能开、一请求就 `未知方法: storage.report`。判断依据：`lsof -nP -iTCP:<端口>` 看那个 PID 是什么时候起的 |
 | **「磁盘占用」有两种口径，差 20% 是正常的** | 按文件大小累加（`stat.size`）与 `du`/Finder 的块对齐统计（4KB 一块）不是一回事：小文件多的时候差得最明显（本机 187MB vs 226MB）。面板要么说清口径、要么直接显示块数；写成笼统的"占用"一定会被当成算错 |
 | **"删依赖"是安全操作，但必须先停预览** | `node_modules` 是缓存，删了会重装；可它正被运行中的预览进程用着，删掉之后下一次请求才炸，日志里还看不出与"刚才点了下清理"有关。所以 `storage.clean` 里先查 `preview.status()`，`ready`/`starting` 直接拒 |
+| **"先 readdir 再 readFile"不是原子操作** | `commitAll` 靠「列目录 → 逐个算 blob oid → `git.add` 时再重读一遍」判断改动。这两步之间文件消失（Agent 原子写、装依赖、写对象的临时文件被 rename）会让整轮对话**崩在 ENOENT**。macOS runner 的慢盘上 **4/4 复现**，本机快盘一次都看不见 —— 这就是把 e2e 放进三平台的意义。三处都要容错，且**判据不是同一个**：readdir/readFile 抛 node 的 `ENOENT`，`git.add` 抛 isomorphic-git 的 `NotFoundError`（它把 lstat 的 ENOENT 折成自己的类）—— 只认 `ENOENT` 会让第二处继续崩 |
+| **`_tmp_<pid>_<hex>` 要按名字剪掉，不能"读到了再说"** | 写对象/打包时落在**工作区根目录**的临时文件。慢盘上它停得够久就会被 readdir 逮到；那一刻若 readFile 赢了，它就被当用户文件提交进历史，之后每次 clone 都带着这坨垃圾。容错只保证"不崩"，剪枝才保证"不进版本库"，两件事都要做 |
+| **`fs.rm` 的 `ENOTEMPTY` 不是 Windows 专属** | macOS 的 APFS 一样会：递归删除跑到 rmdir 那步时目录又非空了（`close()` 之后还有一个短命的 git 收尾写在落盘 —— `agent.close()` 不等已经在跑的 `commitTurn`）。生产代码早就用 `removeTree` 退避重试兜住了（`apps.delete`，还考虑了杀软扫描），**测试里的裸 `rm` 没有**，于是单测在 `afterEach` 炸。`maxRetries` + `retryDelay` 就是为这几个错误码准备的 |
 
 
 ---
