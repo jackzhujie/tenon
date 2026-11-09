@@ -67,6 +67,12 @@ jobs:
       - name: 装依赖
         run: pnpm install --frozen-lockfile
 
+      - name: 构建组件产物
+        # 组件的 `server.js` / `web.js` 在 `.gitignore` 里（源码是 `.ts`），是构建产物。
+        # 少了这步，`pack:hub` 报的是「清单声明了 server facet「server.js」，但文件不存在」
+        # —— 本地能过是因为本机跑过 `build:plugins`，这类"只在 CI 缺文件"最难猜。
+        run: pnpm build:plugins
+
       - name: 打包并签名
         env:
           TENON_HUB_PRIVATE_KEY: ${{ secrets.TENON_HUB_PRIVATE_KEY }}
