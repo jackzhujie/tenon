@@ -7,7 +7,9 @@ import { NewAppDialog } from '../features/apps/NewAppDialog.js'
 import { DiffPanel } from '../features/diff/DiffPanel.js'
 import { ReleaseDialog } from '../features/release/ReleaseDialog.js'
 import { useWorkspace } from '../hooks/useWorkspace.js'
+import { useAppUpdate } from '../hooks/useAppUpdate.js'
 import { useInspectorSelection } from '../hooks/useInspectorSelection.js'
+import { UpdateBanner } from '../features/update/UpdateBanner.js'
 import { cn } from '../lib/cn.js'
 import { releaseHint } from '../lib/release-hint.js'
 
@@ -55,6 +57,8 @@ export function App() {
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null)
   // 预览里"按住 Alt 点一下"选中的东西，从 iframe 发回来（跨源，靠 origin + token 认）
   const inspectorToken = useInspectorSelection(state.preview, workspace.setSelection)
+  /* 自动更新：只有 Electron 壳里有桥，浏览器里 `state` 恒为 null，横幅整块不渲染 */
+  const update = useAppUpdate()
   /* 顶栏那个数字：上次发布之后又改了几版（算法与边界见 lib/release-hint.ts） */
   const unreleased = useMemo(
     () => releaseHint(state.commits, state.releases),
@@ -99,6 +103,9 @@ export function App() {
         unreleased={unreleased}
         onRelease={() => setReleaseOpen(true)}
       />
+
+      {/* 更新提示紧贴顶栏下方：它说的是"这个软件本身"的事，不属于任何一块业务面板 */}
+      <UpdateBanner update={update} />
 
       <main className="flex min-h-0 flex-1">
         <section

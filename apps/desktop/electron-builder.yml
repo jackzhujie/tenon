@@ -15,6 +15,9 @@ directories:
 
 files:
   - dist/main.mjs
+  # ★ 别漏这一行：漏了的话窗口里 preload 加载失败、更新入口整块消失，
+  # 而应用其它部分一切正常 —— 这种"少一个文件"的故障不会有人报上来。
+  - dist/preload.cjs
   - package.json
 
 extraResources:
@@ -48,6 +51,24 @@ extraResources:
 
 asar: true
 # 模板与页面在 asar 外面（生成器要按真实路径读文件），所以只有主进程进 asar
+
+# ★ 更新源（M6 之后的第一块欠账，见 docs/BACKLOG.md §1.1）
+#
+# 写了这一段，`electron-builder` 才会在打出来的包里放一份 `Resources/app-update.yml`，
+# 并按 provider 生成 `latest.yml` / `latest-mac.yml` —— **没有这段，`electron-updater`
+# 连"去哪儿问有没有新版"都不知道**，而它不会报错，只会一直说"已是最新"。
+#
+# 为什么用 GitHub Releases：产物本来就挂在 Release 上（desktop.yml），
+# 不需要额外买对象存储、也不需要自己维护索引签名（组件 Hub 那套是另一回事）。
+# 代价：国内网络访问 GitHub 不稳 —— 所以 `TENON_UPDATE_FEED` 留了覆盖入口，
+# 将来托管到自己的域名时不用改代码。
+publish:
+  provider: github
+  owner: jackzhujie
+  repo: tenon
+  # 预发布版本（0.0.0-alpha.x）走 `latest` 频道并由 `allowPrerelease` 决定可见性，
+  # 不用单独开 alpha 频道 —— 一份频道少一类"用户装了却收不到"的故障。
+  releaseType: prerelease
 
 mac:
   category: public.app-category.developer-tools

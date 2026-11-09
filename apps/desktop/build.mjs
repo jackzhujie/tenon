@@ -4,6 +4,7 @@
  * ```
  * apps/desktop/dist/
  *   main.mjs              ← Electron 主进程（只有 electron 是外部依赖）
+ *   preload.cjs           ← 更新状态的桥（沙箱只能吃 CJS，所以单独一份）
  *   server/server.mjs     ← 整个 server 打成一个文件（12MB，含 fastify/pi/isomorphic-git）
  *   templates/            ← 建应用用的模板（真实文件，必须随包走）
  *   plugins/              ← 官方组件（真实文件，加载器按目录扫描 manifest.json）
@@ -202,6 +203,26 @@ async function main() {
     banner: { js: "import { createRequire as __tenonCreateRequire } from 'node:module'\nconst require = __tenonCreateRequire(import.meta.url)" },
   })
 
+  /*
+   * 1b) preload：**单独一份 CJS**，不并进 main.mjs。
+   *
+   * 三个约束逼出这个形状：
+   * - 沙箱化 preload 只支持 CJS（`main.mjs` 是 ESM，塞不进 `webPreferences.preload`）；
+   * - 沙箱里只允许 `require('electron')`，所以它必须自带全部逻辑、不能有别的 require；
+   * - 它跑在渲染进程启动之前，任何异常都会让**整个窗口白屏**（不是"更新不可用"）。
+   * 所以这里只打这一个文件，`external: ['electron']`，别的什么都不留。
+   */
+  await build({
+    entryPoints: [join(here, 'src', 'preload.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node22',
+    external: ['electron'],
+    outfile: join(dist, 'preload.cjs'),
+    logLevel: 'warning',
+  })
+
   // 2) 整个 server 打成一个文件
   await build({
     entryPoints: [join(root, 'packages', 'server', 'src', 'bin.ts')],
@@ -332,6 +353,7 @@ async function main() {
   process.stdout.write(
     [
       `main.mjs      ${kib(mainSize)}`,
+      `preload.cjs   ${kib((await stat(join(dist, 'preload.cjs'))).size)}`,
       `server.mjs    ${kib(serverSize)}`,
       `pglite+pnpm   ${kib(await sizeOf(join(dist, 'server', 'node_modules')))}（外部化）/ pnpm ${kib(await sizeOf(join(dist, 'server', 'node_modules', 'pnpm')))}`,
       `codemode      ${kib(await sizeOf(join(dist, 'server', 'node_modules', '@earendil-works', 'pi-codemode')))} + quickjs.wasm ${kib((await stat(join(dist, 'server', 'node_modules', 'quickjs-wasi', 'quickjs.wasm'))).size)}`,

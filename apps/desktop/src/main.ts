@@ -9,10 +9,14 @@
  *
  * 它真正负责的只有生命周期：起子进程 → 等就绪 → 开窗口 → 关窗口时把子进程收干净。
  */
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { resolveDesktopPaths, type DesktopPaths } from './paths.js'
 import { startSupervisor, type ServerReady, type ServerSupervisor } from './supervisor.js'
+import { createUpdater, type UpdaterAdapter } from './updater.js'
 
 /** `TENON_SMOKE=1`：加载完后打印一条 `TENON_SMOKE {...}` 再退出（打包冒烟用，不需要人看） */
 const SMOKE = process.env['TENON_SMOKE'] === '1'
@@ -63,7 +67,12 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#080706',
     show: false,
     webPreferences: {
-      // 页面来自 http://127.0.0.1:<随机端口>，不需要任何 Node 能力
+      /*
+       * 页面来自 http://127.0.0.1:<随机端口>，不需要任何 Node 能力。
+       * 唯一的例外是更新状态：那是壳里才知道的事，靠这个 preload 递过去
+       * （`contextIsolation` + `sandbox` 都留着，桥只有四个方法，见 `preload.ts`）。
+       */
+      preload: fileURLToPath(new URL('./preload.cjs', import.meta.url)),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -154,6 +163,65 @@ async function runSmokeProbe(target: BrowserWindow): Promise<void> {
   }
 }
 
+/**
+ * 接上自动更新。
+ *
+ * 分工：这个函数只负责"接线"（谁调谁、什么时候检查一次、怎么退出），
+ * 状态机与错误降级全在 `updater.ts` 里 —— 那部分要能被单测。
+ *
+ * `TENON_UPDATE_FEED`：把 feed 指到一个自建静态目录（`generic` 协议）。
+ * 存在的理由是**可验证性**：没有真 Release 的时候也要能验"检查得到、下载得了"，
+ * 否则这条链永远只有"我写完了"。
+ */
+function startUpdater(target: BrowserWindow): void {
+  const controller = createUpdater({
+    adapter: autoUpdater as unknown as UpdaterAdapter,
+    isPackaged: app.isPackaged,
+    currentVersion: app.getVersion(),
+    feedUrl: (process.env['TENON_UPDATE_FEED'] ?? '').trim() === ''
+      ? null
+      : (process.env['TENON_UPDATE_FEED'] as string).trim(),
+    // 打包时 `electron-builder` 按 publish 配置写进 Resources 的文件：它在 = 这个包能更新
+    feedConfigured: existsSync(join(process.resourcesPath, 'app-update.yml')),
+    platform: process.platform,
+    onState: (state) => {
+      if (target.isDestroyed()) return
+      target.webContents.send('tenon:update:changed', state)
+    },
+    /*
+     * 装之前先把 server 收干净：它正在写 `tenon.db` 与应用的 git 仓库。
+     * 把 `supervisor` 置空是为了让 `before-quit` 那条钩子知道"已经在收了"，
+     * 否则它会再拦一次退出，而 Squirrel 等不到我们 —— 结果是安装程序不启动。
+     */
+    beforeInstall: async () => {
+      const current = supervisor
+      supervisor = null
+      if (current !== null) await current.stop()
+    },
+  })
+
+  /*
+   * 通道只读/只触发，没有"设置"入口：能被页面改的东西越少越好（页面里还跑着生成的应用）。
+   * 返回 `void` 而不是结果 —— 结果统一走 `tenon:update:changed` 广播，
+   * 否则"拉一次"和"推一次"两条路各有一套形状，迟早对不上。
+   */
+  ipcMain.handle('tenon:update:state', () => controller.state())
+  ipcMain.handle('tenon:update:check', async () => {
+    await controller.check()
+  })
+  ipcMain.handle('tenon:update:download', async () => {
+    await controller.download()
+  })
+  ipcMain.handle('tenon:update:install', async () => {
+    await controller.install()
+  })
+
+  // 首屏之后再检查：启动那几秒的带宽与 CPU 留给"把界面画出来"
+  target.webContents.once('did-finish-load', () => {
+    setTimeout(() => void controller.check(), 20_000).unref()
+  })
+}
+
 async function main(): Promise<void> {
   const paths = resolveDesktopPaths({
     isPackaged: app.isPackaged,
@@ -162,6 +230,9 @@ async function main(): Promise<void> {
   })
 
   win = createWindow()
+
+  // 冒烟只关心"能不能起来"，别在这个时候去碰网络（也没人看结果）
+  if (!SMOKE) startUpdater(win)
 
   supervisor = startSupervisor({
     entry: paths.serverEntry,
