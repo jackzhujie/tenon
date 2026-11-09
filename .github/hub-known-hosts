@@ -1,0 +1,4 @@
+# Hub 服务器的主机公钥（43.166.42.20）。**公开信息**，钉在这里是为了让 CI 不比 ssh-keyscan 时更信任谁。
+# 服务器换主机密钥时要跟着改，否则发布会因为 known_hosts 不匹配而失败（这是好事）。
+# 指纹：SHA256:JGS9xLAP862jNRSV7nn0bUnuiYWQFreaIKD+dRDKtEo
+43.166.42.20 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGqYC3XvFVH4pQcl8pGAbJFnou/5xzoy5tLnHSZHmpSo

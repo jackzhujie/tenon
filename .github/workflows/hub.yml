@@ -1,0 +1,191 @@
+## Hub 发布：打包 → 签名 → 上传 → 线上自检
+##
+## 这是仓库里**唯一一条把东西推到生产**的流水线，而且它签名。所以几条约束是刻意的：
+##
+## 1. **只认手动与 `hub-v*` tag，绝不跟 push main 走。**
+##    push 就发布等于"任何一次合并都可能改掉用户装到的东西"，而组件是会被用户
+##    install 进应用里的代码。
+##
+## 2. **secret 放在 `hub-release` 环境里。**
+##    环境可以配「必须有人批准」，于是签名私钥在批准之前根本不会进入 runner。
+##    公开仓库尤其需要这层：谁都能 fork、都能提 PR，而 `pull_request` 事件拿不到
+##    environment secret（这也正是为什么这里没有 `pull_request` 触发器）。
+##
+## 3. **上传用 rsync，而且 CI 那把钥匙在服务器上是被锁住的。**
+##    `authorized_keys` 里是 `restrict,command="/usr/bin/rrsync -wo /www/wwwroot/tenon-hub"`：
+##    只能往那一个目录写，`ssh … 'cat /etc/passwd'` 会被 rrsync 当场拒掉
+##    （三条边界都实测过：能写、不能执行命令、不能 `../` 越界）。
+##    所以 CI 钥匙泄露 ≠ 服务器失守。
+##
+## 4. **主机公钥钉在 `.github/hub-known-hosts`，不在运行时 ssh-keyscan。**
+##    运行时扫描是 TOCTOU：那一次扫描本身就可以是中间人。主机公钥是公开信息，
+##    钉在仓库里还能被 review。
+
+name: Hub 发布
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 真的上传到线上 Hub（不勾 = 只打包，产物作为 artifact 留下）
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'hub-v*'
+
+# 两次发布会同时改同一个索引：后结束的那次会把前一次的组件清单覆盖掉。
+# 这里不 cancel-in-progress —— 发布被砍在中间比慢一点危险得多。
+concurrency:
+  group: hub-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: 打包并发布
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 签名私钥与部署钥匙都挂在这个环境上（建议配「必须批准」）
+    environment: hub-release
+    env:
+      HUB_HOST: 43.166.42.20
+      HUB_USER: ubuntu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 pnpm（版本来自 packageManager）
+        uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 打包并签名
+        env:
+          TENON_HUB_PRIVATE_KEY: ${{ secrets.TENON_HUB_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TENON_HUB_PRIVATE_KEY:-}" ]; then
+            echo "::error::没有 TENON_HUB_PRIVATE_KEY（应在 hub-release 环境里）"
+            exit 1
+          fi
+          # Hub 地址只有一个事实来源：客户端随包的那份 hub.defaults.json。
+          # 在这里再抄一遍字符串，就会出现"客户端连 A、索引里写 B"的分裂。
+          HUB_URL=$(node -p "require('./apps/desktop/hub.defaults.json').hubUrl")
+          echo "HUB_URL=$HUB_URL" >> "$GITHUB_ENV"
+          TENON_HUB_URL="$HUB_URL" pnpm pack:hub
+
+      - name: 产物自检（签名在不在、包齐不齐）
+        run: |
+          set -euo pipefail
+          cat > /tmp/check-index.cjs <<'JS'
+          const fs = require('node:fs')
+          const dir = 'dist/hub'
+          const index = JSON.parse(fs.readFileSync(`${dir}/index.json`, 'utf8'))
+          const fail = (message) => {
+            console.error(`::error::${message}`)
+            process.exit(1)
+          }
+          if (typeof index.signature !== 'string' || index.signature === '') fail('索引没有签名')
+          if (!Array.isArray(index.components) || index.components.length === 0) fail('索引里没有组件')
+          let versions = 0
+          for (const component of index.components) {
+            for (const version of component.versions) {
+              versions += 1
+              // 索引里是绝对地址，本地文件取最后一段；漏一个包的表现是"用户点更新 404"
+              const file = `${dir}/${version.url.split('/').pop()}`
+              if (!fs.existsSync(file)) fail(`索引引用了不存在的包：${version.url}`)
+            }
+          }
+          console.log(`索引签名 ✓ · ${index.components.length} 个组件 · ${versions} 个版本`)
+          JS
+          node /tmp/check-index.cjs
+          echo "### 本次构建" >> "$GITHUB_STEP_SUMMARY"
+          node -e '
+            const i = require("./dist/hub/index.json")
+            for (const c of i.components) {
+              console.log(`- \`${c.id}\` → ${c.versions.map((v) => v.version).join(", ")}`)
+            }
+          ' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 留一份产物（不发布时也能拿到）
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-dist
+          path: dist/hub/
+          if-no-files-found: error
+
+      - name: 配置 SSH（受限部署钥匙 + 钉住的主机公钥）
+        if: ${{ github.event_name == 'push' || inputs.publish == true }}
+        env:
+          HUB_DEPLOY_SSH_KEY: ${{ secrets.HUB_DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HUB_DEPLOY_SSH_KEY:-}" ]; then
+            echo "::error::没有 HUB_DEPLOY_SSH_KEY（应在 hub-release 环境里）"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$HUB_DEPLOY_SSH_KEY" > ~/.ssh/hub_deploy
+          chmod 600 ~/.ssh/hub_deploy
+          cp .github/hub-known-hosts ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          # 先做一次**干跑**：钥匙没装好、主机密钥对不上，都该在这一步红，
+          # 而不是等到真上传一半失败。注意不能用 `ssh host rsync` 之类试探 ——
+          # 那把钥匙被 rrsync 锁死，只会报 "does not run rsync"；只有真正的
+          # rsync 协议（`--dry-run` 也是）才会被放行。
+          rsync -azn --itemize-changes \
+            -e "ssh -i $HOME/.ssh/hub_deploy -o BatchMode=yes -o IdentitiesOnly=yes" \
+            dist/hub/ "$HUB_USER@$HUB_HOST:/" | sed 's/^/  干跑 /'
+
+      - name: 上传
+        if: ${{ github.event_name == 'push' || inputs.publish == true }}
+        run: |
+          set -euo pipefail
+          # 不加 --delete：索引是增量重写的，可能还引用着旧版本的 bundle，
+          # 而本地 dist/hub 只有本次构建的那几个。删掉就成了"索引指向 404"。
+          #
+          # 也不加 --chmod：`D755,F644` 这种写法只有 rsync 3.x 认，macOS 自带的是
+          # 2.6.9（会直接 "Invalid argument passed to --chmod"）。而它本来也没必要 ——
+          # 落地权限由 umask 给到 644，nginx 只要可读。
+          rsync -az \
+            -e "ssh -i $HOME/.ssh/hub_deploy -o BatchMode=yes -o IdentitiesOnly=yes" \
+            dist/hub/ "$HUB_USER@$HUB_HOST:/"
+
+      - name: 确认线上就是刚构建的这一份
+        if: ${{ github.event_name == 'push' || inputs.publish == true }}
+        run: |
+          set -euo pipefail
+          # 只跑 hub:check 是不够的：上传若静默失败，它验的是**上一版**索引，照样全绿。
+          # 所以先确认字节相同。这里不与 gzip 打交道 —— curl 不主动要压缩。
+          curl -fsS --max-time 30 "$HUB_URL/index.json" -o /tmp/online-index.json
+          LOCAL=$(sha256sum dist/hub/index.json | cut -d' ' -f1)
+          ONLINE=$(sha256sum /tmp/online-index.json | cut -d' ' -f1)
+          echo "本地 $LOCAL"
+          echo "线上 $ONLINE"
+          if [ "$LOCAL" != "$ONLINE" ]; then
+            echo "::error::线上索引与本次构建不一致（上传没生效？nginx 缓存？）"
+            exit 1
+          fi
+
+      - name: 线上自检（客户端自己的代码去验）
+        if: ${{ github.event_name == 'push' || inputs.publish == true }}
+        run: pnpm hub:check
+
+      - name: 写发布记录
+        if: ${{ github.event_name == 'push' || inputs.publish == true }}
+        run: |
+          {
+            echo "### 已发布"
+            echo ""
+            echo "- 地址：\`$HUB_URL\`"
+            echo "- 索引 sha256：\`$(sha256sum dist/hub/index.json | cut -d' ' -f1)\`"
+            echo "- 触发：${{ github.event_name }} / ${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
