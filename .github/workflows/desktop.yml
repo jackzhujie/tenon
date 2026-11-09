@@ -71,25 +71,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Windows 上装依赖 + 打 nsis 明显比另外两个慢
     timeout-minutes: 45
-    env:
-      #
-      # 签名凭据一律从 Secrets 来；**没配就是空串**，此时 electron-builder 跳过签名，
-      # 产物与这一版之前完全一致（这条"没证书也能出包"的路径是有意保住的：
-      # 一个没有证书的 fork 也应当能打出包来试）。
-      #
-      # 为什么 mac 与 win 分开两个 secret：两边的证书不是同一种东西
-      # （.p12 的 Developer ID 证书 vs Windows 代码签名证书），不能混用。
-      #
-      # ★ 这里只能用 `matrix.os`，**不能用 `runner.os`**：`runner` 上下文在
-      # `jobs.<id>.env` 里不可用（要等分配了 runner 才有），写了会让整个 workflow
-      # 解析期就报 "Unrecognized named-value: 'runner'" —— 而那一步连日志都不会有。
-      # 到了 step 级别才可以用 `runner.os`（下面的公证/验证步骤就是这么写的）。
-      CSC_LINK: ${{ startsWith(matrix.os, 'macos') && secrets.MAC_CSC_LINK || startsWith(matrix.os, 'windows') && secrets.WIN_CSC_LINK || '' }}
-      CSC_KEY_PASSWORD: ${{ startsWith(matrix.os, 'macos') && secrets.MAC_CSC_KEY_PASSWORD || startsWith(matrix.os, 'windows') && secrets.WIN_CSC_KEY_PASSWORD || '' }}
-      # 公证三件套（只有 macOS 用得上）。三个都给齐才会开启，见下面的"开启公证"一步
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    # 注意：这里**刻意不放** CSC_LINK / CSC_KEY_PASSWORD / APPLE_*。
+    # secret 没配时它们是空字符串，而 electron-builder 判断的是"变量在不在"、不是"值空不空" ——
+    # 于是它会认为"有证书但密码为空"，真的去签名，最后以一句 `⨯ <目录> not a file` 失败。
+    # 正确做法是「配了才注入」，见下面第一步。
     steps:
       - uses: actions/checkout@v4
         with:
@@ -120,6 +105,43 @@ jobs:
 
       - name: 装依赖
         run: pnpm install --frozen-lockfile --prefer-offline
+
+      #
+      # 签名凭据：**配了才注入**。
+      #
+      # 为什么不能直接在 env 里写 `CSC_LINK: ${{ secrets.X }}`：secret 没配时那是一个
+      # 空字符串，而 electron-builder 看的是"变量存不存在"。于是它会走进签名分支，
+      # 报一行 `empty password will be used for code signing`，然后以
+      # `⨯ <项目目录> not a file` 收场 —— 这条错误离真正的原因隔了三层。
+      #
+      # 公证三件套同理：缺一个都不写，避免"开了一半"的公证配置让构建直接失败。
+      - name: 注入签名凭据（配了才写）
+        shell: bash
+        env:
+          # ★ 这里只能用 `matrix.os`，不能用 `runner.os` —— `runner` 上下文在
+          # `jobs.<id>.env` 级别不可用；本步骤是 step 级别所以两者都行，统一用 matrix 更稳
+          IN_CSC_LINK: ${{ startsWith(matrix.os, 'macos') && secrets.MAC_CSC_LINK || startsWith(matrix.os, 'windows') && secrets.WIN_CSC_LINK || '' }}
+          IN_CSC_KEY_PASSWORD: ${{ startsWith(matrix.os, 'macos') && secrets.MAC_CSC_KEY_PASSWORD || startsWith(matrix.os, 'windows') && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          IN_APPLE_ID: ${{ secrets.APPLE_ID }}
+          IN_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          IN_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$IN_CSC_LINK" ]; then
+            {
+              echo "CSC_LINK=$IN_CSC_LINK"
+              echo "CSC_KEY_PASSWORD=$IN_CSC_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "::notice::已注入代码签名证书，本次产物会签名"
+          else
+            echo "::notice::没有证书 secret，本次产物不签名（与历史产物一致）"
+          fi
+          if [ -n "$IN_APPLE_ID" ] && [ -n "$IN_APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$IN_APPLE_TEAM_ID" ]; then
+            {
+              echo "APPLE_ID=$IN_APPLE_ID"
+              echo "APPLE_APP_SPECIFIC_PASSWORD=$IN_APPLE_APP_SPECIFIC_PASSWORD"
+              echo "APPLE_TEAM_ID=$IN_APPLE_TEAM_ID"
+            } >> "$GITHUB_ENV"
+          fi
 
       # 三个产物共用这一步：web 产物 + 组件 + 主进程，铺成同构的 apps/desktop/dist
       - name: 构建（web + 组件 + 主进程）
