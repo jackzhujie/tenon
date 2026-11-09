@@ -3130,6 +3130,87 @@ allow-unsigned-executable-memory / allow-dyld-environment-variables / disable-li
 - 导出**静态包**没有后端，登录不适用（导出 Docker 才有效）。已在文档与工具输出里说明。
 - 没有找回密码（内部系统里通常是"管理员重置"）；`AuthService` 没有暴露重置接口。
 
+### 4.63 真 Hub 上线：一台宝塔服务器 + 三条命令（BACKLOG §2.1 收口）
+
+#### 一、为什么选「现有站点的子路径」而不是新端口/新域名
+
+Hub 只需要一个**公网可达的静态目录**：`index.json` + 每个版本一个 bundle JSON，平铺同层。
+三个候选里选了子路径：
+
+- 新端口（`http://IP:9528`）：没有 TLS。签名防得住"改内容"，防不住"重放一整套旧签名"
+  （降级攻击），而索引签名存在的意义正是防降级 —— 没 TLS 就等于白签。
+- 新子域名：要动 DNS，而 DNS 不在我手上。
+- **现有域名 + 子路径**：TLS 现成、不动 DNS、索引里的绝对地址也合法（只要落在 hubUrl 之下）。
+
+最终：`https://download.telepathy-app.com/tenon-hub`。
+
+#### 二、服务器上只加了一个文件
+
+这台机器是**宝塔面板**管的 nginx（`/www/server/nginx/`，不是 `/etc/nginx`），上面已有
+`download.telepathy-app.com` / `fastgpt` / `gomoku` / `bughunter1024` 几个站点。所以：
+
+- **没有改任何现有 vhost**，只在宝塔自己的扩展目录里放了一个片段：
+  `/www/server/panel/vhost/nginx/extension/download.telepathy-app.com/tenon-hub.conf`
+  （那个目录被 vhost 用 `include … /extension/<域名>/*.conf` 引入，站点在面板里被编辑时不会覆盖它）
+- 静态目录 `/www/wwwroot/tenon-hub`，`autoindex off`，`gzip on`（560KB → 154KB，实测）
+- 改完 `nginx -t` → `reload` → 立刻验了四件事：索引 200、bundle 200、不存在的 404、
+  **下载站首页仍然 200**
+
+#### 三、`location` 用了 `^~`，这不是随手写的
+
+那个站点的配置里有一串正则 `location ~ .*\.(js|css)?$` 之类的块。**正则 location 的优先级
+高于普通前缀**，所以 `location /tenon-hub/` 会被它们接管（只影响缓存头，但排障时会看不懂
+命中了哪条规则）。`^~` 是"前缀最长匹配，命中后不再看正则"。
+
+#### 四、客户端：地址与公钥要随包走，但要能覆盖
+
+官方 Hub 的 URL 与公钥是**公开信息**（公钥本来就该随客户端发布，VS Code 内置商店同理），
+所以有了 `apps/desktop/hub.defaults.json`：
+
+- `build.mjs` 在环境变量缺失时回落到它 → `pnpm build:desktop` 不设任何变量也打出
+  "商店里有三个组件"的包。之前的默认是"写一份空 hub.json"，那会得到一个
+  界面显示「未配置」、看起来完全正常的包。
+- `dev-web.ts` 把同一份值注入 server → `pnpm dev:web` 的开发态商店也是通的
+  （打包版有 `dist/hub.json` 兜底，开发态本来没有这一档）。
+- `TENON_HUB_URL` / `TENON_HUB_PUBLIC_KEY` 仍然优先（私有 Hub、排障、灰度）。
+
+#### 五、发布与自检（三条命令）
+
+```sh
+TENON_HUB_PRIVATE_KEY="$(cat ~/.tenon/hub-key.pem)" \
+TENON_HUB_URL="https://download.telepathy-app.com/tenon-hub" pnpm pack:hub
+scp dist/hub/* ubuntu@43.166.42.20:/www/wwwroot/tenon-hub/
+pnpm hub:check
+```
+
+`pack:hub` 是这次新加的：`pack:plugin <id>` 一次只处理一个，而索引是**增量重写**的 ——
+漏打一个组件不会报错，只会让那个组件停在旧版本，用户点"更新"永远升不上去。
+
+`hub:check` 走的是**客户端自己的** `fetchHubIndex`（含验签、地址必须落在 Hub 之下），
+再逐个 HEAD bundle 并校验 `content-type`。只 `curl` 一下 200 是不够的：真正会失败的是
+"签名不对"和"下载地址越界"，两件都跟 HTTP 状态码无关。
+
+#### 六、验证
+
+| 层 | 结果 |
+|---|---|
+| 线上自检 | `pnpm hub:check` 全绿：索引验签通过（指纹 `d0c60201…`）、3 个组件、地址都在 Hub 之下、可下载、`application/json` |
+| 客户端真装 | 用 `installFromHubIndex` 从公网装了一个包到临时目录：4 个文件落盘（`manifest.json` / `web.js` / `server.js` / `README.md`） |
+| 应用自己 | 起 server 调 `hub.status`（`configured: true`、`origin: env`）与 `hub.check`，列出 3 个组件 |
+| 回归 | 下载站首页仍 200；宝塔其他站点配置未改动 |
+| 传输 | gzip 实测 560318 → 154462 字节 |
+
+#### 七、仍欠 / 要当心
+
+- **私钥只有一份**：`~/.tenon/hub-key.pem`（0600，不在仓库）。丢了就无法给已发出的客户端
+  发更新（它们认的是这把公钥）；换密钥 = 所有老客户端都装不了新组件，必须发新版。
+  备份到密码管理器，别只留在这台 Mac 上。
+- 缓存策略目前是 `max-age=300`（索引要能较快生效），bundle 文件名带版本其实可以长缓存，
+  但现在的配置是整目录一刀切。
+- 发布还没自动化成"一条命令"：打包/上传/自检是三条，且上传依赖 SSH 凭据。
+  要做的话应该是 GitHub Actions + 服务器上的 deploy key（而不是把密码放进 CI）。
+- **服务器登录用的是密码**（这次是临时用 `sshpass` 跑的）。建议改成密钥登录并关掉密码认证。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -3147,6 +3228,10 @@ allow-unsigned-executable-memory / allow-dyld-environment-variables / disable-li
 | **生成应用的主键别用 `uuid`** | PG 生成 uuid 要 `uuid-ossp`/`pgcrypto` 扩展，PGlite 里装不出来，`create extension` 失败会让启动流程挂掉（报错在扩展那行，看起来像"后端起不来"）。用 `serial` |
 | **多个功能包共用一对 `AGENTS.md` 标记会互相抹掉** | `spliceSection` 是"找到标记整段换掉"，共用一对时后写的把先写的整节删掉 —— 文件仍合法、应用照跑，只是下次改代码的人不知道有后端。一个功能包一对标记（`tenon:backend:*` / `tenon:auth:*`） |
 | **新增工具要改四处，还有第五处** | `harness-pool` 里 `tools`（子角色白名单池）、`rootTools`（主角色）、`extensions`、`registry.install` —— 少任何一处都是"工具存在但调不到"。第五处是 `packages/server/test/tools.test.ts` 里 rootTools 的**逐字快照**（`add_auth` 就是这么红的）。那条逐字相等是故意的：新工具必须显式登记，否则"顺手给主角色也来一个"会悄悄发生 |
+| **宝塔面板的 nginx 不在 `/etc/nginx`** | 二进制在 `/www/server/nginx/sbin/nginx`，站点在 `/www/server/panel/vhost/nginx/*.conf`。想加东西**别改别的站点的 vhost**：面板有 `include … /extension/<域名>/*.conf`，片段放那里既生效又不会被面板编辑覆盖。改完必须 `nginx -t` 再 `reload` |
+| **站点已有正则 `location` 时，静态目录要用 `^~`** | `location ~ .*\.(js|css)?$` 这类正则的优先级**高于普通前缀**，`location /static/` 会被它们接管。`^~` 表示前缀命中后不再看正则 |
+| **Hub 的地址与公钥必须随包** | 只靠环境变量，双击打开的 `.app` 里没有它们 → 商店永远显示「未配置」，而界面上看不出异常。现在 `hub.defaults.json` 随仓库，`build.mjs` 与 `dev-web.ts` 都读它；索引里的下载地址是**绝对地址**，换域名要重发整份索引 |
+| **Hub 发布漏一个组件不会报错** | 索引是增量重写的：漏打的那个停在旧版本，用户"更新"永远升不上去，而 Hub 看起来正常。所以有 `pnpm pack:hub`（打全部）与 `pnpm hub:check`（验线上：验签 + 地址在 Hub 之下 + content-type） |
 | **PGlite 冷启动 2.4s / 每应用 38MB** | 建应用与快照都要算这笔账：`app.create` 要给分阶段进度，`dumpDataDir` 约 4.5MB、0.7s |
 | **LISTEN/NOTIFY 不可用** | PGlite + pg-gateway 下监听端收不到通知（实测 0 条）。后端推前端只能走网关 SSE |
 | **HMR 首帧会丢** | 客户端要在 WS 握手**之前**挂好 `message` 监听，否则丢掉 Vite 的 `connected` |
