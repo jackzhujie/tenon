@@ -84,13 +84,13 @@
 | 地址 | **https://download.telepathy-app.com/tenon-hub**（`index.json` + 三个官方组件包，同一层平铺） |
 | 现状 | ✅ 公网可达的静态 Hub：TLS 由该域名现有证书提供；nginx `location ^~ /tenon-hub/` 指向 `/www/wwwroot/tenon-hub`；gzip 开着（560KB → 154KB） |
 | 客户端 | `apps/desktop/hub.defaults.json` 随仓库带官方地址与公钥（公开信息），`build.mjs` 与 `dev-web.ts` 都读它 → **不设环境变量也是对的**；环境变量仍优先 |
-| 发布流程 | `TENON_HUB_PRIVATE_KEY=… TENON_HUB_URL=… pnpm pack:hub` → `scp dist/hub/*` 到服务器 → `pnpm hub:check` 验线上 |
+| 发布流程 | ✅ 一条命令：GitHub Actions 手动触发（或推 `hub-v*` tag）→ 打包签名 → `rsync` 上传 → 字节比对 → 线上自检，全在 `.github/workflows/hub.yml`。签名私钥与部署钥匙都在 **`hub-release` 环境**（配了 required reviewer，批准前不进 runner）。上传用的 SSH 钥匙在服务器上被 `rrsync` 锁死成「只能写 hub 目录」——CI 钥匙泄露 ≠ 服务器失守（三条边界实测过）。本地仍可手打 `pack:hub` + `rsync` 应急 |
 | 自检 | `pnpm hub:check` 走客户端自己的 `fetchHubIndex`（含验签）+ 逐个 HEAD bundle + 校验 content-type |
 | 服务器访问 | ✅ 2026-11-09 起**只允许密钥登录**：本机 `~/.ssh/tenon_kr_ed25519`，`ssh tenon-kr` 直达（`~/.ssh/config` 里配了 `43.166.42.20` 的别名）。`PasswordAuthentication no`、`PermitRootLogin prohibit-password`。改前整目录备份在服务器 `~/sshd-backup-20261109-215228/`，锁死时的兜底是**宝塔面板的网页终端**（HTTPS 登录，不依赖 sshd） |
 | 已验证 | ① 公网索引验签通过（3 组件）；② 客户端代码真装了一个包到本机（`installFromHubIndex`）；③ 应用自己的 `hub.check` 能列出 3 个组件；④ 下载站原有页面仍 200 |
 | 私钥保管 | ✅ 已做加密异地备份（2026-11-09）：`AES-256-CBC + PBKDF2(300k)`，一份在 `~/tenon-backups/`、一份在 iCloud Drive 的 `tenon-backups/`（密文，Apple 也解不开）。**备份被验证过是能用的**——解开后逐字节一致，且用它签出的索引能被线上公钥验过。口令在 macOS 登录钥匙串（条目 `tenon-hub-key-backup`），**不在仓库、不在备份目录附近**。仍要记住：换密钥等于所有老客户端都装不了新组件（它们认的是这把公钥） |
-| 仍欠 | CDN 缓存策略（现在是 nginx `max-age=300`）；第三方上架与审核（M7，属商业版）；发布流水线还没自动化到"一键"（现在是三条命令） |
-| DoD | ① ✅ 公网可达（HTTPS + 签名索引）；② ✅ 全新客户端能装非随包组件（已用客户端代码实测）；③ ✅ 发布是一条命令（`pack:hub`），上传与自检各一条 |
+| 仍欠 | CDN / 多地域（现在只有一台机器，`max-age=300` 一刀切）；第三方上架与审核（M7，属商业版）；回滚只是「重推一版 index.json」，没有版本列表可回切（索引是增量重写的，旧 bundle 还在，但 UI 上没有回退入口） |
+| DoD | ① ✅ 公网可达（HTTPS + 签名索引）；② ✅ 全新客户端能装非随包组件（已用客户端代码实测）；③ ✅ 发布是一条命令（Actions 里点一次 + 批准），上传与自检都在里面 |
 
 ### 2.2 商业授权入口
 

@@ -3202,14 +3202,43 @@ pnpm hub:check
 
 #### 七、仍欠 / 要当心
 
-- **私钥只有一份**：`~/.tenon/hub-key.pem`（0600，不在仓库）。丢了就无法给已发出的客户端
-  发更新（它们认的是这把公钥）；换密钥 = 所有老客户端都装不了新组件，必须发新版。
-  备份到密码管理器，别只留在这台 Mac 上。
 - 缓存策略目前是 `max-age=300`（索引要能较快生效），bundle 文件名带版本其实可以长缓存，
   但现在的配置是整目录一刀切。
-- 发布还没自动化成"一条命令"：打包/上传/自检是三条，且上传依赖 SSH 凭据。
-  要做的话应该是 GitHub Actions + 服务器上的 deploy key（而不是把密码放进 CI）。
-- **服务器登录用的是密码**（这次是临时用 `sshpass` 跑的）。建议改成密钥登录并关掉密码认证。
+- **私钥已做加密异地备份**（`~/tenon-backups/` + iCloud Drive，口令在登录钥匙串条目
+  `tenon-hub-key-backup`），仍然是"换密钥 = 所有老客户端都装不了新组件"。
+- CDN / 多地域没有；目前只有这一台机器。
+- 第三方上架与审核仍是商业版的事（M7）。
+
+#### 八、发布自动化：一条命令，且钥匙是被锁住的
+
+`workflow_dispatch`（或推 `hub-v*` tag）→ 打包签名 → 上传 → 自检，全在
+`.github/workflows/hub.yml`。发布只需要在 Actions 页面点一次「Run workflow」并批准。
+
+**三个刻意的约束**
+
+| 约束 | 为什么 |
+|---|---|
+| 不跟 `push main` 走，也没有 `pull_request` 触发器 | 这是唯一把东西推到生产、且它签名的流水线。push 就发布 = 任何一次合并都可能改掉用户装到的东西；fork 的 PR 本来也拿不到 environment secret |
+| 两个 secret 挂在 `hub-release` 环境上，环境配了 required reviewer | 签名私钥在有人批准之前**不会进入 runner**。仓库是 public，这层尤其必要。（管理员可通过 API 批准 —— 这是 GitHub 的语义，挡的是没有 admin 的凭据） |
+| CI 的 SSH 钥匙在服务器上是 `restrict,command="/usr/bin/rrsync -wo /www/wwwroot/tenon-hub"` | 只能往那一个目录写。三条边界都实测过：能写、`ssh … 'cat /etc/passwd'` 被 rrsync 拒、`rsync … :/../../tmp/` 被拒。**CI 钥匙泄露 ≠ 服务器失守** |
+
+**几个不显眼但会咬人的点**
+
+- **主机公钥钉在 `.github/hub-known-hosts`**，不在运行时 `ssh-keyscan`：那一次扫描本身
+  就可以是中间人。主机公钥是公开信息，钉在仓库里还能被 review。
+- **上传不带 `--delete`**：索引是增量重写的，可能还引用旧版本的 bundle，而本地 `dist/hub`
+  只有本次构建的那几个 —— 删掉就成了"索引指向 404"。
+- **上传后先比 sha256，再跑 `hub:check`**：只跑 `hub:check` 不够 —— 上传若静默失败，
+  它验的是**上一版**索引，照样全绿。
+- **Hub 地址只从 `apps/desktop/hub.defaults.json` 读**，不在 workflow 里再抄一遍字符串。
+- **`--chmod=D755,F644` 只有 rsync 3.x 认**：macOS 自带 2.6.9 会直接
+  `Invalid argument passed to --chmod`（本地实测撞到）。而它本来也没必要，umask 给的 644 就够。
+- **不要用 `ssh host rsync` 试探连通性**：那把钥匙被 rrsync 锁死，只会报
+  `SSH_ORIGINAL_COMMAND does not run rsync`；真正的 rsync 协议（`--dry-run` 也算）才放行，
+  所以握手用的是 `rsync -azn`。
+
+**验证**：run `42633408007` 十四步全绿。独立复核（不信 CI 自己）：线上 `generatedAt`
+= 那次运行时间、服务器四个文件 mtime 与之一致、本机 `pnpm hub:check` 全部通过。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
@@ -3452,6 +3481,9 @@ pnpm hub:check
 | **sshd 的 `Include` 在文件顶部 ⇒ drop-in 优先，且同一指令「先出现者胜」** | `sshd_config` 一开头就 `Include …/sshd_config.d/*.conf`，所以 drop-in 里的 `PasswordAuthentication` 压过主配置的同名行。于是关密码登录：① 改主配置第 123 行**无效**；② 新建 `99-tenon.conf` 也**无效** —— 字典序上 `50-cloud-init.conf` 在前，它那句 `yes` 先被读到就定了。必须用**更小的数字前缀**（`10-tenon-ssh.conf`）。验证不必 reload：`sshd -T` 是纯读配置，可以故意把冲突值写回去看它算哪个 |
 | **关密码登录前必须先证明钥匙能开门** | 顺序反了就是把自己关在门外。正确顺序：`authorized_keys` 落盘 → `ssh -o BatchMode=yes -o PasswordAuthentication=no` **真登一次** → 才改配置 → 改完用 `sshpass … PreferredAuthentications=password` 反向确认**密码真的进不来了**（"reload 没报错"不算验证）。同时整目录备份 sshd 配置，并确认手上有一条**不依赖 sshd** 的入场券（这台机器是宝塔面板的网页终端） |
 | **"有备份"与"备份能用"是两件事** | 私钥备份必须**解开一次**才算数：逐字节比对，再拿它真签一次、被线上公钥验过（指纹要对上 `hub:check` 报的那个）。只 `ls` 到一个 `.enc` 文件，等于什么都没有 |
+| **构建产物在 `.gitignore` 里 ⇒ CI 上"文件不存在"** | 组件的 `server.js` / `web.js` 是 `.ts` 编出来的，被 `.gitignore` 第 36/37 行忽略。本机打包永远成功（因为跑过 `build:plugins`），CI 的 checkout 里却没有这些文件。凡是"本机能跑、CI 说缺文件"的，先查 `.gitignore` 与构建顺序 |
+| **`git commit -m "…"` 里的反引号会被 shell 执行** | 写了 `` `server.js` `` 这类标记，成品的提交信息里那几个词直接消失（变成"组件源码是 ，而  /  在 里"），而且**提交本身成功**，不报错。正文一律用 `git commit -F -` + heredoc（引号包裹的 heredoc 才不会被替换） |
+| **校验「产物」时别手写字段断言，去调客户端自己的函数** | 这次自检把签名字段写成 `signature`（实际是 `sig`），判了"索引没有签名"，而产物完全正常 —— 又是探针在骗人。调 `verifyHubIndex()` 等于让"客户端会不会接受"来判，字段改名它自己会跟着改 |
 
 
 ---
