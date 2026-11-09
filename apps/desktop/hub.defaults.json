@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "官方 Hub 的地址与公钥。",
+    "这两样都是**公开信息** —— 公钥本来就该随客户端发布（VS Code 内置 marketplace 同理），",
+    "泄露它不会让任何人能发布组件；能发布的是私钥，私钥不在仓库里（~/.tenon/hub-key.pem）。",
+    "为什么要有这份默认值：没有它的话，`pnpm build:desktop` 打出来的包里商店是空的，",
+    "而界面上看不出任何异常（只会显示\"未配置\"）。有了它，不设任何环境变量也是对的。",
+    "环境变量 TENON_HUB_URL / TENON_HUB_PUBLIC_KEY 仍然优先（私有 Hub、排障、灰度时用）。",
+    "换密钥 = 所有已发出的客户端都认不了新签名，必须重新发版；所以这把私钥要备份。"
+  ],
+  "hubUrl": "https://download.telepathy-app.com/tenon-hub",
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAEQOnBdp+O5jUCfUC9gG8pXsVdqMtCp9/ZwYqoiS9thY=\n-----END PUBLIC KEY-----\n"
+}

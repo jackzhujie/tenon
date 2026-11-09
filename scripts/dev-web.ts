@@ -58,6 +58,30 @@ function resolvePackageBin(pkgName: string): string {
 const children = new Set<ChildProcess>()
 let shuttingDown = false
 
+/**
+ * 开发态把官方 Hub 的地址与公钥注进去（`apps/desktop/hub.defaults.json`）。
+ *
+ * 不注的话，`pnpm dev:web` 起来的 server 商店永远是"未配置" —— 而那不是一个错误，
+ * 界面上只是一片空，没人会报上来。打包版有 `dist/hub.json` 兜底，开发态没有，
+ * 所以这一档单独补：两处都读同一个文件，不会各写一套。
+ *
+ * 环境变量优先：设了 `TENON_HUB_URL` 就完全交给它（私有 Hub / 排障）。
+ */
+function hubEnvDefaults(): Record<string, string> {
+  if ((process.env['TENON_HUB_URL'] ?? '').trim() !== '') return {}
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(root, 'apps', 'desktop', 'hub.defaults.json'), 'utf8'),
+    ) as { hubUrl?: unknown; publicKey?: unknown }
+    if (typeof parsed.hubUrl !== 'string' || typeof parsed.publicKey !== 'string') return {}
+    if (parsed.hubUrl === '' || parsed.publicKey === '') return {}
+    return { TENON_HUB_URL: parsed.hubUrl, TENON_HUB_PUBLIC_KEY: parsed.publicKey }
+  } catch {
+    // 读不到就当没配：开发态拿不到商店不该让 dev 起不来
+    return {}
+  }
+}
+
 function shutdown(code: number): void {
   if (shuttingDown) return
   shuttingDown = true
@@ -86,7 +110,7 @@ async function startServer(): Promise<ReadyInfo> {
 
   const child = spawn(process.execPath, [resolvePackageBin('tsx'), bin], {
     cwd: root,
-    env: { ...process.env, TENON_FAUX: faux },
+    env: { ...process.env, TENON_FAUX: faux, ...hubEnvDefaults() },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   wireSignals(child)

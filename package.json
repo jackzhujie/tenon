@@ -44,6 +44,8 @@
     "e2e:real": "tsx scripts/e2e-real.ts",
     "shot:settings": "tsx scripts/shot-settings.ts",
     "pack:plugin": "tsx scripts/pack-plugin.ts",
+    "pack:hub": "tsx scripts/pack-hub.ts",
+    "hub:check": "tsx scripts/check-hub.ts",
     "e2e:hub": "tsx scripts/e2e-hub.ts",
     "e2e:apps": "tsx scripts/e2e-apps.ts",
     "e2e:export": "tsx scripts/export-app.ts",

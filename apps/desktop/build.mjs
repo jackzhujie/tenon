@@ -8,7 +8,7 @@
  *   server/server.mjs     ← 整个 server 打成一个文件（12MB，含 fastify/pi/isomorphic-git）
  *   templates/            ← 建应用用的模板（真实文件，必须随包走）
  *   plugins/              ← 官方组件（真实文件，加载器按目录扫描 manifest.json）
- *   hub.json              ← 官方 Hub 的地址与公钥（M6 第 5 步；没配就写空值）
+ *   hub.json              ← 官方 Hub 的地址与公钥（默认取 hub.defaults.json，环境变量可覆盖）
  *   web/                  ← 渲染器产物（`pnpm build:web` 的 dist）
  * ```
  *
@@ -30,7 +30,7 @@
  */
 import { build } from 'esbuild'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { cp, mkdir, readdir, rm, stat, realpath, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, relative } from 'node:path'
@@ -186,6 +186,24 @@ function reportNatives(natives) {
   return lines
 }
 
+/**
+ * 官方 Hub 的默认地址与公钥（`hub.defaults.json`）。
+ *
+ * 读不到就当空 —— 打包不该因为"默认值文件被删了"失败，此时行为与以前完全一致
+ * （写一份空 hub.json，界面显示"未配置"）。但 `TENON_REQUIRE_HUB=1` 仍会把它抓出来。
+ */
+function readHubDefaults() {
+  try {
+    const parsed = JSON.parse(readFileSync(join(here, 'hub.defaults.json'), 'utf8'))
+    return {
+      hubUrl: typeof parsed.hubUrl === 'string' ? parsed.hubUrl : '',
+      publicKey: typeof parsed.publicKey === 'string' ? parsed.publicKey : '',
+    }
+  } catch {
+    return { hubUrl: '', publicKey: '' }
+  }
+}
+
 async function main() {
   await rm(dist, { recursive: true, force: true })
   await mkdir(join(dist, 'server'), { recursive: true })
@@ -313,9 +331,14 @@ async function main() {
    * 为什么没配也要写一份空文件：`electron-builder.yml` 里 `extraResources` 的来源
    * 不存在会直接报错，本地打包就再也打不出来了。空值（`""`）在 `resolveHubConfig`
    * 里是"就是没配"，与"文件字段拼错"分开。
+   *
+   * 为什么还要有 `hub.defaults.json`：官方 Hub 上线后，"不设环境变量"就是最常见的情况
+   * （本地打包、fork、CI 里漏配）。那时候打出来的包商店是空的，而界面上只会显示
+   * 「未配置」—— 一个看起来完全正常的包。所以默认值随仓库走，环境变量仍然优先。
    */
-  const hubUrl = (process.env['TENON_HUB_URL'] ?? '').trim().replace(/\/+$/, '')
-  const rawKey = (process.env['TENON_HUB_PUBLIC_KEY'] ?? '').trim()
+  const hubDefaults = readHubDefaults()
+  const hubUrl = (process.env['TENON_HUB_URL'] ?? hubDefaults.hubUrl).trim().replace(/\/+$/, '')
+  const rawKey = (process.env['TENON_HUB_PUBLIC_KEY'] ?? hubDefaults.publicKey).trim()
   const hubKey = rawKey.includes('\\n') ? rawKey.replaceAll('\\n', '\n') : rawKey
   const hubReady = hubUrl !== '' && hubKey !== ''
   if (!hubReady && process.env['TENON_REQUIRE_HUB'] === '1') {
