@@ -3449,6 +3449,9 @@ pnpm hub:check
 | **本地通过、CI 失败：`~/node_modules` 在替仓库兜底** | 家目录里一份 `node_modules`（160 个包）会被 Node 一路往上解析到。未声明的依赖因此本地永远"能跑"，到干净的 runner 上才炸。判据不是"看 package.json 有没有声明"，而是**逐个 import 真解析、看结果落在哪**。本机解决了 `isomorphic-git`、`@babel/types` 两处 |
 | **快照还原不能"按行数组前 N 个值"取值** | 快照之后如果 `drop column` 过，保留的列不再是行数组的前 N 个 —— 按位置取会让整行**往前错一位**。类型相容时是**静默写进错误的列**，类型不容才报 `malformed array literal: "12.50"`（score 被写进了 labels）。必须按**列名取下标** |
 | **迁移的校验不能是"源行数 == 目标行数"** | 目标库里有迁移之后新写的数据时（或只是重跑），这个比较会把一次**正确**的迁移判成失败，提示还是"先清空目标表再迁" —— 等于建议用户删数据。正确判据是「目标(后) == 目标(前) + 实写」，`on conflict` 跳过的行数如实进报告 |
+| **sshd 的 `Include` 在文件顶部 ⇒ drop-in 优先，且同一指令「先出现者胜」** | `sshd_config` 一开头就 `Include …/sshd_config.d/*.conf`，所以 drop-in 里的 `PasswordAuthentication` 压过主配置的同名行。于是关密码登录：① 改主配置第 123 行**无效**；② 新建 `99-tenon.conf` 也**无效** —— 字典序上 `50-cloud-init.conf` 在前，它那句 `yes` 先被读到就定了。必须用**更小的数字前缀**（`10-tenon-ssh.conf`）。验证不必 reload：`sshd -T` 是纯读配置，可以故意把冲突值写回去看它算哪个 |
+| **关密码登录前必须先证明钥匙能开门** | 顺序反了就是把自己关在门外。正确顺序：`authorized_keys` 落盘 → `ssh -o BatchMode=yes -o PasswordAuthentication=no` **真登一次** → 才改配置 → 改完用 `sshpass … PreferredAuthentications=password` 反向确认**密码真的进不来了**（"reload 没报错"不算验证）。同时整目录备份 sshd 配置，并确认手上有一条**不依赖 sshd** 的入场券（这台机器是宝塔面板的网页终端） |
+| **"有备份"与"备份能用"是两件事** | 私钥备份必须**解开一次**才算数：逐字节比对，再拿它真签一次、被线上公钥验过（指纹要对上 `hub:check` 报的那个）。只 `ls` 到一个 `.enc` 文件，等于什么都没有 |
 
 
 ---
