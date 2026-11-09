@@ -9,11 +9,30 @@
 ## 没有任何人能发现** —— 而 Windows 的差异更大（路径分隔符、cmd 而不是 sh、junction、
 ## 换行、进程组）。
 ##
-## 为什么仍然**不跑**这些：
-## - `e2e:*`（docker / 真 PG / Electron / 真 Chromium）：runner 上要容器、要 GUI、要大镜像，
-##   失效时没人愿意修。它们是"在真机上手动跑"的（见 README 的脚本表）。
+## e2e 按**依赖成本**分三档，不是一个开关（v1.2.25）：
+##
+##   A 档 零依赖（`e2e:hub` / `e2e:diff` / `e2e:release` / `e2e:provider`）
+##        不联网、不开浏览器、不要 docker，四条合计 **约 22 秒**。→ 进 `check`，**三平台都跑**。
+##        它们恰好是跨平台差异的重灾区：系统 git、子进程退出码、路径拼法、临时目录。
+##        "只在 macOS 绿"正是这套门禁最想抓的东西，所以不能退到只有 ubuntu。
+##
+##   B 档 要联网装依赖（`e2e:preview` / `e2e:fullstack` / `e2e:backend` / `e2e:auth`）
+##        在生成的应用里 `pnpm install` React 或 NestJS，冷缓存 1–3 分钟。→ 只跑 **ubuntu**。
+##        理由是它守的是"模板真能装起来、真能跑"（CJS/ESM、tsc+装饰器、PGlite pool.max=1），
+##        这些**与宿主平台无关**；三份重复付网络成本换不到新信息。
+##
+##   C 档 要 docker（`e2e:postgres` / `e2e:docker`）
+##        ubuntu runner 自带 docker，所以它们**不再 skip**，是真的跑起来。→ 独立 job。
+##        独立而不并进 B 档：`e2e:docker` 要 build 镜像（拉 node + postgres，5 分钟级），
+##        并进去会让"模板装不起来"和"镜像 build 不起来"两类红灯挤在同一条日志里。
+##
+## 仍然**不进** CI 的，只有两类，理由各不相同：
+## - **GUI 类**（`e2e:apps` / `e2e:component` / `e2e:inspector` / `e2e:e2e` / `e2e:real` /
+##   `e2e:packaged`）：要 Electron 二进制（100MB+）与真窗口，ubuntu 上还要 xvfb。
+##   更要紧的是**它们验的是"人看得见对不对"**（气泡对齐、球有没有重复挂、Alt 描边），
+##   失败时得有人盯着截图才有意义 —— 挂在门禁上只会变成"红了没人看，最后被 skip 掉"。
 ## - **三平台打包**：mac 不签名会被 Gatekeeper 拦，要 Apple 账号（$99/年）。
-##   这件事单独做，别和质量门禁混在一起 —— 门禁要快、要稳、要能天天绿。
+##   这件事单独做（`desktop.yml`），别和质量门禁混在一起 —— 门禁要快、要稳、要能天天绿。
 ##
 ## pnpm 版本从 `package.json` 的 `packageManager` 读（pnpm/action-setup 自己认），
 ## 不在这里再写一遍：写两遍就会出现"CI 用 9、本机用 10"这类只在 CI 复现的问题。
@@ -86,6 +105,15 @@ jobs:
       - name: 构建前端
         run: pnpm build:web
 
+      # A 档 e2e：四条合计约 22 秒，零网络零 GUI。放三平台不是"顺手"，是它们
+      # 专挑跨平台差异（系统 git、退出码、路径拼法）—— 只在 mac 上跑等于没跑
+      - name: E2E（零依赖：不联网 / 不开浏览器 / 不要 docker）
+        run: |
+          pnpm e2e:hub
+          pnpm e2e:diff
+          pnpm e2e:release
+          pnpm e2e:provider
+
       - name: 留存前端产物（排障用，不进 artifact 长期库）
         if: failure()
         uses: actions/upload-artifact@v4
@@ -94,3 +122,83 @@ jobs:
           path: apps/web/dist
           retention-days: 3
           if-no-files-found: ignore
+
+  # ── B 档：要联网装 React / NestJS。只 ubuntu。 ────────────────────────────
+  # needs: check 是故意的：矩阵里只要有平台红，先修平台问题，别在坏地基上跑更慢的验证
+  e2e:
+    name: e2e（联网装依赖）
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 pnpm（版本来自 packageManager）
+        uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      # 组件产物（`plugins/*/server.js` / `web.js`）在 .gitignore 里，checkout 不带它们。
+      # `pnpm test` 靠 pretest 自动构建，但这几条 e2e 直接调 tsx，得显式来一次。
+      - name: 构建组件产物
+        run: pnpm build:plugins
+
+      # 每条都自带"应用目录里 pnpm install"，所以冷缓存下每条 1–3 分钟。
+      # 不合并成一个 run：分开才有独立日志与独立重跑，模板与鉴权是两套完全不同的坑
+      - name: E2E：预览（Vite + 网关 + HMR）
+        run: pnpm e2e:preview
+
+      - name: E2E：全栈（PGlite + Nest + 迁移 + 重启后数据还在）
+        run: pnpm e2e:fullstack
+
+      - name: E2E：加后端（Nest 的 CJS 产物跑在 ESM 应用里）
+        run: pnpm e2e:backend
+
+      - name: E2E：加登录（全局守卫 + /api/health 必须公开 + cookie 穿过网关）
+        run: pnpm e2e:auth
+
+  # ── C 档：要 docker。ubuntu runner 自带守护进程，所以这两条会真跑而不是 skip。 ──
+  # 单独一个 job：`e2e:docker` 要 build 镜像（拉 node + postgres），慢且失败原因独立
+  e2e-docker:
+    name: e2e（docker）
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 pnpm（版本来自 packageManager）
+        uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+
+      - name: 装依赖
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: 构建组件产物
+        run: pnpm build:plugins
+
+      # 真 PostgreSQL：验跨档迁移（pglite → postgres）的搬与退
+      - name: E2E：真 PostgreSQL
+        run: pnpm e2e:postgres
+
+      # 导出的 Docker 上下文真能 build + compose up + 打接口
+      - name: E2E：Docker 导出
+        run: pnpm e2e:docker
+
+      # 容器/镜像留在 runner 上无所谓（runner 用完即弃），但失败时要能看见
+      # 到底哪一步断的 —— docker 自己的日志比脚本的 tail 更早给出线索
+      - name: 打印 docker 状态（失败排障）
+        if: failure()
+        run: |
+          docker ps -a
+          docker images
