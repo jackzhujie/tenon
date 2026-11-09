@@ -8,6 +8,7 @@
  */
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
+import type { Dirent } from 'node:fs'
 import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import git from 'isomorphic-git'
@@ -56,6 +57,18 @@ function buildMessage(summary: string, trailers: CommitTrailers | undefined): st
 /** 这些目录不参与提交（与 .gitignore 一致；目录遍历不会自己读 .gitignore，必须显式剪枝） */
 const PRUNE_DIRS = new Set(['.git', 'node_modules', 'dist', '.tenon', 'pgdata', 'exports'])
 
+/**
+ * 写对象 / 打包过程中落在**工作区根目录**的临时文件：`_tmp_<pid>_<hex>`。
+ *
+ * 它不是用户代码。本机上几乎看不见 —— 写和 rename 挤在同一个事件循环里 —— 但在
+ * macOS runner 的慢盘上它会在目录里停足够久，被 `readdir` 逮到（2026-11-09 CI 实测，
+ * `e2e:release` 第 6 节 "再改一轮" 整轮崩在 ENOENT）。
+ *
+ * 比"崩一下"更值得防的是**读到它**：那样它会被当用户文件 `add` 进历史，之后每次
+ * clone 都带着一个 4MB 的垃圾。所以按名字剪掉，不做"先读到再说"的宽容。
+ */
+const TMP_FILE = /^_tmp_\d+_[0-9a-f]{8,}$/
+
 interface WorkingChanges {
   upserts: string[]
   deletes: string[]
@@ -69,19 +82,49 @@ function blobOid(content: Buffer): string {
     .digest('hex')
 }
 
+/**
+ * 文件在我们手里"消失"了 —— 列举时还在，读的时候没了。
+ *
+ * 两种来源必须是同一套判据：我们自己 `readFile` 拿到的是 node 的 `ENOENT`，
+ * 而 `git.add` / `git.remove` 内部被 isomorphic-git 转成了 `NotFoundError`
+ * （它的 FileSystem 把 lstat 的 ENOENT 折成 null 再抛自己的类）。
+ * 只认前者会让 `add` 那一步继续崩 —— 单测里实测过，报错是 `Could not find sub/f0.txt`。
+ */
+function isGone(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR' || code === 'NotFoundError'
+}
+
 /** 递归列出工作区文件（已剪枝），返回 相对路径 → 内容 blob oid */
 async function workdirOids(root: string, prefix = ''): Promise<Map<string, string>> {
   const found = new Map<string, string>()
-  const entries = await readdir(prefix === '' ? root : join(root, prefix), { withFileTypes: true })
-  for (const entry of entries) {
+  const absolute = prefix === '' ? root : join(root, prefix)
+  let entries: Dirent[]
+  try {
+    entries = await readdir(absolute, { withFileTypes: true })
+  } catch (error) {
+    // 目录在"列父目录"和"列它自己"之间消失：这一支已经没有内容可提交了。
+    // 不吞别的错误 —— EACCES 之类是环境坏了，必须让调用方看见
+    if (isGone(error)) return found
+    throw error
+  }  for (const entry of entries) {
     if (PRUNE_DIRS.has(entry.name)) continue
+    if (TMP_FILE.test(entry.name)) continue
     const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`
     if (entry.isDirectory()) {
       for (const [key, value] of await workdirOids(root, relative)) found.set(key, value)
       continue
     }
     if (!entry.isFile()) continue
-    found.set(relative, blobOid(await readFile(join(root, relative))))
+    // 列举与读取之间文件消失是**正常**的：Agent 在原子写（临时文件 + rename）、
+    // 预览/依赖安装也在增删文件。ENOENT 只说明"这一项已经不在了"，跳过即可 ——
+    // 为此让整轮 commit 失败，等于把一次无害的并发变成一次对话的结束
+    try {
+      found.set(relative, blobOid(await readFile(join(root, relative))))
+    } catch (error) {
+      if (isGone(error)) continue
+      throw error
+    }
   }
   return found
 }
@@ -140,17 +183,36 @@ export async function commitAll(
   const { upserts, deletes } = await workingTreeChanges(dir)
   if (upserts.length === 0 && deletes.length === 0) return undefined
 
+  // 第二道口子：`git.add` 会**自己再读一遍文件**，所以上面算 oid 时躲过的竞态在这里会
+  // 重演一遍（单测实测报 `Could not find sub/f0.txt`）。读不到的就不进这一轮 ——
+  // 它已经不在工作区了，下一轮 workdirOids 会把它算成删除，自愈
+  const staged: string[] = []
   for (const filepath of upserts) {
-    // force：忽略 index 里的 stat 缓存，确保内容真的这次被读了一遍
-    await git.add({ fs, dir, filepath, force: true })
+    try {
+      // force：忽略 index 里的 stat 缓存，确保内容真的这次被读了一遍
+      await git.add({ fs, dir, filepath, force: true })
+      staged.push(filepath)
+    } catch (error) {
+      if (isGone(error)) continue
+      throw error
+    }
   }
+  const removed: string[] = []
   for (const filepath of deletes) {
-    await git.remove({ fs, dir, filepath })
+    try {
+      await git.remove({ fs, dir, filepath })
+      removed.push(filepath)
+    } catch (error) {
+      if (isGone(error)) continue
+      throw error
+    }
   }
+  // 全都在列举之后消失了：这一轮没有可提交的东西，别造一条空提交
+  if (staged.length === 0 && removed.length === 0) return undefined
 
   const message = buildMessage(summary, trailers)
   const sha = await git.commit({ fs, dir, message, author: AUTHOR })
-  return { sha, message, changed: [...upserts, ...deletes] }
+  return { sha, message, changed: [...staged, ...removed] }
 }
 
 export async function headSha(dir: string): Promise<string | undefined> {

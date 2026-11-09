@@ -17,7 +17,9 @@ beforeEach(async () => {
 afterEach(async () => {
   await running?.close()
   running = undefined
-  await rm(dir, { recursive: true, force: true })
+  // maxRetries：close 之后还有一个短命的异步写（git 收尾）在落盘，
+  // macOS 的 APFS 上会撞成 ENOTEMPTY（rm 删完再 rmdir 时目录又非空了）
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 describe('对话链路（faux 模型）', () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -61,6 +61,50 @@ describe('Git 一等公民（isomorphic-git）', () => {
     const result = await diff(dir, first!.sha)
     expect(result.patch).toContain('-v1')
     expect(result.patch).toContain('+v2')
+  })
+
+  it('工作区里的 `_tmp_<pid>_<hex>` 不会被当用户文件提交（CI 上 macOS 慢盘逮到过它）', async () => {
+    // 写对象 / 打包时的中间产物。它和用户代码唯一的区别就是名字，
+    // 一旦被 readdir 逮到并成功读出来，就会进历史，之后每次 clone 都带着它
+    await writeFile(join(dir, '_tmp_10041_b5eca88e96bfb1f62e3b02cbe7de7ade'), 'garbage')
+    // 只有它 → 没有任何真实改动 → 不该产生提交
+    expect(await commitAll(dir, '不该有这条')).toBeUndefined()
+
+    await writeFile(join(dir, 'real.txt'), 'real\n')
+    const result = await commitAll(dir, 'feat: 真改动')
+    expect(result?.changed).toEqual(['real.txt'])
+    expect((await log(dir, 10))[0]?.message).toBe('feat: 真改动')
+  })
+
+  it('列举与读取之间文件消失，不让整轮提交失败', async () => {
+    // 真机上这一刻随时会发生：Agent 在原子写（临时文件 + rename）、预览与依赖安装
+    // 也在增删文件。为此让 commit 抛错 = 把一次无害的并发变成一次对话的结束
+    await writeFile(join(dir, 'keep.txt'), 'keep\n')
+    await mkdir(join(dir, 'sub'))
+    for (let i = 0; i < 20; i++) await writeFile(join(dir, 'sub', `f${i}.txt`), `v${i}\n`)
+
+    // 不 await：让 commitAll 与删除在同一个事件循环里交错
+    const committing = commitAll(dir, 'race')
+    await rm(join(dir, 'sub'), { recursive: true, force: true })
+    const result = await committing
+
+    expect(result?.changed).toContain('keep.txt')
+    expect(result?.changed.some((path) => path.startsWith('sub/'))).toBe(false)
+  })
+
+  it('只吞 ENOENT —— 读文件失败的其他原因必须冒出来', async () => {
+    // 反向断言，防止"用 catch {} 把所有错误吞掉"这种写法混进来
+    const name = 'secret.txt'
+    await writeFile(join(dir, name), 'x\n', { mode: 0o000 })
+    const probe = await import('node:fs/promises')
+    const readable = await probe.readFile(join(dir, name)).then(
+      () => true,
+      () => false,
+    )
+    // 以 root 跑（部分容器）时 0o000 仍可读，这条就失去意义
+    if (readable) return
+
+    await expect(commitAll(dir, 'x')).rejects.toThrowError(/EACCES|EPERM/)
   })
 
   it('revert 产生新提交而不改写历史（禁止 reset --hard）', async () => {
