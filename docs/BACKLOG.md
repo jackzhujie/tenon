@@ -39,7 +39,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | CI 与打包配置已经**能签**了：`electron-builder.yml` 不再写死 `identity: null`（那是"强制不签"而不是"找不到就不签"——买完证书的人会得到一个构建全绿、产物仍未签名的结果）；`hardenedRuntime` + entitlements 已配；`desktop.yml` 按 Secrets 是否存在决定签不签、公证不公证，并各有一条验证步骤 |
+| 现状 | CI 与打包配置已经**能签**了：`electron-builder.yml` 不再写死 `identity: null`（那是"强制不签"而不是"找不到就不签"——买完证书的人会得到一个构建全绿、产物仍未签名的结果）；`hardenedRuntime` + entitlements 已配；`desktop.yml` 按 Secrets 是否存在决定签不签、公证不公证，并各有一条验证步骤。**无证书路径已用真 dispatch 验过**（run `42540462130`，四平台全绿、150s） |
 | 还差什么 | **钱**：Apple Developer Program $99/年（要 Developer ID Application，**免费的 "Apple Development" 证书不行**，本机那张也已过期）+ Windows 代码签名证书（OV/EV，或用 Azure Trusted Signing，约 $10/月） |
 | 怎么接 | 往仓库 Secrets 里放五项，见下表；放完**不用改代码**，下一次打包自动带上签名与公证 |
 | DoD | ① mac：`spctl -a -vvv --type execute Tenon.app` 返回 accepted（已公证）；② Windows：`Get-AuthenticodeSignature` 为 `Valid`；③ 自动更新（§1.1）在已签名包上真的换得掉版本 |

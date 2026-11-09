@@ -3012,9 +3012,29 @@ allow-unsigned-executable-memory / allow-dyld-environment-variables / disable-li
 - 证书过期后 electron-builder 会列出它、然后说 `0 valid identities found` 并跳过 ——
   这条警告很容易被当成"还没配"糊过去
 
-#### 五、剩下的事只有一件
+#### 四、真跑一次才发现：空字符串 ≠ 没设
 
-买证书、把六个 secret 填进仓库，然后推一个 tag 看验证步骤。代码不需要再改。
+第一次 `workflow_dispatch` 两条 mac job 全红，错误是
+`⨯ /Users/runner/work/tenon/tenon/apps/desktop not a file` —— 离真正的原因隔了三层。
+
+原因：`CSC_LINK: ${{ secrets.MAC_CSC_LINK }}` 在 secret 没配时是**空字符串**，
+而 electron-builder 判断的是"这个变量在不在"，不是"值空不空"。于是它以为
+"有证书但密码为空"（日志里那句 `empty password will be used for code signing`），
+去把**项目目录**当证书文件导入。
+
+改法：凭据改成「**配了才注入**」—— 一个 step 里判断，非空才写进 `$GITHUB_ENV`；
+公证三件套要三个齐全才写。本机复现确认过差别只在这个空变量上。
+
+#### 五、这条路的验证是"真跑一次"，不是"看着对"
+
+改完重跑 dispatch（run `42540462130`）：四个平台全绿、150 秒，日志里明写
+`没有证书 secret，本次产物不签名（与历史产物一致）`。到此"没证书也能出包"这条路径
+是被证据钉住的，而不是靠推理。
+
+#### 六、剩下的事只有一件
+
+买证书、把六个 secret 填进仓库，然后推一个 tag —— 验证步骤会自动跑
+（`codesign` + `stapler` + `spctl` / `Get-AuthenticodeSignature`）。代码不需要再改。
 
 ## 5. 已知陷阱（都踩过，别重踩）
 
