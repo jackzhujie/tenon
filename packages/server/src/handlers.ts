@@ -42,6 +42,7 @@ import type { ComponentRuntime } from './components.js'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { exportStamp, exportStatic } from './export.js'
+import { cleanStorage, reportStorage } from './storage.js'
 import { applyApiFeature, applyAuthFeature, listTemplates } from '@tenon/generator'
 import type {
   ComponentProblem,
@@ -1099,6 +1100,44 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       // 删掉的正好是当前用的那个：把选中项也清掉，否则下次启动会报"提供商已不存在"
       if (wasActive) core.settings.set({ [SETTING_KEYS.activeProviderId]: null })
       return { deleted: true, applied: await applyAndReport(agent) }
+    },
+
+    /*
+     * `~/.tenon` 的体积（BACKLOG 3.3）。
+     *
+     * 名字优先从 store 取，取不到就退回 appId —— 后者不是兜底洁癖：删除失败的
+     * 应用会留下一个没有记录的目录，而它恰恰是"不知道为什么占了 200MB"的常见来源。
+     * 只认 store 的话，这种残骸在界面上会直接消失。
+     */
+    'storage.report': async () => {
+      const labels = new Map(core.apps.list(true).map((app) => [app.id, app.name]))
+      return reportStorage(core.home, labels)
+    },
+    'storage.clean': async (input) => {
+      if (input.kind === 'deps') {
+        /*
+         * 删依赖前先看预览：正在跑的应用删掉 node_modules 会当场崩，
+         * 而用户看到的是一句"预览挂了"，不会联想到自己刚点了清理。
+         */
+        const targets =
+          input.appId === undefined || input.appId === null
+            ? core.apps.list(true).map((app) => app.id)
+            : [input.appId]
+        for (const appId of targets) {
+          const state = deps.preview.status(appId).state
+          if (state === 'ready' || state === 'starting') {
+            throw new TenonError(
+              'APP_BUSY',
+              `「${appId}」的预览正在运行。先停掉预览再清理依赖 —— 否则它会在下一次请求时突然报找不到模块。`,
+            )
+          }
+        }
+      }
+      return cleanStorage(core.home, {
+        kind: input.kind,
+        ...(input.appId === undefined ? {} : { appId: input.appId }),
+        ...(input.keep === undefined ? {} : { keep: input.keep }),
+      })
     },
   } satisfies HandlerMap
 }

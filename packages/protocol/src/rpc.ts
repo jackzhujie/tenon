@@ -830,6 +830,66 @@ export const rpcMethods = {
     input: z.object({ id: Id }),
     output: z.object({ deleted: z.literal(true), applied: ModelState }),
   },
+
+  /**
+   * `~/.tenon` 的体积盘点（BACKLOG 3.3）。
+   *
+   * **纯只读**，可以随时刷新。清理是下面另一个方法 —— 两件事分开，是因为
+   * "看一眼占了多少"应当是零成本的，而"删掉什么"必须是一次明确的动作。
+   */
+  'storage.report': {
+    input: Empty,
+    output: z.object({
+      root: z.string(),
+      totalBytes: z.number(),
+      apps: z.array(
+        z.object({
+          appId: z.string(),
+          name: z.string(),
+          dir: z.string(),
+          bytes: z.number(),
+          /** 分块明细：界面上要能回答"这 226MB 是什么" */
+          categories: z.array(
+            z.object({
+              key: z.enum(['git', 'deps', 'code', 'database', 'snapshots', 'exports', 'metadata']),
+              bytes: z.number(),
+              files: z.number(),
+              /** 只有为真的分块才会出现在清理动作里 */
+              reclaimable: z.boolean(),
+            }),
+          ),
+          depsBytes: z.number(),
+          snapshotBytes: z.number(),
+          snapshotCount: z.number(),
+        }),
+      ),
+      backups: z.array(z.object({ appId: z.string(), bytes: z.number() })),
+      backupsBytes: z.number(),
+      /** 根目录下产品库 / 密钥 / Hub 包等（不属于任何应用，也不可清理） */
+      sharedBytes: z.number(),
+      scannedAt: z.number(),
+    }),
+  },
+  /**
+   * 清理一个明确的东西。
+   *
+   * 三个动作都是"能再生的"：依赖会重装、旧快照只影响回到很久以前、gc 不删可达对象。
+   * 返回里带具体路径 —— 用户点完之后应该看到一串可核对的东西，而不是一句"已释放 177MB"。
+   */
+  'storage.clean': {
+    input: z.object({
+      kind: z.enum(['deps', 'snapshots', 'backups-gc']),
+      /** `deps` 专用：只清这个应用；不给就是全部 */
+      appId: z.string().nullable().optional(),
+      /** `snapshots` 专用：每个应用保留最近几份（0 = 全清） */
+      keep: z.number().int().min(0).max(100).optional(),
+    }),
+    output: z.object({
+      freedBytes: z.number(),
+      removed: z.array(z.string()),
+      notes: z.array(z.string()),
+    }),
+  },
 } as const
 
 export type RpcMethods = typeof rpcMethods
