@@ -2965,6 +2965,57 @@ preload 必须是单独一份 **CJS**（`dist/preload.cjs`）：沙箱化 preloa
 同时按 provider 生成 `latest.yml` / `latest-mac.yml`，Flows 里跟着产物一起发。
 `TENON_UPDATE_FEED` 可以把 feed 指到自建静态目录（`generic`），用于端到端测试与将来自托管。
 
+### 4.61 签名与公证：把"能签"这条路打通，卡在证书（BACKLOG §1.2 第一半）
+
+#### 一、`identity: null` 是"强制不签"，不是"找不到就不签"
+
+这是这次最值钱的一条。之前为了"没有证书时别去钥匙串里找"，yml 里写了 `identity: null`。
+后果是：**买完证书也照样出不签名包**，而且构建日志全绿 —— 唯一的线索是产物上
+`codesign -dv` 那句 `code object is not signed at all`，而没人会去查它。
+
+现在交给 electron-builder 自己判断：有 `CSC_LINK`（CI）或钥匙串里的 `Developer ID` 就签，
+没有就跳过并打一行 `skipped macOS application code signing`。无证书机器上的产物与之前
+**一致** —— 已用 `pnpm pack:desktop` + `smoke:desktop:packaged` 实测（那条 skipped 警告就在输出里）。
+
+#### 二、hardened runtime 少一条授权就是"装上了闪一下就没了"
+
+`hardenedRuntime: true` 之后，系统默认拒绝 JIT、拒绝加载非同一 Team 签名的动态库。
+Electron 的 V8 要 JIT，随包的 pnpm / PGlite 要加载自带的 `.node` / `.wasm`。
+所以 `apps/desktop/build/entitlements.mac.plist` 里显式声明了四条（allow-jit /
+allow-unsigned-executable-memory / allow-dyld-environment-variables / disable-library-validation）。
+
+这类失败最坑的地方是：**构建成功、签名成功、公证成功**，双击却直接退出，没有任何日志。
+
+#### 三、CI 的开关逻辑：没有证书时行为一模一样
+
+- `CSC_LINK` / `CSC_KEY_PASSWORD`：mac 与 win 分开两个 secret（两边证书不是一种东西）
+- 没有 `CSC_LINK` 时才设 `CSC_IDENTITY_AUTO_DISCOVERY=false`（有证书时**不能**设，
+  否则 .p12 导入临时钥匙串那条路走不通）
+- 公证要 `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID` **三个齐全**才开
+  （`-c.mac.notarize=true`）；缺一个就开着会让构建直接失败
+- 签名路径后面各跟一条验证：`codesign --verify --deep --strict` + `xcrun stapler validate`
+  + `spctl -a`（mac）/ `Get-AuthenticodeSignature`（Windows）。**"签了"必须被验过**，
+  否则签名只是构建日志里的一句话
+
+> 顺手撞到一个会**让整个 workflow 解析期就失败**的坑：`jobs.<id>.env` 里**不能用
+> `runner.os`**（`runner` 上下文要等分配了 runner 才有），必须用 `matrix.os`；
+> 写了会报 `Unrecognized named-value: 'runner'`，而且不会产生任何 job 日志。
+> step 级别才可以用 `runner.os` —— 公证与验证两条步骤就是那么写的。
+
+#### 四、本机顺手发现的坑
+
+这台机器上有一张 `Apple Development: 630796280@qq.com (2N94X762BN)`，但状态是
+`CSSMERR_TP_CERT_EXPIRED`，而且类型不对。两点都要记住：
+
+- **Apple Development ≠ Developer ID Application**：前者只能装在注册设备上调试，
+  发出去的包必须是后者（付费账号才能签）
+- 证书过期后 electron-builder 会列出它、然后说 `0 valid identities found` 并跳过 ——
+  这条警告很容易被当成"还没配"糊过去
+
+#### 五、剩下的事只有一件
+
+买证书、把六个 secret 填进仓库，然后推一个 tag 看验证步骤。代码不需要再改。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -2974,6 +3025,9 @@ preload 必须是单独一份 **CJS**（`dist/preload.cjs`）：沙箱化 preloa
 | **`ELECTRON_RUN_AS_NODE` 的正确用法** | `spawn(process.execPath, [entry], { env: { ELECTRON_RUN_AS_NODE: '1' } })`；不要额外打包 Node |
 | **pi 依赖 `node:sqlite`** | Electron 内置 Node 有该模块（已验证），所以不能在 `node_modules` 里补 `better-sqlite3` 之类原生模块 |
 | **安装包内原生模块：放开（v1.2.13）** | 原先要求"零原生模块"（v1.2 的收益），现已**撤销**为偏好 —— 安装包预编译分发，用户机器不需要 node-gyp。`build.mjs` 改为**审计**（列清单 + 体积 + 平台标签），不再失败；要卡住设 `TENON_STRICT_NATIVE=1`。**不变的边界：生成应用的依赖仍不引入需按平台编译的包**（用户在本地 `pnpm install`） |
+| **`mac.identity: null` 是"强制不签"，不是"找不到就不签"** | 写死它会让**买了证书也出未签名包**，而且构建全绿。判断签名状态只能看 `codesign -dv` 那句 `code object is not signed at all`。现在的做法：不写 identity，交给 electron-builder 按 `CSC_LINK`/钥匙串决定（见 §4.61） |
+| **`Apple Development` 证书不能发版，且会过期** | 发出去的包必须 `Developer ID Application`（付费账号）；过期证书会被列出来但计为 `0 valid identities found`，警告很容易被当成"还没配"糊过去 |
+| **hardened runtime 漏一条 entitement = 双击闪退且无日志** | V8 要 JIT、随包的 pnpm/PGlite 要加载自带 `.node`/`.wasm`；四条授权见 `apps/desktop/build/entitlements.mac.plist`。这类故障在构建、签名、公证三步全是成功的 |
 | **PGlite 冷启动 2.4s / 每应用 38MB** | 建应用与快照都要算这笔账：`app.create` 要给分阶段进度，`dumpDataDir` 约 4.5MB、0.7s |
 | **LISTEN/NOTIFY 不可用** | PGlite + pg-gateway 下监听端收不到通知（实测 0 条）。后端推前端只能走网关 SSE |
 | **HMR 首帧会丢** | 客户端要在 WS 握手**之前**挂好 `message` 监听，否则丢掉 Vite 的 `connected` |

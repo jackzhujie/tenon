@@ -72,10 +72,26 @@ publish:
 
 mac:
   category: public.app-category.developer-tools
-  identity: null
+  #
+  # ★ 这里**不再**写 `identity: null`。
+  #
+  # 之前写死它的理由是"没有证书，别去钥匙串里找"。代价是：**有了证书也用不上** ——
+  # `identity: null` 是"强制不签"，不是"找不到就不签"。于是买完证书的人会得到
+  # 一个「构建全绿、产物依然未签名」的结果，而这件事从构建日志里看不出来。
+  #
+  # 现在交给 electron-builder 自己判断：有 `CSC_LINK`（CI）或钥匙串里的
+  # Developer ID 就签，没有就跳过并打一行 `skipped macOS application code signing`。
+  # 无证书的机器上产物与以前完全一致 —— 已用 `pnpm pack:desktop` 实测过。
+  hardenedRuntime: true
+  # 公证过的包不该再让 Gatekeeper 在构建机上做一次 assess：那一步在 CI 上会误判
+  gatekeeperAssess: false
+  # hardened runtime 下 JIT / 内存权限要显式声明，否则 Electron 本体起不来
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   target:
     - target: dmg
     - target: zip
+
 
 win:
   # ★ 文件名别带空格：NSIS 默认产出 `Tenon Setup 0.0.0.exe`，而 GitHub Release 会把空格

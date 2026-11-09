@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS hardened runtime 的权限声明。
+
+  为什么必须有这份文件：`hardenedRuntime: true` 打开之后，系统默认拒绝 JIT、
+  拒绝加载未由同一 Team 签名的动态库。Electron 的 V8 要 JIT，Node 侧要加载
+  随包带的 `.node` / `.wasm`（pnpm 的 reflink、PGlite 的 wasm），少一条就表现为
+  「装上了、双击闪一下就没了」——而构建、签名、公证全都成功。
+
+  这份集合就是 Electron 官方推荐的那几条，没有多余授权：
+  - allow-jit / allow-unsigned-executable-memory：V8 需要
+  - allow-dyld-environment-variables：Electron 自己的 helper 需要
+  - disable-library-validation：随包 Node 侧要 load 包里自带的动态库
+
+  改这里之前先想清楚"为什么需要"：每多一条都是把沙箱放宽一格。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>

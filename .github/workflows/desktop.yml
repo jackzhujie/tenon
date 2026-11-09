@@ -72,8 +72,24 @@ jobs:
     # Windows 上装依赖 + 打 nsis 明显比另外两个慢
     timeout-minutes: 45
     env:
-      # 没有证书：别让 electron-builder 去钥匙串里找，找不到会报警告甚至失败
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      #
+      # 签名凭据一律从 Secrets 来；**没配就是空串**，此时 electron-builder 跳过签名，
+      # 产物与这一版之前完全一致（这条"没证书也能出包"的路径是有意保住的：
+      # 一个没有证书的 fork 也应当能打出包来试）。
+      #
+      # 为什么 mac 与 win 分开两个 secret：两边的证书不是同一种东西
+      # （.p12 的 Developer ID 证书 vs Windows 代码签名证书），不能混用。
+      #
+      # ★ 这里只能用 `matrix.os`，**不能用 `runner.os`**：`runner` 上下文在
+      # `jobs.<id>.env` 里不可用（要等分配了 runner 才有），写了会让整个 workflow
+      # 解析期就报 "Unrecognized named-value: 'runner'" —— 而那一步连日志都不会有。
+      # 到了 step 级别才可以用 `runner.os`（下面的公证/验证步骤就是这么写的）。
+      CSC_LINK: ${{ startsWith(matrix.os, 'macos') && secrets.MAC_CSC_LINK || startsWith(matrix.os, 'windows') && secrets.WIN_CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ startsWith(matrix.os, 'macos') && secrets.MAC_CSC_KEY_PASSWORD || startsWith(matrix.os, 'windows') && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+      # 公证三件套（只有 macOS 用得上）。三个都给齐才会开启，见下面的"开启公证"一步
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,9 +125,60 @@ jobs:
       - name: 构建（web + 组件 + 主进程）
         run: pnpm build:desktop
 
+      #
+      # 没有证书时关掉"去钥匙串里找身份"：runner 上没有 identity 时，electron-builder
+      # 会打一行 skipped 警告继续跑；但我们没必要让它去翻，也避免有人事后从日志里
+      # 误以为"本来想签、没签成"。
+      #
+      # 有证书时**不要**设这个变量：`CSC_LINK` 指向的 .p12 要被导入临时钥匙串，
+      # 关掉自动发现会让那条路走不通。
+      - name: 无证书时关闭身份自动发现
+        if: env.CSC_LINK == ''
+        shell: bash
+        run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+
+      # 公证是 macOS 专属，而且必须三件套齐全；缺一个就开着的话 electron-builder 会直接失败，
+      # 所以做成"有条件才开"，而不是在 yml 里写死 notarize: true。
+      - name: 有 Apple 凭据时开启公证
+        if: runner.os == 'macOS' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        shell: bash
+        run: echo "SIGN_ARGS=-c.mac.notarize=true" >> "$GITHUB_ENV"
+
       # 目标在 electron-builder.yml 里按平台配好了（mac: dmg+zip / win: nsis / linux: AppImage）
       - name: 打安装包
-        run: pnpm --filter @tenon/desktop exec electron-builder ${{ matrix.args }} --publish never
+        run: pnpm --filter @tenon/desktop exec electron-builder ${{ matrix.args }} --publish never ${{ env.SIGN_ARGS }}
+
+      #
+      # 签名与公证都要**验一遍**，不然"签了"只是构建日志里的一句话。
+      # 三条命令各验一件事：签名完整（codesign --verify）、Gatekeeper 放行（spctl）、
+      # 公证票据已钉在包里（stapler validate）。
+      #
+      # `spctl` 对未公证的已签名包会 reject —— 那不是失败，是"还没公证"，所以分开判。
+      - name: 验证签名（macOS，有证书才跑）
+        if: runner.os == 'macOS' && env.CSC_LINK != ''
+        shell: bash
+        run: |
+          APP=$(ls -d apps/desktop/release/mac*/Tenon.app | head -1)
+          echo "产物：$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | sed -n '1,12p'
+          if [ -n "${{ env.SIGN_ARGS }}" ]; then
+            xcrun stapler validate "$APP"
+            spctl -a -vvv --type execute "$APP"
+          else
+            echo "::warning::本次没有公证（缺 APPLE_* 三件套），Gatekeeper 首次打开仍会拦一次"
+          fi
+
+      - name: 验证签名（Windows，有证书才跑）
+        if: runner.os == 'Windows' && env.CSC_LINK != ''
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem apps/desktop/release/*.exe | Select-Object -First 1
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          Write-Host "文件：$($exe.Name)"
+          Write-Host "状态：$($sig.Status)"
+          Write-Host "签名者：$($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "签名无效：$($sig.Status)" }
 
       # macOS 上**真启动一次**打包产物：产物存在不等于能跑（历史上踩过"装完白屏"）。
       # Windows / Linux 上没有等价的冒烟脚本（要 GUI 会话），所以那边只验"打得出来"。
@@ -189,7 +256,7 @@ jobs:
         shell: bash
         run: |
           cat > NOTES.md <<'NOTES'
-          预览构建（未签名）。四个平台各一份，都是**免安装依赖**的整包：
+          预览构建。四个平台各一份，都是**免安装依赖**的整包：
           Node 不用装、pnpm 随包、数据库是 WASM。
 
           | 文件 | 平台 |
@@ -199,16 +266,20 @@ jobs:
           | `Tenon-*-setup.exe` | Windows x64（NSIS 安装包） |
           | `Tenon-*.AppImage` | Linux x64 |
 
-          ## 未签名，系统会拦一次
+          ## 首次打开可能被系统拦一次
 
-          没有 Apple / Windows 代码签名证书，所以：
+          这一版是否带签名，取决于发布时仓库里配没配证书：
 
-          - **macOS**：双击会提示"无法验证开发者"。右键 → 打开 → 再点"打开"；
-            或终端 `xattr -dr com.apple.quarantine /Applications/Tenon.app`
-          - **Windows**：SmartScreen 提示"未知发布者"。点"更多信息" → "仍要运行"
+          - **已签名（且 macOS 已公证）**：双击即可打开
+          - **未签名**：macOS 提示"无法验证开发者"→ 右键 → 打开 → 再点"打开"，
+            或终端 `xattr -dr com.apple.quarantine /Applications/Tenon.app`；
+            Windows 弹 SmartScreen → "更多信息" → "仍要运行"。这不是包坏了。
           - **Linux**：`chmod +x Tenon-*.AppImage` 再运行
 
-          这不是包坏了，是没买证书。只影响第一次打开时的信任提示。
+          ## 自动更新
+
+          桌面版会检查本仓库的 Releases。**未签名的包 macOS 不允许自动替换**，
+          界面会明确提示改用手动下载；已签名的包点「重启安装」即可。
 
           ## 校验
 

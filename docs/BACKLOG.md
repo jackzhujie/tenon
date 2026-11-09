@@ -35,14 +35,30 @@
 | 还没验的 | 打包版真机走完"检查到新版 → 下载 → 重启换版本"。mac 要等 1.2；Windows 有机器即可单独验 |
 | 落点 | `apps/desktop/src/{updater,preload,main}.ts`、`apps/desktop/electron-builder.yml`、`apps/web/src/{hooks/useAppUpdate.ts,features/update/UpdateBanner.tsx}`、`apps/desktop/test/updater.test.ts` |
 
-### 1.2 签名与公证
+### 1.2 签名与公证 —— ⏳ 接线已完成（2026-11-09），只等证书
 
 | 项 | 内容 |
 |---|---|
-| 现状 | `electron-builder.yml` 里 `identity: null`；README「产物不自带签名与公证」 |
-| 后果 | macOS 上陌生人打不开（右键→打开）；Windows 弹"未知发布者"。M6 DoD ①「两平台安装包签名可安装」**未达成** |
-| 卡点 | 钱：Apple Developer $99/年 + Windows 代码签名证书。另需 CI 里存证书与口令（GitHub Secrets） |
-| DoD | ① mac：下载的 `.dmg` 双击即开、GATEKEEPER 通过 `spctl -a -vv` ；② Windows：安装不弹 SmartScreen 警告；③ 1.1 的自动更新在签名后可用 |
+| 现状 | CI 与打包配置已经**能签**了：`electron-builder.yml` 不再写死 `identity: null`（那是"强制不签"而不是"找不到就不签"——买完证书的人会得到一个构建全绿、产物仍未签名的结果）；`hardenedRuntime` + entitlements 已配；`desktop.yml` 按 Secrets 是否存在决定签不签、公证不公证，并各有一条验证步骤 |
+| 还差什么 | **钱**：Apple Developer Program $99/年（要 Developer ID Application，**免费的 "Apple Development" 证书不行**，本机那张也已过期）+ Windows 代码签名证书（OV/EV，或用 Azure Trusted Signing，约 $10/月） |
+| 怎么接 | 往仓库 Secrets 里放五项，见下表；放完**不用改代码**，下一次打包自动带上签名与公证 |
+| DoD | ① mac：`spctl -a -vvv --type execute Tenon.app` 返回 accepted（已公证）；② Windows：`Get-AuthenticodeSignature` 为 `Valid`；③ 自动更新（§1.1）在已签名包上真的换得掉版本 |
+| 验证命令 | mac：`codesign --verify --deep --strict --verbose=2 Tenon.app` / `xcrun stapler validate Tenon.app`；Windows：`signtool verify /pa Tenon-*-setup.exe` |
+
+**要配的 Secrets**
+
+| Secret | 是什么 | 怎么来 |
+|---|---|---|
+| `MAC_CSC_LINK` | `Developer ID Application` 证书的 `.p12`，**base64** | 钥匙串导出 .p12 → `base64 -i cert.p12 \| pbcopy` |
+| `MAC_CSC_KEY_PASSWORD` | 导出 .p12 时设的密码 | — |
+| `APPLE_ID` | 开发者账号邮箱 | — |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App 专用密码（不是账号密码） | appleid.apple.com → 登录与安全 |
+| `APPLE_TEAM_ID` | 10 位团队 ID | 开发者后台 Membership |
+| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows 代码签名证书 `.pfx` 与口令 | 证书颁发机构 |
+
+> 缺任何一项都不会让构建失败 —— 只是回到"未签名"那条路。这是刻意的：一个没有证书的
+> fork 也应该能打出包来试。但**"签了"必须被验证过**，所以每条签名路径后面都有一个验证步骤，
+> 没有它，签名只是构建日志里的一句话。
 
 ### 1.3 生成的应用需要用户体系
 
