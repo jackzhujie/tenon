@@ -52,7 +52,7 @@ GLM / Kimi / Ollama…），保存即生效，不用重启。Key 本地加密存
 | 平台 | 状态 |
 |---|---|
 | macOS（Apple Silicon / Intel） | 首发。有 `.app`（未签名公证） |
-| Windows x64 | **核心 + Web 模式已在 CI 里跑通**（lint / 类型 / 832 项测试 / 前端构建）。桌面安装包还没产出 —— `electron-builder` 只在 macOS 上打过 `--dir` |
+| Windows x64 | **核心 + Web 模式已在 CI 里跑通**（lint / 类型 / 841 项测试 / 前端构建）。桌面安装包还没产出 —— `electron-builder` 只在 macOS 上打过 `--dir` |
 | Linux | 桌面端 M7 后置；**核心测试在 CI 的 ubuntu 里跑**（服务端本身没问题，缺的是桌面壳的打包与验证） |
 
 CI 是**三平台矩阵**（ubuntu / macOS / Windows）。这不是为了好看：这套东西到处在
@@ -74,7 +74,7 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 
 ## 状态
 
-**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**832 项单测 + 27 个端到端/验收脚本**绿（三个平台各跑一遍）。
+**M1–M6 全部收口**，方案 v1.2.26，五个技术 spike 全跑通，**841 项单测 + 27 个端到端/验收脚本**绿（三个平台各跑一遍）。
 九个包（`protocol` / `component-host` / `core` / `agent` / `generator` / `gateway` /
 `db-provisioner` / `runtime-sdk` / `server`）+ 两个 app（渲染器 `apps/web`，浏览器与窗口共用一套代码；
 壳 `apps/desktop`，只做生命周期）。
@@ -99,18 +99,19 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 | 发布 | 打 annotated tag + 推本地裸库（标准裸库，`git clone` 出来就是这一版）；发布前门禁**并行**真跑 `tsc` / `test` / `lint`，三态判定，被拒的发布不留 tag、不消耗版本号；**同一版代码再打开对话框不重跑**（存档 + 三条判据） |
 | 导得出 | 静态包（拷走就能跑）/ Docker 上下文（compose 自带 PG，迁移自动跑）/ 桌面 `.app`（自带 pnpm，不依赖系统装了什么） |
 | 自动更新 | 桌面版会检查 GitHub Releases：有新版本时顶栏下出现一条横幅，点「下载」→「重启安装」。**未签名的包 macOS 不允许自动替换**，会明确提示改用手动下载 |
+| 存储 | 顶栏「存储」把 `~/.tenon` 拆成代码 / 依赖 / 数据库 / 快照 / 备份库，可清**能再生**的三样（依赖、旧快照、备份库 gc），删前先给数字、删后给路径。代码与数据库没有清理入口 —— 那是应用本身 |
 
 **还差什么**：完整清单、优先级与每项的验收标准见 **[docs/BACKLOG.md](docs/BACKLOG.md)**（唯一事实来源）。
 一句话版本：**装得出去**（自动更新与官方 Hub 都已就位，但签名还没有 —— 未签名的包换不掉自己；另有遥测 / 真远端 push）、
-**卖得出去**（商业授权无联系入口、组织级能力仍只是设计稿）、
-**用得长久**（生成的应用没有用户体系、存储无清理策略、跨应用用量有汇总但无全局上限）。
+**卖得出去**（商业授权入口已有（[COMMERCIAL.md](COMMERCIAL.md)），但组织级能力仍只是设计稿、付费组件没有交易链路）、
+**用得长久**（存储与商业授权入口已补；仍欠跨应用用量总闸、遥测、i18n）。
 
 ## 开发与验证
 
 ```bash
 pnpm lint                   # eslint（约 3 秒）：0 error / 10 warning（那 10 条是 effect 里 setState 的性能建议）
 pnpm typecheck              # 18 个 tsconfig（含 scripts 与 spikes）
-pnpm test                   # 832 项单测/集成，约 280s（含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 841 项单测/集成，约 305s（含 PGlite 冷启动与真 QuickJS）
 pnpm build:web              # 前端产物（server 启动时把它读进内存）
 ```
 
@@ -192,6 +193,10 @@ runner 没有 GUI 会话，那边只验"打得出来"。
 | `apps/*`、`packages/*`（除下面两项） | **AGPL-3.0-only** | 自用、改、分发都行；但把它**作为网络服务对外提供**时必须开源你的修改 |
 | `packages/runtime-sdk`、`packages/generator/templates`、`plugins/` | **Apache-2.0** | **你生成的应用不受 AGPL 传染** —— 归你所有，可闭源、可商用、可再卖 |
 | `docs/` | **CC BY 4.0** | 文档可自由引用改写，只要署名 |
+
+> **要商用？** 先看 **[COMMERCIAL.md](COMMERCIAL.md)**：一句话是「生成的应用归你、随便商用；
+> 把 Tenon 本身闭源交付（或公司多人部署而不愿开源修改）才需要授权」。
+> 联系 **630796280@qq.com**（标题写 `[Tenon 商业授权]`）。
 
 **个人使用免费**（含个人承接的外包交付）。以下两种情况需要商业授权（双许可）：
 以**公司身份在内部多人部署**，或需要**闭源集成**（含免除 AGPL 义务）的企业功能，
