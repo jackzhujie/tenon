@@ -110,7 +110,7 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 827 项单测 + 集成测试（约 280s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                       # 832 项单测 + 集成测试（约 280s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -3036,6 +3036,100 @@ allow-unsigned-executable-memory / allow-dyld-environment-variables / disable-li
 买证书、把六个 secret 填进仓库，然后推一个 tag —— 验证步骤会自动跑
 （`codesign` + `stapler` + `spctl` / `Get-AuthenticodeSignature`）。代码不需要再改。
 
+### 4.62 生成应用的账号体系：`auth-feature` 功能包（BACKLOG §1.3 收口）
+
+#### 一、为什么是功能包，而且必须先把后端补上
+
+「加登录」不是建应用时选的一个模板，而是**这个应用现在需要登录** —— 后者必须能加在
+已有代码上，且不能覆盖用户改过的 `App.tsx`。所以走 `applyApiFeature` 那套机制：
+只写新文件 + 几处就地改。
+
+纯前端应用会被**先补上后端**再装登录。这不是"顺手多做一个功能"：会话、口令哈希、
+"谁都改不了的默认拒绝"只能在后端。只在前端做登录框，等于在门上装一把画上去的锁。
+
+#### 二、默认拒绝，唯一的例外是就绪探针（这条是实测撞出来的）
+
+守卫用 `APP_GUARD` 注册成**全局**的，新接口自动受保护；放行要显式 `@Public()`。
+反过来做（默认放行、逐个加守卫）一定会漏，而漏掉的那个接口和旁边长得一模一样。
+
+第一次跑 `e2e:auth` 时，整套设计当场失败了：
+
+```
+✗ 预览没就绪：后端在 300 秒内没有就绪
+  （最后一次：HTTP 401 {"message":"需要先登录"}）
+  [api] WARN [tenon] 4xx GET /api/health → 401 …
+```
+
+**守卫把网关的就绪探针也拦了。** 表现是预览永远起不来，日志里只有一串 401 ——
+看起来像后端崩了。修法不是给 `HealthController` 补 `@Public()`（那是应用内的注解，
+用户随时可能改），而是在守卫里**硬编码放行 `/api/health`**：它是平台契约
+（`gateway/src/preview.ts` 写死了这条路径），不该由应用代码来保证。
+
+#### 三、会话：库里的不透明令牌 + 按应用命名的 cookie
+
+不用 JWT 的两个具体理由：
+
+1. **能吊销。** 内部系统最常见的操作是"这人走了，立刻断掉"。JWT 签发后撤不回，
+   要么等过期，要么维护黑名单（那就又回到查库了）。
+2. **跨应用隔离。** 浏览器**不按端口**隔离 cookie：同一台机器上 `127.0.0.1:5001`
+   与 `:5002` 共用同一个 cookie 罐。两个应用都叫 `sid` 会互相覆盖，症状是"随机掉登录"。
+   现在 cookie 名带应用 slug（`tenon_auth_<slug>`），而令牌存在**各自库**里 ——
+   A 的令牌拿到 B 的库查不到。换成共享密钥的 JWT，这层隔离就没了。
+
+库里存的是令牌的 `sha256`（不是原值）：备份、导出、截图贴群都在应用之外，库里只有
+哈希，搬走了也换不出可用的 cookie。cookie 属性是 `HttpOnly` + `SameSite=Lax`
+（后者才是挡 CSRF 的那条），`Secure` 按请求是否 https 决定。
+
+#### 四、口令用 scrypt；主键用 serial
+
+- **不用 argon2 / bcrypt**：都是原生模块，生成应用的依赖不许引入需按平台编译的包
+  （用户在本地 `pnpm install`，Windows 上没装 VS 就卡在 node-gyp，报错像网络问题）。
+  `node:crypto` 自带 scrypt，零依赖零编译，哈希串里带算法与参数（以后能调强度，不用强制改密）。
+- **不用 uuid 主键**：PG 生成 uuid 要 `uuid-ossp` / `pgcrypto` 扩展，PGlite 里装不出来，
+  `create extension` 失败会让整个启动流程挂掉（表现为"后端起不来"，报错在扩展那行）。
+- 账号不存在时也跑一次哈希：否则"不存在的邮箱"明显更快，可以拿来枚举账号。
+
+#### 五、四处"不报错就等于没生效"，每处一条测试
+
+`api/db.ts` 登记实体（漏了 → 迁移不建表 → 登录报 `relation "auth_users" does not exist`）、
+`api/app.module.ts` 挂模块（漏了 → **守卫不生效，所有接口公开**）、
+`src/main.tsx` 包一层 `<AuthGate>`（漏了 → 接口全 401 而页面上没有登录框）、
+`docs/AGENTS.md` 加一节（漏了 → 下一次 Agent 又用 localStorage 存数据）。
+
+其中 `main.tsx` 是唯一"碰用户代码"的一步，做成**尽力而为**：形状不匹配就只留一条
+明确待办（`wired: false`），绝不硬改 —— 硬改的代价是白屏，而白屏比"没接上"难查得多。
+
+另外两个功能包共用同一份 `AGENTS.md`，`spliceSection` 的做法是"找到标记整段换掉"，
+所以各用一对标记（`tenon:backend:*` / `tenon:auth:*`）。共用一对的话，后写的会把先写的
+那节整段抹掉 —— 文件仍然合法、应用也照跑，只是下一次改代码时不知道有后端了。
+
+#### 六、验证
+
+| 层 | 结果 |
+|---|---|
+| 单测 `auth-feature.test.ts` | 5/5：四处就地改、幂等、已有后端不重复补、main.tsx 形状不符只留待办、cookie 名按应用区分 |
+| `pnpm e2e:auth`（真起应用打接口） | **30 项全过**：未登录 401；`/api/health` 未被拦（readiness 四格全 ready）；弱口令 400；setup 只成功一次（再调 409）；错密码 403；admin 加人 201；member 调管理员接口 403；退出 204 且老 cookie 立刻 401 |
+| `pnpm shot:auth`（Electron 真渲染） | 登录页、登录后账号栏、成员浮层三张截图；渲染进程无 error 级日志 |
+| 依赖 | 生成应用**没有新增任何包**（scrypt 与 cookie 解析都在 `node:crypto` / 手写十几行里） |
+
+截图那一步抓到了两个**类型检查与接口测试都看不见**的问题：
+
+1. 登录界面跟 `prefers-color-scheme` 走，而应用自己是浅色（模板默认）—— 浅色页面上
+   浮起一块黑板。修法：`tone.ts` 读 `body` 的实际背景色算亮度定调，CSS 用
+   `[data-tone]` 分两套，不跟系统走。
+2. 深色下实心按钮是白字压在浅蓝 `#6ea8ff` 上（对比度约 2:1，读不清）。修法：加
+   `--auth-on-accent`，暗色下换成近黑。
+
+这两条在 `e2e:auth` 里全是绿的 —— 接口对、cookie 对、页面能开，只是不好看。这类问题
+只有截图能发现，所以 `shot:auth` 与 `e2e:auth` 是两条不可互相替代的验收。
+
+#### 七、仍欠
+
+- 首次部署后要**先自己打开一次**完成初始化：在那之前任何能访问地址的人都能把自己
+  设成管理员。要不要"初始化需要一次性口令"是个产品决定，现在只是写进了 AGENTS.md。
+- 导出**静态包**没有后端，登录不适用（导出 Docker 才有效）。已在文档与工具输出里说明。
+- 没有找回密码（内部系统里通常是"管理员重置"）；`AuthService` 没有暴露重置接口。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -3048,6 +3142,11 @@ allow-unsigned-executable-memory / allow-dyld-environment-variables / disable-li
 | **`mac.identity: null` 是"强制不签"，不是"找不到就不签"** | 写死它会让**买了证书也出未签名包**，而且构建全绿。判断签名状态只能看 `codesign -dv` 那句 `code object is not signed at all`。现在的做法：不写 identity，交给 electron-builder 按 `CSC_LINK`/钥匙串决定（见 §4.61） |
 | **`Apple Development` 证书不能发版，且会过期** | 发出去的包必须 `Developer ID Application`（付费账号）；过期证书会被列出来但计为 `0 valid identities found`，警告很容易被当成"还没配"糊过去 |
 | **hardened runtime 漏一条 entitement = 双击闪退且无日志** | V8 要 JIT、随包的 pnpm/PGlite 要加载自带 `.node`/`.wasm`；四条授权见 `apps/desktop/build/entitlements.mac.plist`。这类故障在构建、签名、公证三步全是成功的 |
+| **`APP_GUARD` 会连就绪探针一起拦** | 全局默认拒绝时 `GET /api/health` 也 401，网关认为后端起不来 → 预览 **300 秒超时**，日志里只有一串 `4xx /api/health → 401`（看起来像后端崩了）。探针必须在守卫里硬编码放行：`/api/health` 是平台契约（`gateway/src/preview.ts` 写死），不该由应用的 `@Public()` 保证 |
+| **cookie 不按端口隔离** | `127.0.0.1:5001` 与 `:5002` 共用同一个 cookie 罐。两个生成应用都写 `sid` 会互相覆盖，症状是"随机掉登录"。名字必须带应用 slug，且令牌存**各自库**（这样才天然隔离；共享密钥的 JWT 不隔离） |
+| **生成应用的主键别用 `uuid`** | PG 生成 uuid 要 `uuid-ossp`/`pgcrypto` 扩展，PGlite 里装不出来，`create extension` 失败会让启动流程挂掉（报错在扩展那行，看起来像"后端起不来"）。用 `serial` |
+| **多个功能包共用一对 `AGENTS.md` 标记会互相抹掉** | `spliceSection` 是"找到标记整段换掉"，共用一对时后写的把先写的整节删掉 —— 文件仍合法、应用照跑，只是下次改代码的人不知道有后端。一个功能包一对标记（`tenon:backend:*` / `tenon:auth:*`） |
+| **新增工具要改四处，还有第五处** | `harness-pool` 里 `tools`（子角色白名单池）、`rootTools`（主角色）、`extensions`、`registry.install` —— 少任何一处都是"工具存在但调不到"。第五处是 `packages/server/test/tools.test.ts` 里 rootTools 的**逐字快照**（`add_auth` 就是这么红的）。那条逐字相等是故意的：新工具必须显式登记，否则"顺手给主角色也来一个"会悄悄发生 |
 | **PGlite 冷启动 2.4s / 每应用 38MB** | 建应用与快照都要算这笔账：`app.create` 要给分阶段进度，`dumpDataDir` 约 4.5MB、0.7s |
 | **LISTEN/NOTIFY 不可用** | PGlite + pg-gateway 下监听端收不到通知（实测 0 条）。后端推前端只能走网关 SSE |
 | **HMR 首帧会丢** | 客户端要在 WS 握手**之前**挂好 `message` 监听，否则丢掉 Vite 的 `connected` |
