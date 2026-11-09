@@ -82,8 +82,9 @@ function ToolCard({ activity, dense = false }: { activity: ToolActivity; dense?:
   return (
     <div
       className={cn(
+        // 不填底色：卡片只靠 1px 边框立住。填色一多，整屏就是一片灰块叠灰块。
         'overflow-hidden rounded-lg border',
-        dense ? 'border-line-soft/50' : 'bg-panel-2/70',
+        dense ? 'border-line-soft/50' : '',
         running ? 'border-brand/30' : 'border-line-soft',
       )}
     >
@@ -147,7 +148,7 @@ function ExploreCard({ items }: { items: readonly ToolActivity[] }) {
   const hint = latestHint(items)
 
   return (
-    <div className="overflow-hidden rounded-lg border border-line-soft bg-panel-2/50">
+    <div className="overflow-hidden rounded-lg border border-line-soft">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -234,7 +235,11 @@ function DelegationCard({
   const conversation = activity.childConversationId?.replace(/^conv_?/i, '') ?? null
 
   return (
-    <div className="overflow-hidden rounded-lg border border-brand/25 bg-brand-dim/15">
+    /*
+     * 派活卡**不填底色**，只留品牌色边框 —— 它要跟普通工具行区分开的是"这是另一个 Agent"，
+     * 靠标题颜色和边框就够了；再加一层底色，满宽之后会变成一条很重的色带。
+     */
+    <div className="overflow-hidden rounded-lg border border-brand/25">
       <button
         type="button"
         onClick={() => setManual((value) => !(value ?? open))}
@@ -316,7 +321,7 @@ function SubagentCard({
   const [open, setOpen] = useState(true)
 
   return (
-    <div className="overflow-hidden rounded-lg border border-brand/25 bg-brand-dim/15">
+    <div className="overflow-hidden rounded-lg border border-brand/25">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -482,10 +487,15 @@ function Bubble({
     <div className={cn('tenon-rise flex', isUser ? 'justify-end' : 'justify-start')}>
       <div
         className={cn(
-          'max-w-[92%] rounded-xl px-3.5 py-2.5 text-[13.5px] leading-[1.75]',
+          'text-[13.5px] leading-[1.75]',
+          /*
+           * 助手消息**不画气泡**：正文直接铺在面板上、与工具行同宽（满宽）。
+           * 满宽再套一层灰底就成了"整列灰墙"，所以这里刻意没有 bg / ring / padding。
+           * 用户消息反过来 —— 那是唯一需要"我发的"这个视觉标记的东西，留着气泡。
+           */
           isUser
-            ? 'bg-brand-dim/80 text-[#f4e7de] ring-1 ring-brand/20'
-            : 'bg-panel-2 text-ink ring-1 ring-line-soft',
+            ? 'max-w-[92%] rounded-xl bg-brand-dim/80 px-3.5 py-2.5 text-[#f4e7de] ring-1 ring-brand/20'
+            : 'w-full text-ink',
         )}
       >
         <Parts
@@ -514,7 +524,7 @@ function LiveBubble({
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-[92%] space-y-1.5">
+      <div className="w-full space-y-1.5">
         {/* 工具卡片与探索组：和历史上的同一条渲染路径，避免"跑的时候一堆、跑完变一行" */}
         {live.tools.length > 0 && (
           <Activities activities={live.tools} {...(treeOf === undefined ? {} : { treeOf })} />
@@ -527,12 +537,12 @@ function LiveBubble({
            * 还没出正文时只给一行状态，**不画气泡**：一个空的圆角块看着像"答了一半"，
            * 而这一刻其实是"它还在动"。面板拆掉之后，"现在在干什么"就落在这里。
            */
-          <div className="flex items-center gap-2 px-1 text-[11.5px] text-faint">
+          <div className="flex items-center gap-2 text-[11.5px] text-faint">
             <span className="size-1.5 rounded-full bg-brand tenon-pulse" />
             {activity ?? '思考中…'}
           </div>
         ) : (
-          <div className="rounded-xl bg-panel-2 px-3.5 py-2.5 text-[13.5px] leading-[1.75] text-ink ring-1 ring-line-soft">
+          <div className="text-[13.5px] leading-[1.75] text-ink">
             <TextBlock text={live.text} />
             <span className="tenon-caret" />
           </div>
@@ -633,11 +643,16 @@ export function MessageList({
         isEmpty && 'flex flex-col justify-center',
       )}
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-3">
+      <div className="mx-auto flex max-w-3xl flex-col gap-4">
         {isEmpty ? empty : null}
         {items.map((item) =>
           item.kind === 'tools' ? (
-            <div key={item.key} className="flex flex-col gap-1.5">
+            /*
+             * 工具行与正文**同宽（满宽）**。曾经这里靠 flex 冒充满宽、气泡却是 `max-w-[92%]`，
+             * 一屏里"文字块窄、卡片宽"来回切，右边缘全是参差（844px 下差 61px）。
+             * 现在两边都满宽，左边对齐、右边也齐。
+             */
+            <div key={item.key} className="flex w-full flex-col gap-1.5">
               <Activities activities={item.activities} treeOf={treeOf} />
             </div>
           ) : (
@@ -658,17 +673,15 @@ export function MessageList({
         ) : (
           /* 气泡没了但树还在（子会话比正文活得久）：单独铺一次，别让它消失 */
           plan.orphans.length > 0 && (
-            <div className="flex justify-start">
-              <div className="w-full max-w-[92%] space-y-1.5">
-                {plan.orphans.map((tree) => (
-                  <SubagentCard
-                    key={tree.conversationId}
-                    role={tree.role}
-                    rows={tree.rows}
-                    active={tree.active}
-                  />
-                ))}
-              </div>
+            <div className="w-full space-y-1.5">
+              {plan.orphans.map((tree) => (
+                <SubagentCard
+                  key={tree.conversationId}
+                  role={tree.role}
+                  rows={tree.rows}
+                  active={tree.active}
+                />
+              ))}
             </div>
           )
         )}
