@@ -1,0 +1,15 @@
+{
+  "id": "auth-feature",
+  "kind": "feature",
+  "hidden": true,
+  "label": "登录与用户体系",
+  "description": "给已有后端应用补上账号体系：auth_users / auth_sessions 两张表、初始化与登录/登出接口、默认拒绝的全局守卫、登录页与成员管理。这是「功能包」而不是模板 —— 由 applyAuthFeature() 应用到**已经存在**的应用上，不出现在建应用对话框里。",
+  "entry": null,
+  "variables": ["appSlug", "authCookieName"],
+  "notes": [
+    "为什么是功能包：鉴权不是「建应用时选的一个模板」，而是「这个应用现在需要登录」。后者必须能在已有代码上加，且不能覆盖用户改过的 App.tsx。",
+    "为什么必须先是后端：会话、口令哈希、谁都改不了的默认拒绝，只能在后端。纯前端应用会被先补上后端（applyApiFeature），这不是可选步骤。",
+    "为什么 cookie 名带应用 slug：浏览器不按端口隔离 cookie。同机两个应用都用 `sid` 会互相踢下线，而且现象像「随机掉登录」。",
+    "为什么用 node:crypto 的 scrypt 而不是 argon2/bcrypt：后两个是原生模块，生成应用的依赖不许引入需按平台编译的包（STATUS §5）。"
+  ]
+}

@@ -228,6 +228,35 @@ export const rpcMethods = {
     }),
   },
 
+  /**
+   * 给已有应用加账号体系（登录 / 用户）。
+   *
+   * 与 `app.addBackend` 同样的幂等语义（`tenon.auth` 已存在就返回 `applied: false`）。
+   * 纯前端应用会被先补上后端 —— 登录必须在后端拦，否则只是一个画上去的锁。
+   *
+   * `wired: false` 表示 `src/main.tsx` 的形状和模板不一样，登录页没自动包进去：
+   * 接口已经会 401，但页面上没有登录框。调用方要把这件事说出来，不能当成功。
+   */
+  'app.addAuth': {
+    input: z.object({
+      id: Id,
+      /** 加完是否重装依赖（默认 true：纯前端应用会顺带补 Nest/TypeORM） */
+      installDeps: z.boolean().default(true),
+    }),
+    output: z.object({
+      applied: z.boolean(),
+      /** `already` = 本来就有登录 */
+      reason: z.string().optional(),
+      /** 这次顺带补了后端 */
+      addedBackend: z.boolean(),
+      files: z.array(z.string()),
+      /** `src/main.tsx` 有没有自动包上 `<AuthGate>` */
+      wired: z.boolean(),
+      notes: z.array(z.string()),
+      deps: z.object({ installed: z.boolean(), command: z.string(), durationMs: z.number() }).nullable(),
+    }),
+  },
+
   'chat.submit': {
     input: ChatSubmitInput,
     output: z.object({

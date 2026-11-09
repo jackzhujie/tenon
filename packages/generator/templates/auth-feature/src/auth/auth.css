@@ -1,0 +1,320 @@
+/*
+ * 登录相关的样式。**自带全部变量**，不依赖应用自己的 styles.css ——
+ * 那个文件是用户/Agent 会改的，把登录页的观感绑在它上面，等于让改配色的人
+ * 顺手把登录页改坏（而且他不会知道）。
+ *
+ * 配色分两套（`[data-tone='light'|'dark']`），由 `tone.ts` 按**应用实际的底色**选，
+ * 不跟系统偏好走：见那个文件头部的说明。
+ *
+ * 只用 `.auth-` 前缀，加进来不会碰到任何已有 class。
+ */
+
+.auth-page,
+.auth-panel,
+.auth-bar,
+.auth-splash {
+  --auth-surface: #ffffff;
+  --auth-ink: #18181b;
+  --auth-ink-soft: #52525b;
+  --auth-line: #e4e4e7;
+  --auth-accent: #1f6feb;
+  /* 实心按钮上的文字：亮色底 → 白字；暗色底 → 近黑（白字压在浅蓝上只有 ~2:1 对比度） */
+  --auth-on-accent: #ffffff;
+  --auth-bad: #b42318;
+}
+
+.auth-page[data-tone='dark'],
+.auth-panel[data-tone='dark'],
+.auth-bar[data-tone='dark'],
+.auth-splash[data-tone='dark'] {
+  --auth-surface: #1b1b1f;
+  --auth-ink: #f4f4f5;
+  --auth-ink-soft: #a1a1aa;
+  --auth-line: #2e2e33;
+  --auth-accent: #6ea8ff;
+  --auth-on-accent: #0b0b0f;
+  --auth-bad: #ff8a80;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--auth-bg, #f7f7f8);
+  color: var(--auth-ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+}
+
+.auth-page[data-tone='light'] {
+  --auth-bg: #f7f7f8;
+}
+
+.auth-page[data-tone='dark'] {
+  --auth-bg: #111113;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px;
+  background: var(--auth-surface);
+  border: 1px solid var(--auth-line);
+  border-radius: 14px;
+}
+
+.auth-eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--auth-ink-soft);
+}
+
+.auth-title {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.auth-hint {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--auth-ink-soft);
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--auth-ink-soft);
+}
+
+.auth-field input,
+.auth-row input,
+.auth-row select {
+  appearance: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--auth-ink);
+  background: var(--auth-surface);
+  border: 1px solid var(--auth-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.auth-field input:focus,
+.auth-row input:focus,
+.auth-row select:focus {
+  border-color: var(--auth-accent);
+}
+
+.auth-submit {
+  appearance: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--auth-on-accent);
+  background: var(--auth-accent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auth-submit-inline {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.auth-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--auth-bad);
+}
+
+.auth-notice {
+  margin: 0;
+  font-size: 13px;
+  color: var(--auth-accent);
+}
+
+.auth-splash {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--auth-bg, #f7f7f8);
+  color: var(--auth-ink-soft);
+  font-size: 13px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.auth-splash[data-tone='light'] {
+  --auth-bg: #f7f7f8;
+}
+
+.auth-splash[data-tone='dark'] {
+  --auth-bg: #111113;
+}
+
+/* ---------- 登录后右上角那条账号栏 ---------- */
+
+.auth-bar {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 10px;
+  font-size: 12px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: var(--auth-ink-soft);
+  background: color-mix(in srgb, var(--auth-surface) 88%, transparent);
+  border: 1px solid var(--auth-line);
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+}
+
+.auth-who {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-role {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--auth-line);
+}
+
+.auth-link {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--auth-accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.auth-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.auth-muted {
+  color: var(--auth-ink-soft);
+  font-size: 12px;
+}
+
+/* ---------- 成员浮层 ---------- */
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(9, 9, 11, 0.45);
+}
+
+.auth-panel {
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  background: var(--auth-surface);
+  color: var(--auth-ink);
+  border: 1px solid var(--auth-line);
+  border-radius: 14px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.auth-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.auth-panel-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.auth-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.auth-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-list-mail {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--auth-line);
+}
+
+.auth-sub h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.auth-row input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.auth-row select {
+  flex: 0 0 auto;
+}

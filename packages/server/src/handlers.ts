@@ -42,7 +42,7 @@ import type { ComponentRuntime } from './components.js'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { exportStamp, exportStatic } from './export.js'
-import { applyApiFeature, listTemplates } from '@tenon/generator'
+import { applyApiFeature, applyAuthFeature, listTemplates } from '@tenon/generator'
 import type {
   ComponentProblem,
   InstalledComponent,
@@ -371,6 +371,81 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         files: [...result.files],
         addedScripts: [...result.addedScripts],
         addedDependencies: [...result.addedDependencies],
+        notes: [...result.notes],
+        deps: depsResult,
+      }
+    },
+
+    /*
+     * 给已有应用加账号体系。步骤与加后端同构（写文件 → 装依赖 → 提交 → 重启预览），
+     * 只有一处不同：`wired` 可能为 false（main.tsx 形状不匹配）。那不是失败 ——
+     * 文件已经写好、接口已经开始 401 —— 但必须让调用方知道"页面上还没有登录框"。
+     */
+    'app.addAuth': async (input) => {
+      const app = core.apps.require(input.id)
+      const paths = appPaths(core.home, app.id)
+      const result = await applyAuthFeature({ repoDir: paths.repoDir })
+
+      if (!result.applied) {
+        return {
+          applied: false,
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+          addedBackend: false,
+          files: [],
+          wired: true,
+          notes: [],
+          deps: null,
+        }
+      }
+
+      for (const note of result.notes) pushTenonLog(bus, app.id, 'info', '加登录', note)
+      if (!result.wired) {
+        pushTenonLog(
+          bus,
+          app.id,
+          'warn',
+          '登录页没自动接上',
+          'src/main.tsx 的形状和模板不一样：请把 <App/> 包进 <AuthGate>。在那之前接口会 401，而页面上没有登录框。',
+        )
+      }
+
+      let depsResult: { installed: boolean; command: string; durationMs: number } | null = null
+      if (input.installDeps) {
+        depsResult = await deps.preview.ensureDeps(app.id).catch((error: unknown) => {
+          pushTenonLog(
+            bus,
+            app.id,
+            'warn',
+            '账号体系依赖没装好（代码已写入，重装一次即可）',
+            error instanceof Error ? error.message : String(error),
+          )
+          return null
+        })
+      }
+
+      const committed = await gitops.commitAll(paths.repoDir, 'chore: 加上登录与用户体系')
+      if (committed !== undefined) {
+        bus.publish({ type: 'git.commit', appId: app.id, sha: committed.sha, message: committed.message })
+      }
+
+      const state = preview.status(app.id).state
+      if (state === 'ready' || state === 'starting') {
+        await preview.start(app.id, { restart: true }).catch((error: unknown) => {
+          pushTenonLog(
+            bus,
+            app.id,
+            'warn',
+            '重启预览失败，请手动点一次启动',
+            error instanceof Error ? error.message : String(error),
+          )
+        })
+      }
+
+      return {
+        applied: true,
+        addedBackend: result.addedBackend,
+        files: [...result.files],
+        wired: result.wired,
         notes: [...result.notes],
         deps: depsResult,
       }

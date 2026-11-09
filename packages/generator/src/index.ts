@@ -16,8 +16,12 @@ export {
 export {
   applyApiFeature,
   API_FEATURE,
+  applyAuthFeature,
+  AUTH_FEATURE,
   type ApplyApiFeatureInput,
   type ApplyApiFeatureResult,
+  type ApplyAuthFeatureInput,
+  type ApplyAuthFeatureResult,
 } from './features.js'
 export {
   collectFiles,

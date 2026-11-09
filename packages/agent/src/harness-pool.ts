@@ -22,6 +22,7 @@ import { codeactExtension } from './tools/codeact.js'
 import { previewExtension, type PageDriverProvider } from './tools/preview.js'
 import { reviewExtension } from './tools/review.js'
 import { backendExtension } from './tools/backend.js'
+import { authExtension } from './tools/auth.js'
 import { componentsExtension } from './tools/components.js'
 import { subagentExtension } from './tools/subagent.js'
 
@@ -66,11 +67,13 @@ export interface HarnessPoolOptions {
     readonly hub?: { readonly config: HubConfig | null; readonly dir: string } | undefined
   }
   /**
-   * 后端工具（`add_backend`）：给已有应用补后端。
+   * 后端工具（`add_backend` / `add_auth`）：给已有应用补后端、补账号体系。
    *
    * 只给主角色 —— 子角色是只读调查的，"给这个应用加个后端"是设计决策，属于 Builder。
    * `onApplied` 由 server 接到「装依赖 + 预览开着就重启」，不给也能用（只是模型下一步
    * 跑 tsc 会看到一堆找不到 @nestjs/core）。
+   *
+   * 两个工具共用一个钩子：它们的收尾动作是同一件事（把跑着的后端按新代码重启一次）。
    */
   backend?: {
     readonly onApplied?: (appId: string) => void | Promise<void>
@@ -243,7 +246,19 @@ export class HarnessPool {
         ? {}
         : { onApplied: this.options.backend.onApplied }),
     })
+    /*
+     * 账号工具（`add_auth`）：与后端工具同生共死 —— 它是「这个应用需要登录」的一句话，
+     * 而"要不要登录"和"要不要后端"一样，只有人和主角色能判断。
+     */
+    const auth = authExtension({
+      appId,
+      repoDir: paths.repoDir,
+      ...(this.options.backend?.onApplied === undefined
+        ? {}
+        : { onApplied: this.options.backend.onApplied }),
+    })
     tools.push(...(backend.tools ?? []))
+    tools.push(...(auth.tools ?? []))
     if (components !== undefined) tools.push(...(components.tools ?? []))
     tools.push(...(subagent.tools ?? []))
     /*
@@ -253,8 +268,9 @@ export class HarnessPool {
      */
     const rootTools: ToolRegistration[] = [
       ...(coding.tools ?? []),
-      // 加后端是设计决策，只给主角色（子角色按白名单从 tools 里挑，不给它们这条）
+      // 加后端 / 加登录都是设计决策，只给主角色（子角色按白名单从 tools 里挑，不给它们这两条）
       ...(backend.tools ?? []),
+      ...(auth.tools ?? []),
       ...(subagent.tools ?? []),
       ...(components?.tools ?? []),
     ]
@@ -269,6 +285,7 @@ export class HarnessPool {
     const extensions: Extension[] = [
       coding,
       backend,
+      auth,
       subagent,
       preview,
       review,
@@ -278,6 +295,7 @@ export class HarnessPool {
     const registry = createRegistry()
     registry.install(coding)
     registry.install(backend)
+    registry.install(auth)
     registry.install(preview)
     registry.install(review)
     registry.install(codeact.extension)
