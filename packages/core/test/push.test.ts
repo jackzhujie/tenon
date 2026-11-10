@@ -26,8 +26,9 @@ describe('推送失败分类（DoD 的"失败信息能指路"）', () => {
     const failure = classifyPushError(httpError(403))
     expect(failure.code).toBe('FORBIDDEN')
     expect(failure.message).toContain('写权限')
-    // fine-grained 令牌最容易错的一步：没单独勾仓库
+    // 两种最容易混的原因：没单独勾仓库 / 勾了但 Contents 只给了 Read
     expect(failure.hint).toContain('单独勾选')
+    expect(failure.hint).toContain('Read and write')
   })
 
   it('404 要同时提"地址错"和"私有库看不见" —— GitHub 对两者都回 404', () => {

@@ -75,7 +75,9 @@ export function classifyPushError(error: unknown): PushFailure {
       code: 'FORBIDDEN',
       message: '令牌有效，但没有这个仓库的写权限（403）',
       hint:
-        'Fine-grained 令牌要**单独勾选**这一个仓库（默认是"只对选中的仓库生效"）。' +
+        'Fine-grained 令牌要**单独勾选**这一个仓库，且 Repository permissions → ' +
+        '**Contents 必须是 Read and write**。只给 Read 时读得到、推不了，报的就是这个 403 —— ' +
+        '很容易误判成"仓库勾错了"，因为仓库列表里确实有它。' +
         '组织仓库还需要该组织的同意（Settings → Personal access tokens → Pending requests）。',
     }
   }
@@ -176,9 +178,17 @@ export async function pushToRemote(options: PushToRemoteOptions): Promise<PushRe
         remoteRef: ref,
         force: options.force === true,
         onAuth: () => ({ username, password: token }),
-        // 认证失败不要重试三次：401 重试三次还是 401，只是让用户多等 2 秒。
-        // `cancel: true` 让拿到的第一个错误原样冒出来，分类才准
-        onAuthFailure: () => ({ cancel: true }),
+        /*
+         * **刻意不提供 `onAuthFailure`。**
+         *
+         * 它返回 `{ cancel: true }` 时 isomorphic-git 抛的是 `UserCanceledError`，
+         * 那个异常里没有状态码 —— 于是 401 被 cancel 吃掉了，分类器只能给 UNKNOWN，
+         * 用户拿到的是"把这条消息看一遍"这种没用的建议。真机验过：错令牌本来该是
+         * `AUTH` 却报成 `UNKNOWN`，根因就在这里。
+         *
+         * 代价是失败时会多试两次认证（正确令牌一次就成功，不受影响）。用两次 HTTPS
+         * 往返换"401 能正确分类"，值。
+         */
         onProgress: options.onProgress,
       })
       pushed += 1

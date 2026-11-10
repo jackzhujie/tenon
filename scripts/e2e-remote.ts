@@ -83,9 +83,26 @@ async function rpc<T>(method: string, input: unknown): Promise<T> {
   return body.data as T
 }
 
-/** 系统 git 当裁判：远端到底有没有这个 ref */
+/**
+ * 系统 git 当裁判：远端到底有没有这个 ref。
+ *
+ * **凭据用 `GIT_CONFIG_*` 环境变量递进去，不拼 URL。** 两个原因：
+ * - 拼进 URL 的凭据会进 `.git/config`、进日志、进任何打印 url 的地方
+ * - 私有仓库裸 `ls-remote` 会**卡在交互式认证上**（等 stdin 输入用户名密码），
+ *   写脚本时表现为"跑着跑着不动了"，看不出是在等输入
+ * 顺带关掉终端提示：宁可直接失败，也不要一个等着人打字的子进程。
+ */
 async function lsRemote(pattern: string): Promise<string[]> {
-  const { stdout } = await run('git', ['ls-remote', url, pattern])
+  const basic = Buffer.from(`x-access-token:${gitToken}`).toString('base64')
+  const { stdout } = await run('git', ['ls-remote', url, pattern], {
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.extraHeader',
+      GIT_CONFIG_VALUE_0: `Authorization: Basic ${basic}`,
+    },
+  })
   return stdout
     .split('\n')
     .map((line) => line.trim())
@@ -115,11 +132,17 @@ try {
   check('再读一次仍然没有明文', !JSON.stringify(reread.remote).includes(gitToken))
 
   console.log('\n3) 发布：本地备份库 + 远端都要成')
+  /*
+   * `force: true` 是刻意的：这条脚本验的是**推送链路**，不是门禁。模板应用还没装依赖，
+   * 门禁里那几项必然不过（`e2e:release` 里正是拿它当"检查没过要拦住"的素材）。
+   * 用 force 放行、记录里留 `forced` 痕迹，比为了过门禁去装一遍依赖划算得多。
+   * 门禁本身仍会跑一遍 —— force 只影响拦不拦，不影响跑不跑。
+   */
   const published = await rpc<{
     version: string
     release: { id: string }
     remote: { ok: boolean; code: string | null; message: string | null; refs: number } | null
-  }>('release.publish', { appId: app.id })
+  }>('release.publish', { appId: app.id, force: true })
   check('发布本身成功', published.release.id !== '')
   check('远端那格不是 null（配过就一定会推）', published.remote !== null)
   check('远端推送成功', published.remote?.ok === true, JSON.stringify(published.remote))
