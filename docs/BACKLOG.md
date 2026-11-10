@@ -131,7 +131,7 @@
 | 3.6 | 文档站 | DESIGN M6 列过；现在只有 `docs/*.md` | M | 静态站可直接从 md 生成，链回仓库 |
 | 3.7 | ✅ **e2e 不在 CI** —— 已完成（2026-11-09） | 现在 10 条真机链路进 CI：零依赖那四条（`hub` / `diff` / `release` / `provider`，合计 22s）**三平台都跑**；要联网装 React/NestJS 的四条与 docker 两条跑在 ubuntu runner（自带 docker，所以 `postgres` / `docker` 不再 skip）。**上 CI 当天就抓到第一个只在慢盘出现的 bug**：`commitAll` 的「列目录 → 读文件」竞态，macOS runner 上 4/4 复现、本机一次不现（见 STATUS §5） | ✅ | ① 至少一条能跑 e2e 的车道 ② 门禁不因 e2e 变慢变脆（`needs: check`，先修平台问题）③ GUI 类明确写出"为什么不进" |
 | 3.8 | Agent 命令无沙箱 | `SECURITY.md` 自己列为"当前最大信任边界" | L | 分阶段：先做可审计（命令白名单/确认弹窗），再谈隔离 |
-| 3.9 | 真远端 push | 欠账③：只推本地裸库；GitHub 要凭据 + 真网络 | S | 配好凭据后能推真远端，失败信息能指路 |
+| 3.9 | ✅ **真远端 push** —— 已完成（2026-11-10） | 发布对话框里填一次 HTTPS 地址 + 令牌（`SecretBox` 加密存库、永不回显），之后每次发布把分支与版本 tag 推过去。**远端失败不影响发布本身**（本地备份库已是完整一版），失败分类成 401/403/404/422/网络五种并各给一句指路，另有「再推一次」不消耗新版本号。只支持 HTTPS + 令牌：isomorphic-git 的 push 没有 SSH 实现（见 STATUS §5） | ✅ | ① 配好凭据能真推 ② 错令牌给出可操作的原因 ③ 补推不多出版本号（`e2e:remote` 六节，需真仓库） |
 | 3.10 | Linux 桌面端 | README：M7 后置；CI 出 AppImage 但无 GUI 验证 | M | 真机启动 + 冒烟；或明确宣布不做 |
 | 3.11 | DCO 未强制 | 欠账：靠 `git commit -s` 自觉 | XS | CI 里加一条 `Signed-off-by` 检查 |
 | 3.12 | 第三方组件上架与审核 | DESIGN §17：M7 后置 | L | 不排期 |

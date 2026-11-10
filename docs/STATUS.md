@@ -110,7 +110,7 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 844 项单测 + 集成测试（约 305s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                       # 874 项单测 + 集成测试（约 305s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -3547,6 +3547,9 @@ DoD 写的是「快照保留策略」。真去量发现**大头不是快照**：
 | **"删依赖"是安全操作，但必须先停预览** | `node_modules` 是缓存，删了会重装；可它正被运行中的预览进程用着，删掉之后下一次请求才炸，日志里还看不出与"刚才点了下清理"有关。所以 `storage.clean` 里先查 `preview.status()`，`ready`/`starting` 直接拒 |
 | **"先 readdir 再 readFile"不是原子操作** | `commitAll` 靠「列目录 → 逐个算 blob oid → `git.add` 时再重读一遍」判断改动。这两步之间文件消失（Agent 原子写、装依赖、写对象的临时文件被 rename）会让整轮对话**崩在 ENOENT**。macOS runner 的慢盘上 **4/4 复现**，本机快盘一次都看不见 —— 这就是把 e2e 放进三平台的意义。三处都要容错，且**判据不是同一个**：readdir/readFile 抛 node 的 `ENOENT`，`git.add` 抛 isomorphic-git 的 `NotFoundError`（它把 lstat 的 ENOENT 折成自己的类）—— 只认 `ENOENT` 会让第二处继续崩 |
 | **`_tmp_<pid>_<hex>` 要按名字剪掉，不能"读到了再说"** | 写对象/打包时落在**工作区根目录**的临时文件。慢盘上它停得够久就会被 readdir 逮到；那一刻若 readFile 赢了，它就被当用户文件提交进历史，之后每次 clone 都带着这坨垃圾。容错只保证"不崩"，剪枝才保证"不进版本库"，两件事都要做 |
+| **isomorphic-git 的 push 只实现了 HTTP 传输** | 想"推真远端"只有 HTTPS + 令牌这一条路：SSH 要机器上有 `ssh` 二进制或加载 ssh2，前者与"运行时不依赖外部二进制"冲突，后者在打包产物里是一堆额外要处理的东西。`git.ts` 里 `mirrorTo` 之所以手写对象搬运（而不是调 `git.push`）也是同一件事 —— 它对**本地路径**也会报 `requires a "http" parameter` |
+| **GitHub 对"私有库无权访问"回 404，不是 403** | 于是 404 有两种完全不同的原因（地址拼错 / 令牌看不到这个私有库），文案必须同时说这两种，否则用户会一直去改地址。403 是"看得到但没写权限"，401 是"令牌不认" —— 三者分开是"失败信息能指路"的全部内容 |
+| **`core.apps.create` 是 async，忘了 `await` 报的错在下游** | 拿到的是 Promise，`.id` 是 undefined，于是一路传到 `appPaths(home, undefined)` 才炸，报的是 `The "path" argument must be of type string` —— 看起来像路径拼接的 bug。更坑的是未 await 的 Promise 会在**测试结束、`afterEach` 关库之后**才 reject，表现成一句莫名其妙的 `database is not open`。看到这两个错先回头看有没有漏 `await` |
 | **`fs.rm` 的 `ENOTEMPTY` 不是 Windows 专属** | macOS 的 APFS 一样会：递归删除跑到 rmdir 那步时目录又非空了（`close()` 之后还有一个短命的 git 收尾写在落盘 —— `agent.close()` 不等已经在跑的 `commitTurn`）。生产代码早就用 `removeTree` 退避重试兜住了（`apps.delete`，还考虑了杀软扫描），**测试里的裸 `rm` 没有**，于是单测在 `afterEach` 炸。`maxRetries` + `retryDelay` 就是为这几个错误码准备的 |
 
 

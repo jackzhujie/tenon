@@ -111,12 +111,12 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 ```bash
 pnpm lint                   # eslint（约 3 秒）：0 error / 10 warning（那 10 条是 effect 里 setState 的性能建议）
 pnpm typecheck              # 18 个 tsconfig（含 scripts 与 spikes）
-pnpm test                   # 844 项单测/集成，约 305s（含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 874 项单测/集成，约 305s（含 PGlite 冷启动与真 QuickJS）
 pnpm build:web              # 前端产物（server 启动时把它读进内存）
 ```
 
 端到端脚本按链路分组。**多数要联网装依赖**；标 ★ 的是真机全链路（真进程 / 真 Chromium / 真容器）。
-下表 26 条；另有三个**人眼截图验收**脚本不在表内：`pnpm shot:settings` / `shot:export` / `shot:plugins`。
+下表 27 条；另有三个**人眼截图验收**脚本不在表内：`pnpm shot:settings` / `shot:export` / `shot:plugins`。
 
 **其中 10 条每次 CI 都跑**（见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)）：
 
@@ -144,6 +144,7 @@ pnpm build:web              # 前端产物（server 启动时把它读进内存�
 | `pnpm e2e:docker` ★ | 21 | 导出 Docker 上下文并真跑 compose（带 PG、迁移自动跑；没有 docker 就 skip） |
 | `pnpm e2e:postgres` ★ | 31 | 起真 `postgres:18-alpine`，验跨档迁移与纯 JS 快照（没有 docker 就 skip） |
 | `pnpm e2e:real` ★ | 12 | 真模型验收（要真 key）：一句话做待办 → 一句话装组件 → 真 Chromium 里加/删/问 |
+| `pnpm e2e:remote` ★ | — | **推到真远端**：令牌从库里解出来交给 onAuth、分支与 tag 真的到了远端（用系统 git `ls-remote` 当裁判）、错令牌报 AUTH 且指路、补推不多出版本号。要一个专门的测试仓库（会往里写东西），没给 `TENON_TEST_GIT_URL` / `TENON_TEST_GIT_TOKEN` 就 skip |
 | `pnpm e2e:provider` | — | BYOK 接线（真模型验收的前置）：本地假 OpenAI 服务走完整条路 —— profile 加密存库 → resolveModel → 流式 SSE → 工具落盘 → 收尾 → commit。**它证明我们这一侧没坏**，于是接真 key 后若不对，问题只可能在模型或提示词 |
 | `pnpm shot:chat` ★ | — | **对话界面的人眼验收**：faux 剧本真跑一轮（探索 + 派 explore 子 Agent）→ Electron 截四张图（合并后 / 子代理运行中 / 展开 / Markdown）。三件事都是"看着对不对"，单测答不了 |
 | `pnpm e2e:backend` ★ | 14 | **加后端真跑一遍**：建纯前端应用（`type: module`）→ `app.addBackend` → 起预览 → 经网关 `/api/health` 200 / `poolMax=1` → 产物目录钉成 commonjs → 前端照常开 |
