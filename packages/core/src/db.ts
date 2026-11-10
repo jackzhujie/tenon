@@ -149,6 +149,32 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idx_component_kv_app ON component_kv(app_id);
     `,
   },
+  {
+    version: 5,
+    name: 'app-remotes',
+    /*
+     * 每个应用的远端仓库（DESIGN §12.1 的「配好远端就推远端」）。
+     *
+     * 三个决定：
+     * 1. **主键就是 app_id** —— 一个应用只能有一个远端。多远端听起来有用，实际场景是
+     *    "我想同时推 GitHub 和 Gitee"，那是分发策略，不是发布本身；真要做也应该是
+     *    N 张记录 + 一个默认，不是现在拍脑袋弄成这样。
+     * 2. **`token_enc` 可空** —— 公开仓库不需要令牌就能读，但**写**必须有。所以它空着
+     *    时能推的场景只有"远端允许匿名推送"（几乎不存在），界面要明确要求填。
+     * 3. **`ON DELETE CASCADE`** —— 和 component_kv 刻意相反：凭据属于这个应用，
+     *    应用删了必须跟着消失。留一行孤儿密文既是垃圾也是风险面。
+     */
+    sql: `
+      CREATE TABLE app_remotes (
+        app_id TEXT PRIMARY KEY REFERENCES apps(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        username TEXT,
+        token_enc BLOB,
+        branch TEXT NOT NULL DEFAULT 'main',
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 type Row = Record<string, unknown>

@@ -56,7 +56,7 @@ import type {
 } from '@tenon/protocol'
 import { TenonError } from '@tenon/protocol'
 import { pickSnapshot, type PickedSnapshot } from './revert-data.js'
-import { inspectRelease, publishRelease } from './release.js'
+import { inspectRelease, publishRelease, pushReleaseToRemote } from './release.js'
 import type { SseBus } from './sse.js'
 
 export interface ServerDeps {
@@ -769,6 +769,45 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
        */
       core.settings.remove(lastCheckKey(app.id))
       return result
+    },
+
+    /*
+     * 远端仓库。四个方法的分工是刻意的：
+     * - `release.remote` 读（永远不带令牌明文）
+     * - `release.remote.set` 写（token 留空 = 不动已有的）
+     * - `release.remote.clear` 删（和"保存一个空 token"必须是两件事）
+     * - `release.push` 补推（本地那次发布已经成功了，别重跑门禁）
+     */
+    'release.remote': async (input) => {
+      const app = core.apps.require(input.appId)
+      return { remote: core.remotes.get(app.id) }
+    },
+
+    'release.remote.set': async (input) => {
+      const app = core.apps.require(input.appId)
+      // 地址校验在 store 里（`assertSafeRemoteUrl`）：只收 https、拒绝 url 里带凭据。
+      // 放在那里而不是这里，是因为"能不能安全地存"是存储层的知识
+      const remote = core.remotes.upsert({
+        appId: app.id,
+        url: input.url,
+        username: input.username ?? null,
+        token: input.token ?? null,
+        branch: input.branch,
+      })
+      return { remote }
+    },
+
+    'release.remote.clear': async (input) => {
+      const app = core.apps.require(input.appId)
+      const existed = core.remotes.get(app.id) !== null
+      core.remotes.clear(app.id)
+      return { cleared: existed }
+    },
+
+    'release.push': async (input) => {
+      const app = core.apps.require(input.appId)
+      const outcome = await pushReleaseToRemote({ core, app, version: input.version })
+      return { outcome }
     },
 
     /*

@@ -21,11 +21,12 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { CHECK_LABELS } from '@tenon/protocol'
-import type { CheckOutcome, GitCommit, Release } from '@tenon/protocol'
+import type { CheckOutcome, GitCommit, Release, ReleaseRemote } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
 import { relativeTime } from '../../lib/relative-time.js'
 import { rpc } from '../../lib/rpc.js'
+import { RemoteSection, shortUrl } from './RemoteSection.js'
 import type {
   CheckOutcomeResult,
   PublishOutcome,
@@ -179,6 +180,31 @@ export function ReleaseDialog({
   } | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
 
+  /*
+   * 远端配置。**打开对话框时拉一次**：它是服务端状态（加密令牌在库里），不跟着应用
+   * 列表走 —— 用户可能刚在另一台设备上配过。
+   */
+  const [remote, setRemote] = useState<ReleaseRemote | null>(null)
+  /** 补推进行中。和 `publishing` 分开：补推不跑门禁，几秒钟的事 */
+  const [pushingRemote, setPushingRemote] = useState(false)
+
+  useEffect(() => {
+    if (!open || appId === null) return
+    let cancelled = false
+    void rpc('release.remote', { appId }).then(
+      (value) => {
+        if (!cancelled) setRemote(value.remote)
+      },
+      () => {
+        // 读不到就当没配：这一块是"可选"，不该因为它把发布拦住
+        if (!cancelled) setRemote(null)
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [open, appId])
+
   useEffect(() => {
     if (exporting === false) return
     const started = Date.now()
@@ -218,6 +244,39 @@ export function ReleaseDialog({
     },
     [appId],
   )
+
+  /**
+   * 补推远端。
+   *
+   * 刻意**不走 `release.publish`**：远端失败时本地那一版已经发出去了，重跑发布
+   * 会多出一个版本号、历史里两条一模一样的记录。这里只做"把同一版再推一次"。
+   */
+  const pushAgain = useCallback(async (): Promise<void> => {
+    if (appId === null || result === null) return
+    setPushingRemote(true)
+    try {
+      const { outcome } = await rpc('release.push', { appId, version: result.version })
+      setResult((prev) => (prev === null ? prev : { ...prev, remote: outcome }))
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setResult((prev) =>
+        prev === null
+          ? prev
+          : {
+              ...prev,
+              remote: {
+                ok: false,
+                code: 'UNKNOWN',
+                message,
+                hint: '再点一次重试；还不行就确认远端地址现在能打开、网络或代理正常。',
+                refs: 0,
+              },
+            },
+      )
+    } finally {
+      setPushingRemote(false)
+    }
+  }, [appId, result])
 
   const runCheck = useCallback(async (): Promise<void> => {
     setChecking(true)
@@ -563,6 +622,16 @@ export function ReleaseDialog({
             </span>
           </label>
 
+          <RemoteSection
+            // 配置变了（保存 / 清除 / 首次加载完成）就让表单重挂一次，
+            // 用它代替"effect 里同步 setState"那种写法
+            key={remote === null ? 'none' : `${remote.url}#${String(remote.updatedAt)}`}
+            appId={appId}
+            disabled={publishing || pushingRemote}
+            remote={remote}
+            onChange={setRemote}
+          />
+
           {error !== null && blocked === null && (
             <p className="rounded-lg border border-bad/30 bg-[#241413] px-3 py-2 text-[11.5px] leading-relaxed text-bad">
               {error}
@@ -599,6 +668,42 @@ export function ReleaseDialog({
                   <CopyButton text={`git clone ${result.backupPath}`} />
                 </div>
               </div>
+
+              {/*
+                远端单独一块，且**不和"已发布"共用一个绿色**：本地成功、远端失败是
+                完全正常的一种结果（网络、令牌过期），用绿色报喜会让用户以为推上去了。
+              */}
+              {result.remote !== null && (
+                <div className="space-y-1 border-t border-ok/20 pt-2">
+                  <span className="text-[10.5px] text-faint">远端</span>
+                  {result.remote.ok ? (
+                    <p className="text-[11px] leading-relaxed text-ok">
+                      已推到 {remote === null ? '远端仓库' : shortUrl(remote.url)}（{result.remote.refs} 个 ref）
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] leading-relaxed text-bad">{result.remote.message}</p>
+                      {result.remote.hint !== null && (
+                        <p className="text-[10.5px] leading-relaxed text-faint">{result.remote.hint}</p>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={pushingRemote}
+                          data-tenon-action="remote-retry"
+                          onClick={() => void pushAgain()}
+                        >
+                          {pushingRemote ? '推送中…' : '再推一次'}
+                        </Button>
+                        <span className="text-[10.5px] text-faint">
+                          这一版已经发出去了，补推不会多出一个版本号
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

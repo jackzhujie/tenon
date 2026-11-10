@@ -54,6 +54,7 @@
     "shot:release": "tsx scripts/shot-release.ts",
     "shot:chat": "tsx scripts/shot-chat.ts",
     "e2e:docker": "tsx scripts/export-docker.ts",
+    "e2e:remote": "tsx scripts/e2e-remote.ts",
     "e2e:postgres": "tsx scripts/e2e-postgres.ts",
     "e2e:packaged": "tsx scripts/e2e-packaged-gate.ts",
     "e2e:backend": "tsx scripts/e2e-add-backend.ts",

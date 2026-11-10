@@ -15,9 +15,9 @@
  * "现在能不能发"，`release.publish` 拿同一个函数的结果决定发不发。两份实现的话，
  * 必然出现"预检说能发、点下去却被拦"，而门禁一旦开始说两套话，用户就会绕过它。
  */
-import type { App, GateOutcome, Release, ReleaseGateStatus } from '@tenon/protocol'
+import type { App, GateOutcome, Release, ReleaseGateStatus, RemotePushOutcome } from '@tenon/protocol'
 import { TenonError } from '@tenon/protocol'
-import { appPaths, gitops, nextVersion, type CoreServices } from '@tenon/core'
+import { appPaths, gitops, nextVersion, pushToRemote, type CoreServices, type PushToRemoteOptions } from '@tenon/core'
 import { checkLabel, formatGateSummary, runQualityGate } from '@tenon/agent'
 
 /** 拦在发布之前、**与代码质量无关**的事。它们不跑门禁，因为跑也没用 */
@@ -167,6 +167,8 @@ export interface PublishOptions {
    * 但没权不知道自己在放过什么；结果会写进发布记录（`gateStatus: 'forced'`）。
    */
   force?: boolean
+  /** 测试注入：远端推送用假的 `git.push`（真推要连 GitHub，单测里不连网） */
+  pushImpl?: PushToRemoteOptions['pushImpl']
 }
 
 export interface PublishResult {
@@ -178,6 +180,13 @@ export interface PublishResult {
   branch: string
   /** 这次真正写进备份库的对象数；0 表示备份库已经是最新的 */
   objects: number
+  /**
+   * 远端推送的结果。**没配远端时是 null**。
+   *
+   * 与本地那一步的区别是刻意的：本地失败 → 抛错、删 tag、不算发布；
+   * 远端失败 → 只是这一格里的 `ok=false`。理由在 `pushReleaseToRemote` 的注释里。
+   */
+  remote: RemotePushOutcome | null
   /** 这次跑过的检查。发成功之后界面也要显示"它是怎么过的" */
   gate: GateOutcome
 }
@@ -254,6 +263,15 @@ export async function publishRelease(options: PublishOptions): Promise<PublishRe
     gateSummary: formatGateSummary(gate),
   })
 
+  /*
+   * 远端放在**记账之后**：它失败不该把这一版变成"没发出去"。
+   *
+   * 顺序在这里是有意义的 —— 如果先推远端、再写记录，一次网络抖动就会留下
+   * "tag 在、远端有、记录没有"的半成品，而界面依据记录画历史，用户会以为丢了。
+   * 现在的语义一句话：**本地备份库成功 = 发布成功**，远端是分发，可以补推。
+   */
+  const remote = core.remotes.get(app.id) === null ? null : await pushReleaseToRemote({ core, app, version, pushImpl: options.pushImpl })
+
   return {
     release,
     version,
@@ -261,6 +279,81 @@ export async function publishRelease(options: PublishOptions): Promise<PublishRe
     backupPath: paths.backupRepo,
     branch: mirrored.branch,
     objects: mirrored.objects,
+    remote,
     gate,
+  }
+}
+
+export interface PushReleaseOptions {
+  core: CoreServices
+  app: App
+  version: string
+  /** 测试注入：替换真正的 `git.push`（真推要连 GitHub，单测里不连网） */
+  pushImpl?: PushToRemoteOptions['pushImpl']
+}
+
+/**
+ * 把某一版推到配置好的远端。**不抛错**：所有失败都变成 `ok=false` 的那一格。
+ *
+ * 为什么不抛：调用它的人（`publishRelease` 与 `release.push`）都要把失败**显示**给
+ * 用户，而不是让整个 RPC 变成错误 —— 那会让界面上"发布成功"的绿框直接消失，
+ * 用户会以为版本没发出去（其实本地备份库是完整的）。
+ *
+ * 唯一的例外是"根本没配远端"：那在 `release.push` 里是个明确的用户操作错误。
+ */
+export async function pushReleaseToRemote(options: PushReleaseOptions): Promise<RemotePushOutcome> {
+  const { core, app, version } = options
+  const remote = core.remotes.reveal(app.id)
+  if (remote === null) {
+    return {
+      ok: false,
+      code: 'NO_REMOTE',
+      message: '这个应用还没有配置远端仓库',
+      hint: '在发布对话框的「远端仓库」里填一次地址和令牌。',
+      refs: 0,
+    }
+  }
+
+  const paths = appPaths(core.home, app.id)
+  const tags = await gitops.listTags(paths.repoDir)
+  if (!tags.includes(version)) {
+    return {
+      ok: false,
+      code: 'UNKNOWN',
+      message: `仓库里没有 ${version} 这个标签，可能这一版已经被清理掉了`,
+      hint: '重新发布一版即可；已经推到远端的旧版本不受影响。',
+      refs: 0,
+    }
+  }
+
+  try {
+    const result = await pushToRemote({
+      dir: paths.repoDir,
+      url: remote.url,
+      username: remote.username,
+      token: remote.token,
+      branch: remote.branch,
+      tags: [version],
+      pushImpl: options.pushImpl,
+    })
+    if (result.ok) return { ok: true, code: null, message: null, hint: null, refs: result.refs }
+    return {
+      ok: false,
+      code: result.failure.code,
+      message: result.failure.message,
+      hint: result.failure.hint,
+      refs: result.refs,
+    }
+  } catch (error) {
+    // pushToRemote 已经把 git 的错误都收进 failure 了；能到这里的是更外层的意外
+    // （比如令牌解密炸了）。同样不能让它把"发布成功"顶掉
+    const reason = error instanceof Error ? error.message : String(error)
+    return {
+      ok: false,
+      code: 'UNKNOWN',
+      message: `推送时出了意外：${reason.slice(0, 300)}`,
+      hint: '先看远端地址是否还能打开；再看本机网络。',
+      refs: 0,
+    }
   }
 }

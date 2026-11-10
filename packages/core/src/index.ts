@@ -13,6 +13,7 @@ import { ComponentStore } from './stores/components.js'
 import { PriceStore } from './stores/prices.js'
 import { ProviderStore } from './stores/providers.js'
 import { ReleaseStore } from './stores/releases.js'
+import { RemoteStore } from './stores/remotes.js'
 import { SettingsStore } from './stores/settings.js'
 
 export * from './paths.js'
@@ -24,6 +25,15 @@ export * from './ids.js'
 export * from './secrets.js'
 export * as files from './files.js'
 export * as gitops from './git.js'
+export * as pushes from './push.js'
+export {
+  classifyPushError,
+  pushToRemote,
+  type PushFailure,
+  type PushFailureCode,
+  type PushResult,
+  type PushToRemoteOptions,
+} from './push.js'
 export * from './schema-change.js'
 export * from './release.js'
 export * from './taskgraph.js'
@@ -32,6 +42,7 @@ export * from './usage.js'
 export * from './stores/apps.js'
 export * from './stores/providers.js'
 export * from './stores/releases.js'
+export * from './stores/remotes.js'
 export * from './stores/settings.js'
 export { SETTING_KEYS, budgetKey, lastCheckKey, readBudget, readLastCheck, NO_BUDGET } from './setting-keys.js'
 export { PriceStore, type UpsertPriceInput } from './stores/prices.js'
@@ -53,6 +64,8 @@ export interface CoreServices {
   readonly prices: PriceStore
   /** 组件的键值存储（M6 第 4 步） */
   readonly components: ComponentStore
+  /** 每个应用的远端仓库与加密令牌（推 GitHub / GitLab / Gitea） */
+  readonly remotes: RemoteStore
   close(): void
 }
 
@@ -79,6 +92,7 @@ export function openCore(options: OpenCoreOptions = {}): CoreServices {
     providers: new ProviderStore(db, box),
     prices: new PriceStore(db),
     components: new ComponentStore(db),
+    remotes: new RemoteStore(db, box),
     close() {
       db.close()
     },

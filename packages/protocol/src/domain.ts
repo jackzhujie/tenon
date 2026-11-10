@@ -121,6 +121,48 @@ export const Release = z.object({
 })
 export type Release = z.infer<typeof Release>
 
+/**
+ * 应用的远端仓库（推 GitHub / GitLab / Gitea 等 HTTPS 远端）。
+ *
+ * **令牌永远不在这份结构里** —— 只有 `hasToken` 和一个尾四位提示。前端拿不到明文，
+ * 也就不会出现在渲染进程的内存与日志里。这是"能配凭据"这个功能的最低要求：
+ * 一旦回显，它就和写在配置文件里没区别了。
+ */
+export const ReleaseRemote = z.object({
+  appId: z.string(),
+  /** HTTPS 仓库地址，例如 `https://github.com/me/my-app.git` */
+  url: z.string(),
+  /** 少数服务（GitLab 的 oauth2、Gitea 的自己的账号）需要显式用户名 */
+  username: z.string().nullable(),
+  /** 推哪个分支。默认 `main`，与本地发布分支一致 */
+  branch: z.string(),
+  hasToken: z.boolean(),
+  /** `…a1b2` 这种尾四位，让用户确认"填的是哪一个令牌"，本身不构成泄密 */
+  tokenHint: z.string().nullable(),
+  updatedAt: z.number(),
+})
+export type ReleaseRemote = z.infer<typeof ReleaseRemote>
+
+/**
+ * 一次远端推送的结果。
+ *
+ * 与本地备份库（`mirrorTo`）的区别：那是**发布本身**（失败就不算发出去），
+ * 这是**分发**（失败不该让本地那次发布作废）。所以它的失败是一等公民，
+ * 带着 `code` 与 `hint` 回到界面，而不是抛异常。
+ */
+export const RemotePushOutcome = z.object({
+  ok: z.boolean(),
+  /** `ok=false` 时的分类，界面据此给不同的指路文案 */
+  code: z.enum(['NO_REMOTE', 'AUTH', 'FORBIDDEN', 'NOT_FOUND', 'NON_FAST_FORWARD', 'NETWORK', 'UNKNOWN']).nullable(),
+  /** 原始错误里那句人话（已脱敏：不含 url 与令牌） */
+  message: z.string().nullable(),
+  /** 该怎么做。`ok=true` 时为 null */
+  hint: z.string().nullable(),
+  /** 推上去的 ref 个数（分支 + tag） */
+  refs: z.number().int().nonnegative(),
+})
+export type RemotePushOutcome = z.infer<typeof RemotePushOutcome>
+
 export const ProviderKind = z.enum(['builtin', 'openai-compatible'])
 export type ProviderKind = z.infer<typeof ProviderKind>
 

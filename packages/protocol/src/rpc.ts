@@ -28,6 +28,8 @@ import {
   PreviewStatus,
   ProviderProfile,
   Release,
+  ReleaseRemote,
+  RemotePushOutcome,
   TaskGraph,
   ReleaseCheckRecord,
   TemplateInfo,
@@ -560,9 +562,59 @@ export const rpcMethods = {
       branch: z.string(),
       /** 这次真正写进备份库的对象数；0 表示备份库本来就已经是最新的 */
       objects: z.number().int().nonnegative(),
+      /**
+       * 远端推送的结果。**没配远端时是 null**（和"配了但失败了"必须能分开 ——
+       * 前者是用户没这个需求，后者是要他去修令牌）。
+       *
+       * 这里的失败**不会**让 `release` 变成失败：本地备份库已经是一个完整版本，
+       * 远端只是分发。要重试请调 `release.push`，不用重跑那 30 秒门禁。
+       */
+      remote: RemotePushOutcome.nullable(),
       /** 这次跑过的检查。发成功之后前端也要显示"它是怎么过的" */
       gate: GateOutcome,
     }),
+  },
+
+  /**
+   * 远端仓库的配置。**读回来的东西里没有令牌明文**，只有 `hasToken` 与尾四位。
+   *
+   * 分成三个方法而不是一个 `save({ url?, token? })`：清空是个独立的意图
+   * （"我不想再推到任何地方"），混进"保存"里就会出现"想把令牌改掉，结果把整个远端删了"。
+   */
+  'release.remote': {
+    input: z.object({ appId: Id }),
+    output: z.object({ remote: ReleaseRemote.nullable() }),
+  },
+  /**
+   * 保存远端。`token` 留空表示**不动已有令牌** —— 换个地址不该逼人重填。
+   * 要清掉令牌只能走 `release.remote.clear`，这条语义是故意的。
+   */
+  'release.remote.set': {
+    input: z.object({
+      appId: Id,
+      /** 必须 https://，且不能带 `user:pass@`（会被原样存库并显示在界面上） */
+      url: z.string().min(1).max(2000),
+      /** GitLab 填 `oauth2`，Gitea 填账号名；GitHub 可不填 */
+      username: z.string().max(200).optional(),
+      token: z.string().max(500).optional(),
+      branch: z.string().max(200).optional(),
+    }),
+    output: z.object({ remote: ReleaseRemote }),
+  },
+  'release.remote.clear': {
+    input: z.object({ appId: Id }),
+    output: z.object({ cleared: z.boolean() }),
+  },
+  /**
+   * 重新推远端（发布后补推）。
+   *
+   * 为什么要有：远端失败时本地那次发布**已经算成功**了（备份库是完整的）。重试
+   * 界面上的"再推一次"只该做这一件事，而不是让用户重跑一遍门禁再发一版 ——
+   * 那会白白多出一个版本号，历史里两条一模一样的记录。
+   */
+  'release.push': {
+    input: z.object({ appId: Id, version: z.string().min(1).max(100) }),
+    output: z.object({ outcome: RemotePushOutcome }),
   },
 
   /**
