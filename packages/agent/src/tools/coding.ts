@@ -55,11 +55,22 @@ export interface CodingToolsOptions {
   repoDir: string
 }
 
-/** 归一化后的路径必须落在 root 之内；`../` 与绝对路径都要挡住 */
+/**
+ * 归一化后的路径必须落在 root 之内；`../` 与绝对路径都要挡住。
+ *
+ * ⚠️ `root` 自己也要先 `resolve` 一遍。只 `resolve(candidate)` 是不够的：
+ * `resolve` 会把结果统一成平台分隔符，而 `root` 若带着另一种分隔符（`C:\Users\x/.tenon/...`
+ * 这种混合写法在拼接路径时很常见），`startsWith` 就永远不成立 —— 于是**明明在里面的路径
+ * 被判成外面**。Windows 上必现，POSIX 上看不出来。
+ *
+ * 大小写：Windows 不区分大小写，同一个目录可能以 `C:` 或 `c:` 出现，所以比较前折叠。
+ */
 export function isInside(root: string, candidate: string): boolean {
-  const absolute = resolve(root, candidate)
-  const prefix = root.endsWith(sep) ? root : `${root}${sep}`
-  return absolute === root || absolute.startsWith(prefix)
+  const fold = (text: string): string => (process.platform === 'win32' ? text.toLowerCase() : text)
+  const base = fold(resolve(root))
+  const absolute = fold(resolve(base, candidate))
+  const prefix = base.endsWith(sep) ? base : `${base}${sep}`
+  return absolute === base || absolute.startsWith(prefix)
 }
 
 /**

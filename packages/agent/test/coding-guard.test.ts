@@ -6,7 +6,7 @@
  */
 import { homedir } from 'node:os'
 import { describe, expect, it } from 'vitest'
-import { checkCommand, createCodingTools } from '../src/tools/coding.js'
+import { checkCommand, createCodingTools, isInside } from '../src/tools/coding.js'
 
 /**
  * 假的仓库路径：`.tenon` 下面，和真实布局一致（否则"repo 内放行"那几条测不到）。
@@ -49,6 +49,26 @@ describe('bash 护栏确实接在工具上', () => {
     const { text, isError } = await runBash('cat ~/.tenon/tenon.db')
     expect(isError).toBe(true)
     expect(text).toContain('不在这个应用的工作区')
+  })
+})
+
+describe('isInside：root 自己没归一也要判对', () => {
+  /*
+   * 这三条是 Windows CI 逼出来的：`REPO` 在 Windows 上是 `C:\Users\x/.tenon/...`
+   * （homedir 给反斜杠、后面用 `/` 拼），而 `resolve` 只归一 candidate、不归一 root，
+   * 于是 `startsWith` 永远不成立 —— **明明在里面的路径被判成外面**，护栏把正常命令全拦了。
+   * POSIX 上完全看不出来，因为分隔符只有一种。
+   */
+  it('root 尾部带分隔符', () => {
+    expect(isInside(`${REPO}/`, 'src')).toBe(true)
+  })
+
+  it('root 里带 `.` 片段', () => {
+    expect(isInside(`${REPO}/./`, 'src')).toBe(true)
+  })
+
+  it('同级兄弟目录仍是外面（别把归一修成"全都算里面"）', () => {
+    expect(isInside(REPO, '../other/repo')).toBe(false)
   })
 })
 

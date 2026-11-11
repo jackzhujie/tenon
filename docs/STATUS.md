@@ -110,7 +110,7 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 917 项单测 + 集成测试（约 305s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                       # 920 项单测 + 集成测试（约 305s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -3557,7 +3557,8 @@ DoD 写的是「快照保留策略」。真去量发现**大头不是快照**：
 | **`cwd` 钉住 ≠ 命令受限** | bash 工具把 cwd 钉在 `repo/`，看着像"只能在这里干活"，但**一句话就出去了**：`cd ..`、`cd /etc`、任何绝对路径。文件工具靠 `args.path` 拦（`pathGuard`），bash 没有 `path` 可拦 —— 四条工具里三条有护栏，缺的那条恰好权限最大。判据必须落在**命令字符串**上（`bashGuard`），而不是执行环境 |
 | **拦 `~/.tenon` 之前要先判"在不在当前 repo 内"** | 应用仓库自己就在 `~/.tenon/apps/<id>/repo` 里 —— 直接把 `.tenon` 当禁区会把**正常的绝对路径**全拦死（模型常把路径算成绝对再写）。所以判的是 `isInside(repoDir, path)`，不是"路径里有没有 .tenon" |
 | **护栏只处理能静态确定的，含 `$` 就放行** | `cd $(mktemp -d)`、`cd "$WORK/sub"` 一律放行：静态解析猜错的方向是**把正常命令打死**，模型收到莫名其妙的拒绝后会开始换各种写法，那一轮就废了。所以宁可漏，漏的部分由"这是护栏不是沙箱"的措辞兜住 |
-| **纯函数测试全绿 ≠ 护栏接上了** | 少写一行 `guard: bashGuard(repoDir)`，`checkCommand` 的 26 项照样全绿。必须有一条接线级的：从 `createCodingTools` 取出 bash 真的 `execute` 一次。**验证这条测试本身有效的方法**是临时把 `guard:` 摘掉 —— 它应该红（红在 `exec` 层报"working directory does not exist"，而那条命令一次都不会真执行：测试里的 repoDir 故意不存在） |
+| **纯函数测试全绿 ≠ 护栏接上了** | 少写一行 `guard: bashGuard(repoDir)`，`checkCommand` 那 29 项照样全绿。必须有一条接线级的：从 `createCodingTools` 取出 bash 真的 `execute` 一次。**验证这条测试本身有效的方法**是临时把 `guard:` 摘掉 —— 它应该红（红在 `exec` 层报"working directory does not exist"，而那条命令一次都不会真执行：测试里的 repoDir 故意不存在） |
+| **`isInside(root, x)` 里 root 自己也要归一** | 只归一 candidate 不够：`resolve(candidate)` 会把结果统一成平台分隔符，而 root 若带着另一种分隔符（`C:\Users\x/.tenon/...` —— 用 `/` 拼 homedir 时很常见），`startsWith` 就永远不成立，**明明在里面的路径被判成外面**。表现是"护栏把正常命令全拦了"，POSIX 上一次都现不出来。`pathGuard` 用的是同一个函数，只是生产代码传的恰好是 `path.join` 出来的全反斜杠路径，所以四年没露 —— 是 Windows CI 第一次跑新测试时抓到的 |
 
 
 ---

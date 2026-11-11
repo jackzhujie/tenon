@@ -111,7 +111,7 @@ spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI �
 ```bash
 pnpm lint                   # eslint（约 3 秒）：0 error / 10 warning（那 10 条是 effect 里 setState 的性能建议）
 pnpm typecheck              # 18 个 tsconfig（含 scripts 与 spikes）
-pnpm test                   # 917 项单测/集成，约 305s（含 PGlite 冷启动与真 QuickJS）
+pnpm test                   # 920 项单测/集成，约 305s（含 PGlite 冷启动与真 QuickJS）
 pnpm build:web              # 前端产物（server 启动时把它读进内存）
 ```
 
