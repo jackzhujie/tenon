@@ -110,7 +110,7 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 ```bash
 pnpm install && pnpm dev:web    # ★ 一条命令起界面：server + 前端，浏览器打开 http://127.0.0.1:5173
 pnpm dev:desktop                # ★ 桌面版（同一份 server，Electron 只当壳）
-pnpm test                       # 874 项单测 + 集成测试（约 305s，含 PGlite 冷启动与真 QuickJS）
+pnpm test                       # 888 项单测 + 集成测试（约 305s，含 PGlite 冷启动与真 QuickJS）
 pnpm smoke                      # 9 项端到端（真 spawn 进程，走 HTTP + SSE）
 pnpm e2e:preview                # 16 项真机全链路：建应用 → 装依赖 → 起 Vite → 经网关打开 → 断言定位注入 → 改文件 → HMR（要联网）
 pnpm e2e:inspector               # ★ 13 项精调链路：Electron 真 Chromium，父页面与网关跨源，模拟 Alt+Click（要联网）
@@ -3549,6 +3549,7 @@ DoD 写的是「快照保留策略」。真去量发现**大头不是快照**：
 | **`_tmp_<pid>_<hex>` 要按名字剪掉，不能"读到了再说"** | 写对象/打包时落在**工作区根目录**的临时文件。慢盘上它停得够久就会被 readdir 逮到；那一刻若 readFile 赢了，它就被当用户文件提交进历史，之后每次 clone 都带着这坨垃圾。容错只保证"不崩"，剪枝才保证"不进版本库"，两件事都要做 |
 | **isomorphic-git 的 push 只实现了 HTTP 传输** | 想"推真远端"只有 HTTPS + 令牌这一条路：SSH 要机器上有 `ssh` 二进制或加载 ssh2，前者与"运行时不依赖外部二进制"冲突，后者在打包产物里是一堆额外要处理的东西。`git.ts` 里 `mirrorTo` 之所以手写对象搬运（而不是调 `git.push`）也是同一件事 —— 它对**本地路径**也会报 `requires a "http" parameter` |
 | **GitHub 对"私有库无权访问"回 404，不是 403** | 于是 404 有两种完全不同的原因（地址拼错 / 令牌看不到这个私有库），文案必须同时说这两种，否则用户会一直去改地址。403 是"看得到但没写权限"，401 是"令牌不认" —— 三者分开是"失败信息能指路"的全部内容 |
+| **"本月花了多少"在只有累计的账本上是个近似，而近似落晚就静默少算** | `harness.usage()` 只有累计、没有时间维度。要按自然月算，只能落一条月初基线再做差。第一版**只在设了额度时**才落基线 —— 于是"先跑一轮、再设额度"的用户，基线落到的已经是花完之后的累计，`本月已用` 显示 0，闸看起来永远不拦。修法：每轮开始都补基线（缺就补），把误差压到"安装到第一次发消息之间"（那段本来没有花费）。**这条是集成测试抓到的**：纯函数测试验不出时序，它只验算术 |
 | **fine-grained token 的权限 ≠ 用户对这个仓库的权限** | `GET /repos/{o}/{r}` 返回的 `permissions.push: true` 说的是"**你本人**能推"，不是"这个 token 能推"。token 只给了 Contents: Read 时：`upload-pack`（读）回 200、`receive-pack`（写）回 403，而 API 看起来一切正常 —— 只有真推才会露。判断写权限最轻的办法是直接打 `GET /<o>/<r>.git/info/refs?service=git-receive-pack`，200 才算有（只读那条是 `git-upload-pack`，两者要分开测） |
 | **`onAuthFailure` 返回 `cancel` 会连 HTTP 状态码一起吃掉** | isomorphic-git 在 auth 被 cancel 时抛 `UserCanceledError`，那个异常里没有 `data.statusCode` —— 于是 401 被折成"未知错误"，用户拿到的是"把这条消息看一遍"这种废话。想让 401 被正确报成"令牌不被接受"，就**别提供 `onAuthFailure`**（代价是失败时多试两次认证，成功路径不受影响）。这条只有真机能发现：单测里 fake 的 push 直接抛 `HttpError`，永远走不到 cancel 那一支 |
 | **`core.apps.create` 是 async，忘了 `await` 报的错在下游** | 拿到的是 Promise，`.id` 是 undefined，于是一路传到 `appPaths(home, undefined)` 才炸，报的是 `The "path" argument must be of type string` —— 看起来像路径拼接的 bug。更坑的是未 await 的 Promise 会在**测试结束、`afterEach` 关库之后**才 reject，表现成一句莫名其妙的 `database is not open`。看到这两个错先回头看有没有漏 `await` |
