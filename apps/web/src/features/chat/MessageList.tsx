@@ -15,6 +15,8 @@ import {
   type Activity,
 } from '../../lib/tool-groups.js'
 import type { LiveTurn, ToolActivity } from '../../hooks/useWorkspace.js'
+import { useT } from '../../lib/i18n.js'
+import type { ChatKey } from '../../lib/messages/chat.js'
 
 /**
  * 工具名 → 中文标签。
@@ -22,22 +24,22 @@ import type { LiveTurn, ToolActivity } from '../../hooks/useWorkspace.js'
  * 没登记的会原样显示（`subagent` 那种看起来像内部标识符的名字，用户读不懂），
  * 所以**新增工具时顺手补一行** —— 界面上出现英文工具名就是这里漏了。
  */
-const TOOL_LABEL: Record<string, string> = {
-  read: '读取',
-  write: '写入',
-  edit: '修改',
-  bash: '执行',
-  subagent: '派活',
-  add_backend: '加后端',
-  install_component: '装组件',
-  remove_component: '卸组件',
-  list_components: '列组件',
-  typecheck: '类型检查',
-  git_diff: '看改动',
-  preview_assert: '验页面',
-  preview_screenshot: '看页面',
-  preview_click: '点页面',
-  preview_open: '开页面',
+const TOOL_LABEL_KEY: Record<string, ChatKey> = {
+  read: 'tool.label.read',
+  write: 'tool.label.write',
+  edit: 'tool.label.edit',
+  bash: 'tool.label.bash',
+  subagent: 'tool.label.subagent',
+  add_backend: 'tool.label.addBackend',
+  install_component: 'tool.label.installComponent',
+  remove_component: 'tool.label.removeComponent',
+  list_components: 'tool.label.listComponents',
+  typecheck: 'tool.label.typecheck',
+  git_diff: 'tool.label.gitDiff',
+  preview_assert: 'tool.label.previewAssert',
+  preview_screenshot: 'tool.label.previewScreenshot',
+  preview_click: 'tool.label.previewClick',
+  preview_open: 'tool.label.previewOpen',
 }
 
 /** 一行摘要：能让人一眼看出这个工具动了哪个文件、跑了什么命令 */
@@ -73,8 +75,10 @@ function Dot({ status }: { status: Activity['status'] }) {
 }
 
 function ToolCard({ activity, dense = false }: { activity: ToolActivity; dense?: boolean }) {
+  const { t } = useT()
   const [open, setOpen] = useState(false)
-  const label = TOOL_LABEL[activity.name] ?? activity.name
+  const labelKey = TOOL_LABEL_KEY[activity.name]
+  const label = labelKey === undefined ? activity.name : t(labelKey)
   const summary = summarize(activity)
   const running = activity.status === 'running'
   const hasSpend = activity.spend !== undefined && activity.spend.totalTokens > 0
@@ -107,14 +111,14 @@ function ToolCard({ activity, dense = false }: { activity: ToolActivity; dense?:
         {hasSpend && (
           <span
             className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-faint"
-            title="这一次派活消耗的用量（不是这个角色的累计）"
+            title={t('chat.tool.spendHint')}
           >
             {formatTokens(activity.spend!.totalTokens)}
             {activity.spend!.costUsd > 0 ? ` · ${formatCost(activity.spend!.costUsd)}` : ''}
           </span>
         )}
         <span className={cn('shrink-0 text-[10px] text-faint', hasSpend ? 'ml-2' : 'ml-auto')}>
-          {open ? '收起' : '详情'}
+          {open ? t('chat.card.collapse') : t('chat.card.detail')}
         </span>
       </button>
       {/*
@@ -129,7 +133,7 @@ function ToolCard({ activity, dense = false }: { activity: ToolActivity; dense?:
           </pre>
         ) : (
           <div className="border-t border-line-soft px-3 py-2 text-[11px] text-faint">
-            {running ? '还在执行，输出会一段一段出来' : '这次调用没有输出'}
+            {running ? t('chat.tool.runningHint') : t('chat.tool.empty')}
           </div>
         ))}
     </div>
@@ -143,6 +147,7 @@ function ToolCard({ activity, dense = false }: { activity: ToolActivity; dense?:
  * `读取 README.md` 那种连续七八条不该占掉整屏。展开还是逐条原文（复用 ToolCard）。
  */
 function ExploreCard({ items }: { items: readonly ToolActivity[] }) {
+  const { t } = useT()
   const [open, setOpen] = useState(false)
   const running = items.some((item) => item.status === 'running')
   const hint = latestHint(items)
@@ -156,13 +161,15 @@ function ExploreCard({ items }: { items: readonly ToolActivity[] }) {
       >
         <Dot status={running ? 'running' : 'ok'} />
         <span className={cn('shrink-0 text-[12px]', running ? 'text-brand-soft' : 'text-muted')}>
-          查看代码
+          {t('chat.explore.title')}
         </span>
-        <span className="shrink-0 text-[11px] text-faint">{describeExploration(items)}</span>
+        <span className="shrink-0 text-[11px] text-faint">{describeExploration(items, t)}</span>
         {!open && hint !== '' && (
           <span className="truncate font-mono text-[10.5px] text-faint/70">{hint}</span>
         )}
-        <span className="ml-auto shrink-0 text-[10px] text-faint">{open ? '收起' : '展开'}</span>
+        <span className="ml-auto shrink-0 text-[10px] text-faint">
+          {open ? t('chat.card.collapse') : t('chat.card.expand')}
+        </span>
       </button>
       {open && (
         <div className="space-y-1 border-t border-line-soft/60 p-1.5">
@@ -177,6 +184,7 @@ function ExploreCard({ items }: { items: readonly ToolActivity[] }) {
 
 /** 子会话的步骤行（运行中的派活卡与孤儿树共用同一套渲染） */
 function TreeRows({ rows }: { rows: ConversationTree['rows'] }) {
+  const { t } = useT()
   return (
     <div className="space-y-0.5 border-t border-brand/15 px-2 py-1">
       {rows.map((row) => (
@@ -191,9 +199,9 @@ function TreeRows({ rows }: { rows: ConversationTree['rows'] }) {
            * 再写一遍只是噪声 —— 那种节点只显示它在哪个阶段。
            */}
           {row.node.kind !== 'generation' || row.node.scope !== 'delegated' ? (
-            <span className="shrink-0 text-muted">{titleOf(row.node)}</span>
+            <span className="shrink-0 text-muted">{titleOf(row.node, t)}</span>
           ) : null}
-          <span className="min-w-0 flex-1 truncate text-faint">{statusText(row.node)}</span>
+          <span className="min-w-0 flex-1 truncate text-faint">{statusText(row.node, t)}</span>
         </div>
       ))}
     </div>
@@ -220,6 +228,7 @@ function DelegationCard({
   /** 运行中的那棵树（跑完后 pi 会回收，所以这里通常是空） */
   tree?: ConversationTree
 }) {
+  const { t } = useT()
   const role = typeof activity.args?.['role'] === 'string' ? activity.args['role'] : null
   const task = typeof activity.args?.['task'] === 'string' ? activity.args['task'] : ''
   const running = activity.status === 'running' || tree?.active === true
@@ -251,7 +260,9 @@ function DelegationCard({
             activity.status === 'error' ? 'bg-bad' : running ? 'bg-brand tenon-pulse' : 'bg-ok/70',
           )}
         />
-        <span className="shrink-0 text-[12px] text-brand-soft">{roleLabel(role) ?? '子 Agent'}</span>
+        <span className="shrink-0 text-[12px] text-brand-soft">
+          {roleLabel(role) ?? t('chat.subagent.name')}
+        </span>
         {task !== '' && <span className="truncate text-[11px] text-faint">{task}</span>}
         {/* 跑完要知道"结束得干不干净"，所以状态词比步数重要 */}
         <span
@@ -260,18 +271,24 @@ function DelegationCard({
             activity.status === 'error' ? 'text-bad' : running ? 'text-brand-soft' : 'text-faint',
           )}
         >
-          {activity.status === 'error' ? '失败' : running ? '运行中' : '已结束'}
+          {activity.status === 'error'
+            ? t('chat.delegation.failed')
+            : running
+              ? t('chat.delegation.running')
+              : t('chat.delegation.done')}
         </span>
         {hasSpend && (
           <span
             className="shrink-0 font-mono text-[10px] tabular-nums text-faint"
-            title="这一次派活消耗的用量（不是这个角色的累计）"
+            title={t('chat.tool.spendHint')}
           >
             {formatTokens(activity.spend!.totalTokens)}
             {activity.spend!.costUsd > 0 ? ` · ${formatCost(activity.spend!.costUsd)}` : ''}
           </span>
         )}
-        <span className="shrink-0 text-[10px] text-faint">{open ? '收起' : '展开'}</span>
+        <span className="shrink-0 text-[10px] text-faint">
+          {open ? t('chat.card.collapse') : t('chat.card.expand')}
+        </span>
       </button>
 
       {open &&
@@ -285,7 +302,7 @@ function DelegationCard({
               </div>
             ) : (
               <div className="px-3 py-2 text-[11px] text-faint">
-                {running ? '还在跑，步骤会一段一段出来' : '这次派活没有留下结论'}
+                {running ? t('chat.delegation.runningHint') : t('chat.delegation.noConclusion')}
               </div>
             )}
             {/*
@@ -294,7 +311,7 @@ function DelegationCard({
              */}
             {conversation !== null && (
               <div className="border-t border-brand/10 px-3 py-1 font-mono text-[10px] text-faint/80">
-                子会话 #{conversation}
+                {t('chat.delegation.conversation', { id: conversation })}
               </div>
             )}
           </div>
@@ -318,6 +335,7 @@ function SubagentCard({
   rows: ConversationTree['rows']
   active: boolean
 }) {
+  const { t } = useT()
   const [open, setOpen] = useState(true)
 
   return (
@@ -328,9 +346,13 @@ function SubagentCard({
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
       >
         <span className={cn('size-1.5 shrink-0 rounded-full', active ? 'bg-brand tenon-pulse' : 'bg-ok/70')} />
-        <span className="shrink-0 text-[12px] text-brand-soft">{roleLabel(role) ?? '子 Agent'}</span>
+        <span className="shrink-0 text-[12px] text-brand-soft">
+          {roleLabel(role) ?? t('chat.subagent.name')}
+        </span>
         <span className="shrink-0 text-[10.5px] text-faint">{rows.length} 步</span>
-        <span className="ml-auto shrink-0 text-[10px] text-faint">{open ? '收起' : '展开'}</span>
+        <span className="ml-auto shrink-0 text-[10px] text-faint">
+          {open ? t('chat.card.collapse') : t('chat.card.expand')}
+        </span>
       </button>
       {open && <TreeRows rows={rows} />}
     </div>
@@ -520,7 +542,8 @@ function LiveBubble({
   /** 子 Agent 的树插在"工具"与"正文"之间 —— 它是这一步正在发生的事 */
   children?: React.ReactNode
 }) {
-  const activity = rootActivity(graph)
+  const { t } = useT()
+  const activity = rootActivity(graph, t)
 
   return (
     <div className="flex justify-start">
@@ -539,7 +562,7 @@ function LiveBubble({
            */
           <div className="flex items-center gap-2 text-[11.5px] text-faint">
             <span className="size-1.5 rounded-full bg-brand tenon-pulse" />
-            {activity ?? '思考中…'}
+            {activity ?? t('chat.live.thinking')}
           </div>
         ) : (
           <div className="text-[13.5px] leading-[1.75] text-ink">

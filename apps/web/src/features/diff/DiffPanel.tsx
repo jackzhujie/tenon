@@ -21,6 +21,7 @@ import {
   STATUS_SIGN,
 } from '../../lib/diff.js'
 import { relativeTime } from '../../lib/relative-time.js'
+import { useT } from '../../lib/i18n.js'
 
 export interface DiffPanelProps {
   commits: GitCommit[]
@@ -54,6 +55,7 @@ const ROW_CLASS: Record<'ctx' | 'add' | 'del', string> = {
 }
 
 function DiffFileBlock({ file }: { file: DiffFile }) {
+  const { t } = useT()
   const [full, setFull] = useState(false)
   const rows = useMemo(
     () => (full ? collapseContext(file.lines, Number.MAX_SAFE_INTEGER) : collapseContext(file.lines)),
@@ -78,19 +80,19 @@ function DiffFileBlock({ file }: { file: DiffFile }) {
               type="button"
               onClick={() => setFull(true)}
               className="text-faint hover:text-muted"
-              title="展开整个文件"
+              title={t('diff.expandFile')}
             >
-              全文
+              {t('diff.wholeFile')}
             </button>
           )}
         </span>
       </header>
 
       {file.binary === true && (
-        <p className="px-3 py-2 text-[11.5px] text-faint">二进制文件，不做逐行比较</p>
+        <p className="px-3 py-2 text-[11.5px] text-faint">{t('diff.binary')}</p>
       )}
       {file.truncated === true && (
-        <p className="px-3 py-2 text-[11.5px] text-faint">文件太大，已省略逐行比较</p>
+        <p className="px-3 py-2 text-[11.5px] text-faint">{t('diff.truncated')}</p>
       )}
 
       {rows.length > 0 && (
@@ -101,7 +103,7 @@ function DiffFileBlock({ file }: { file: DiffFile }) {
                 row.kind === 'skip' ? (
                   <tr key={`skip-${String(index)}`} className="bg-panel-2/60">
                     <td colSpan={3} className="px-3 py-0.5 text-[10.5px] text-faint">
-                      ⋯ 跳过 {row.count} 行
+                      {t('diff.skipRows', { count: row.count })}
                     </td>
                   </tr>
                 ) : (
@@ -137,6 +139,7 @@ export function DiffPanel({
   onRevert,
   onClose,
 }: DiffPanelProps) {
+  const { t, locale } = useT()
   const totals = diff === null ? null : diffTotals(diff.files)
   const scroller = useRef<HTMLDivElement | null>(null)
   // 回滚要点两下。不用 window.confirm：Electron 里它会阻塞渲染进程，
@@ -174,15 +177,15 @@ export function DiffPanel({
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-bg">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line-soft bg-panel/60 px-3">
-        <span className="text-[11.5px] text-muted">改动</span>
+        <span className="text-[11.5px] text-muted">{t('diff.title')}</span>
         {totals !== null && (
           <span className="flex items-center gap-1.5 font-mono text-[10.5px]">
-            <span className="text-faint">{totals.files} 个文件</span>
+            <span className="text-faint">{t('diff.files', { count: totals.files })}</span>
             <span className="text-ok">+{totals.insertions}</span>
             <span className="text-bad">-{totals.deletions}</span>
           </span>
         )}
-        {loading && <span className="text-[10.5px] text-faint">读取中…</span>}
+        {loading && <span className="text-[10.5px] text-faint">{t('diff.loading')}</span>}
 
         <span className="ml-auto flex items-center gap-1">
           {diff !== null && confirming !== diff.commit.sha && (
@@ -190,18 +193,18 @@ export function DiffPanel({
               variant="outline"
               size="sm"
               disabled={reverting}
-              title={revertHint(diff.commit.sha, diff.commit.message)}
+              title={revertHint(diff.commit.sha, diff.commit.message, t)}
               onClick={() => setConfirming(diff.commit.sha)}
             >
-              回滚这一版
+              {t('diff.revert.action')}
             </Button>
           )}
           {diff !== null && confirming === diff.commit.sha && (
             <Button variant="ghost" size="sm" onClick={() => setConfirming(null)} disabled={reverting}>
-              取消
+              {t('common.cancel')}
             </Button>
           )}
-          <Button variant="ghost" size="sm" className="px-1.5" title="关闭（Esc）" onClick={onClose}>
+          <Button variant="ghost" size="sm" className="px-1.5" title={t('diff.revert.close')} onClick={onClose}>
             ✕
           </Button>
         </span>
@@ -214,8 +217,7 @@ export function DiffPanel({
       {diff !== null && confirming === diff.commit.sha && (
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-warn/30 bg-panel-2/80 px-3 py-2">
           <span className="text-[11.5px] text-ink/85">
-            回滚 <span className="font-mono text-[11px]">{diff.commit.sha.slice(0, 7)}</span>{' '}
-            会写一条新提交（历史保留，不抹掉）。
+            {t('diff.revert.warning', { sha: diff.commit.sha.slice(0, 7) })}
           </span>
 
           {diff.schemaChanged ? (
@@ -228,16 +230,16 @@ export function DiffPanel({
                 className="size-3.5 accent-current"
               />
               <span>
-                连数据库一起回到这一版之前
+                {t('diff.revert.dbLabel')}
                 <span className="ml-1 text-[10.5px] text-faint">
-                  （{diff.hasSnapshot ? '这一版存过快照' : '这一版没存快照，会退到最近一份'}
-                  ，<span className="text-bad">会丢弃</span>该时点之后写入的数据）
+                  ({diff.hasSnapshot ? t('diff.revert.dbSnapshot') : t('diff.revert.dbNoSnapshot')}){' '}
+                  <span className="text-bad">{t('diff.revert.dbLoss')}</span>
                 </span>
               </span>
             </label>
           ) : (
             <span className="text-[10.5px] text-faint">
-              这一版没动表结构，只有代码会回滚。
+              {t('diff.revert.codeOnly')}
             </span>
           )}
 
@@ -253,17 +255,21 @@ export function DiffPanel({
               onRevert(diff.commit.sha, restore)
             }}
           >
-            {reverting ? '回滚中…' : dbRestore && diff.schemaChanged ? '回滚代码与数据' : '确定回滚'}
+            {reverting
+              ? t('diff.revert.running')
+              : dbRestore && diff.schemaChanged
+                ? t('diff.revert.confirmBoth')
+                : t('diff.revert.confirm')}
           </Button>
         </div>
       )}
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-56 shrink-0 flex-col border-r border-line-soft bg-panel/40">
-          <p className="shrink-0 px-3 py-1.5 text-[10.5px] text-faint">版本（点一条看它改了什么）</p>
+          <p className="shrink-0 px-3 py-1.5 text-[10.5px] text-faint">{t('diff.versions.title')}</p>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {commits.length === 0 && (
-              <p className="px-3 py-2 text-[11.5px] text-faint">还没有提交</p>
+              <p className="px-3 py-2 text-[11.5px] text-faint">{t('diff.versions.empty')}</p>
             )}
             {commits.map((commit, index) => (
               <button
@@ -279,8 +285,8 @@ export function DiffPanel({
               >
                 <span className="flex items-baseline gap-1.5">
                   <span className="font-mono text-[10.5px] text-muted">{commit.sha.slice(0, 7)}</span>
-                  {index === 0 && <span className="text-[9.5px] text-brand-soft">最新</span>}
-                  <span className="ml-auto text-[10px] text-faint">{relativeTime(commit.at, 'date')}</span>
+                  {index === 0 && <span className="text-[9.5px] text-brand-soft">{t('diff.versions.latest')}</span>}
+                  <span className="ml-auto text-[10px] text-faint">{relativeTime(commit.at, { t, locale }, 'date')}</span>
                 </span>
                 <span className="mt-0.5 block truncate text-[11.5px] text-ink/85" title={commit.message}>
                   {commit.message.split('\n')[0]}
@@ -292,11 +298,11 @@ export function DiffPanel({
 
         <div ref={scroller} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           {active && totals !== null && totals.files === 0 && (
-            <p className="px-4 py-6 text-[12px] text-faint">这一版没有文件改动。</p>
+            <p className="px-4 py-6 text-[12px] text-faint">{t('diff.empty.noChanges')}</p>
           )}
           {active && diff.files.map((file) => <DiffFileBlock key={file.path} file={file} />)}
           {!active && !loading && (
-            <p className="px-4 py-6 text-[12px] text-faint">从左边选一个版本。</p>
+            <p className="px-4 py-6 text-[12px] text-faint">{t('diff.empty.pick')}</p>
           )}
         </div>
       </div>

@@ -13,38 +13,42 @@ import type { StreamState } from '../../lib/stream.js'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
 import { relativeTime } from '../../lib/relative-time.js'
+import { useT } from '../../lib/i18n.js'
+import type { ChatKey } from '../../lib/messages/chat.js'
 
-const STATUS_TEXT: Record<AppStatus, string> = {
-  idle: '空闲',
-  running: '运行中',
-  error: '出错',
-  archived: '已归档',
+const STATUS_KEY: Record<AppStatus, ChatKey> = {
+  idle: 'chat.status.idle',
+  running: 'chat.status.running',
+  error: 'chat.status.error',
+  archived: 'chat.status.archived',
 }
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
+  const { t } = useT()
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
       <div className="flex size-11 items-center justify-center rounded-xl border border-line bg-panel-2 text-lg text-brand">
+        {/* i18n-ignore 品牌字，不是文案 */}
         榫
       </div>
       <div className="space-y-1.5">
-        <p className="text-[13.5px] text-ink">还没有应用</p>
+        <p className="text-[13.5px] text-ink">{t('chat.empty.noApps.title')}</p>
         <p className="max-w-[36ch] text-[12px] leading-relaxed text-faint">
-          建一个之后，这里就是对话的地方。Agent 会直接改工作区里的代码，
-          每一轮结束自动提交一次 git。
+          {t('chat.empty.noApps.body')}
         </p>
       </div>
       <Button variant="primary" onClick={onCreate}>
-        新建应用
+        {t('chat.empty.noApps.create')}
       </Button>
     </div>
   )
 }
 
 function NoAppSelected() {
+  const { t } = useT()
   return (
     <div className="flex h-full items-center justify-center px-8 text-center">
-      <p className="text-[12.5px] text-faint">从左上角选择一个应用，或者新建一个。</p>
+      <p className="text-[12.5px] text-faint">{t('chat.empty.pickApp')}</p>
     </div>
   )
 }
@@ -89,6 +93,8 @@ export function ChatPanel({
   prefill = null,
   graph = null,
 }: ChatPanelProps) {
+  // hook 要在 early return 之前调，否则两个分支的 hook 数量不一致
+  const { t, locale } = useT()
   if (!hasApps) return <EmptyState onCreate={onCreate} />
   if (app === null) return <NoAppSelected />
 
@@ -109,7 +115,7 @@ export function ChatPanel({
           )}
         />
         <span className="text-[11.5px] text-muted">
-          {status === null ? '准备中' : STATUS_TEXT[status]}
+          {status === null ? t('chat.status.preparing') : t(STATUS_KEY[status])}
         </span>
         {latest !== undefined && (
           <>
@@ -118,11 +124,13 @@ export function ChatPanel({
               className="truncate font-mono text-[10.5px] text-faint"
               title={`${latest.sha.slice(0, 8)} ${latest.message}`}
             >
-              {latest.sha.slice(0, 7)} · {relativeTime(latest.at)}
+              {latest.sha.slice(0, 7)} · {relativeTime(latest.at, { t, locale })}
             </span>
           </>
         )}
-        <span className="ml-auto font-mono text-[10.5px] text-faint">{commits.length} 个版本</span>
+        <span className="ml-auto font-mono text-[10.5px] text-faint">
+          {t('chat.versions', { count: commits.length })}
+        </span>
       </div>
 
       <MessageList
@@ -131,10 +139,11 @@ export function ChatPanel({
         graph={graph}
         empty={
           <div className="mt-10 space-y-2 px-2 text-center">
-            <p className="text-[13px] text-muted">工作区已就绪</p>
+            <p className="text-[13px] text-muted">{t('chat.ready.title')}</p>
             <p className="mx-auto max-w-[40ch] text-[12px] leading-relaxed text-faint">
-              描述你要的界面，Agent 会读写 <span className="font-mono">repo/</span> 里的文件，
-              右侧预览会跟着热更新。
+              {t('chat.ready.body.before')}
+              <span className="font-mono">repo/</span>
+              {t('chat.ready.body.after')}
             </p>
           </div>
         }

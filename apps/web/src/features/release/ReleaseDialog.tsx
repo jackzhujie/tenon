@@ -20,12 +20,13 @@
  * 不然用户会奇怪"刚才不是检查过了吗"。
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { CHECK_LABELS } from '@tenon/protocol'
 import type { CheckOutcome, GitCommit, Release, ReleaseRemote } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
 import { relativeTime } from '../../lib/relative-time.js'
 import { rpc } from '../../lib/rpc.js'
+import { useT } from '../../lib/i18n.js'
+import type { ReleaseKey } from '../../lib/messages/release.js'
 import { RemoteSection, shortUrl } from './RemoteSection.js'
 import type {
   CheckOutcomeResult,
@@ -50,7 +51,8 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-function CopyButton({ text, label = '复制' }: { text: string; label?: string }) {
+function CopyButton({ text, label }: { text: string; label?: string }) {
+  const { t } = useT()
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
@@ -66,13 +68,21 @@ function CopyButton({ text, label = '复制' }: { text: string; label?: string }
         void copy(text).then((ok) => setCopied(ok))
       }}
     >
-      {copied ? '已复制' : label}
+      {copied ? t('release.copied') : (label ?? t('release.copy'))}
     </Button>
   )
 }
 
-/* 与后端同一份（`protocol` 的 `CHECK_LABELS`）：加检查项时只需要改那一处 */
-const CHECK_LABEL: Record<string, string> = { ...CHECK_LABELS }
+/**
+ * 检查项的显示名。服务端只给 id（`typecheck` / `test` / `lint`），名字在这里翻 ——
+ * 之前是直接用 `protocol` 的 `CHECK_LABELS`，那是中文常量，英文界面里会露馅。
+ * 新增检查项时**两处都要改**：`protocol` 的 `CheckId` 与本表。
+ */
+const CHECK_KEY: Record<string, ReleaseKey> = {
+  typecheck: 'release.check.typecheck',
+  test: 'release.check.test',
+  lint: 'release.check.lint',
+}
 const STATUS_STYLE: Record<CheckOutcome['status'], { glyph: string; className: string }> = {
   pass: { glyph: '✓', className: 'text-ok' },
   fail: { glyph: '✗', className: 'text-bad' },
@@ -82,19 +92,21 @@ const STATUS_STYLE: Record<CheckOutcome['status'], { glyph: string; className: s
 
 /** 一项检查。失败/跳过的明细折起来：默认只占一行，要看细节时再展开 */
 function CheckRow({ check }: { check: CheckOutcome }) {
+  const { t } = useT()
+  const key = CHECK_KEY[check.id]
   const style = STATUS_STYLE[check.status]
   return (
     <li className="px-2.5 py-1.5">
       <div className="flex items-baseline gap-1.5">
         <span className={cn('shrink-0 text-[11px]', style.className)}>{style.glyph}</span>
-        <span className="shrink-0 text-[11.5px] text-muted">{CHECK_LABEL[check.id] ?? check.id}</span>
+        <span className="shrink-0 text-[11.5px] text-muted">{key === undefined ? check.id : t(key)}</span>
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink" title={check.summary}>
           {check.summary}
         </span>
       </div>
       {check.detail !== null && check.detail.trim() !== '' && (
         <details className="mt-1 pl-4">
-          <summary className="cursor-pointer text-[10.5px] text-faint hover:text-muted">看输出</summary>
+          <summary className="cursor-pointer text-[10.5px] text-faint hover:text-muted">{t('release.showOutput')}</summary>
           <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-panel px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted">
             {check.detail}
           </pre>
@@ -144,6 +156,7 @@ export function ReleaseDialog({
   onPublish,
   onCheck,
 }: ReleaseDialogProps) {
+  const { t, locale } = useT()
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PublishResult | null>(null)
@@ -268,7 +281,7 @@ export function ReleaseDialog({
                 ok: false,
                 code: 'UNKNOWN',
                 message,
-                hint: '再点一次重试；还不行就确认远端地址现在能打开、网络或代理正常。',
+                hint: t('release.remote.retryHint'),
                 refs: 0,
               },
             },
@@ -414,11 +427,11 @@ export function ReleaseDialog({
   }
 
   const primaryLabel = (): string => {
-    if (publishing) return '发布中…'
-    if (hardBlocked) return '先处理上面的问题'
-    if (checking) return '检查中…'
-    if (gateFailed) return confirming ? '确认：带着问题发布' : '重新检查'
-    return result === null ? '发布' : '再发一版'
+    if (publishing) return t('release.action.publishing')
+    if (hardBlocked) return t('release.action.blocked')
+    if (checking) return t('release.action.checking')
+    if (gateFailed) return confirming ? t('release.action.confirmForce') : t('release.action.recheck')
+    return result === null ? t('release.action.publish') : t('release.action.publishAgain')
   }
 
   /**
@@ -443,7 +456,7 @@ export function ReleaseDialog({
           void submit(true)
         }}
       >
-        {confirming ? '确认：带着问题发布' : '仍然发布'}
+        {confirming ? t('release.action.confirmForce') : t('release.action.publishAnyway')}
       </Button>
     )
   }
@@ -455,13 +468,15 @@ export function ReleaseDialog({
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2">
             <span className="size-3 shrink-0 animate-spin rounded-full border-[1.5px] border-line border-t-muted" />
-            <span className="text-[11.5px] text-muted">正在跑类型检查与测试…</span>
+            <span className="text-[11.5px] text-muted">{t('release.check.running')}</span>
             <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint">
               {(waitedMs / 1000).toFixed(0)}s
             </span>
           </div>
           <p className="text-[10.5px] leading-relaxed text-faint">
-            这一步会<span className="text-muted">真跑一遍</span>（不是读上一次的结果），有测试的应用可能要几十秒。
+            {t('release.check.real.before')}
+            <span className="text-muted">{t('release.check.real.emphasis')}</span>
+            {t('release.check.real.after')}
           </p>
         </div>
       )
@@ -470,10 +485,10 @@ export function ReleaseDialog({
     if (checkError !== null) {
       return (
         <div className="rounded-lg border border-line bg-panel px-3 py-2">
-          <p className="text-[11.5px] leading-relaxed text-muted">预检没跑起来：{checkError}</p>
-          <p className="mt-1 text-[10.5px] leading-relaxed text-faint">
-            这不代表代码有问题 —— 点发布时服务端还会完整检查一遍。
+          <p className="text-[11.5px] leading-relaxed text-muted">
+            {t('release.check.crashed', { error: checkError })}
           </p>
+          <p className="mt-1 text-[10.5px] leading-relaxed text-faint">{t('release.check.crashedNote')}</p>
         </div>
       )
     }
@@ -485,7 +500,9 @@ export function ReleaseDialog({
         <div className="rounded-lg border border-warn/40 bg-warn/5 px-3 py-2">
           <p className="text-[11.5px] leading-relaxed text-ink">{preflight.blocked.message}</p>
           <p className="mt-1 text-[10.5px] leading-relaxed text-faint">
-            现在不满足发布的前提，所以这一步<span className="text-muted">没有</span>跑类型检查和测试。
+            {t('release.check.notRun.before')}
+            <span className="text-muted">{t('release.check.notRun.emphasis')}</span>
+            {t('release.check.notRun.after')}
           </p>
         </div>
       )
@@ -501,11 +518,12 @@ export function ReleaseDialog({
         <div className="space-y-2">
           <div className="rounded-lg border border-warn/40 bg-warn/5 px-3 py-2">
             <p className="text-[11.5px] leading-relaxed text-ink">
-              检查期间又有新提交，这份结果讲的是{' '}
-              <span className="font-mono text-[11px]">{shortSha(preflight.commitSha ?? "")}</span> 那一版，不算数。
+              {t('release.check.stale.before')}
+              <span className="font-mono text-[11px]">{shortSha(preflight.commitSha ?? '')}</span>
+              {t('release.check.stale.after')}
             </p>
             <p className="mt-1 text-[10.5px] leading-relaxed text-faint">
-              针对 A 版的"通过"拿去给 B 版用，比不检查更糟 —— 它给的是虚假的安心。再查一次。
+              {t('release.check.staleNote')}
             </p>
           </div>
           <GateList checks={preflight.gate.checks} />
@@ -517,12 +535,12 @@ export function ReleaseDialog({
       return (
         <div className="space-y-2">
           <div className="flex items-baseline gap-2">
-            <span className="text-[11.5px] text-bad">检查没通过，先别发</span>
+            <span className="text-[11.5px] text-bad">{t('release.check.failed')}</span>
             <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint">{seconds}s</span>
           </div>
           <GateList checks={preflight.gate.checks} />
           <p className="text-[10.5px] leading-relaxed text-faint">
-            修好再点「重新检查」；确实要发就点「仍然发布」，历史里会标「带问题」。
+            {t('release.check.failedHint')}
           </p>
         </div>
       )
@@ -531,12 +549,12 @@ export function ReleaseDialog({
     return (
       <div className="space-y-2">
         <div className="flex items-baseline gap-2">
-          <span className="text-[11.5px] text-ok">✓ 检查通过，可以发</span>
+          <span className="text-[11.5px] text-ok">{t('release.check.passed')}</span>
           <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint">{seconds}s</span>
         </div>
         <GateList checks={preflight.gate.checks} />
         <p className="text-[10.5px] leading-relaxed text-faint">
-          点发布会再跑一遍（结果不缓存 —— 两次之间代码或依赖都可能变），所以还会再等一次。
+          {t('release.check.passedNote')}
         </p>
       </div>
     )
@@ -557,20 +575,21 @@ export function ReleaseDialog({
       >
         <div className="border-b border-line-soft px-4 py-3">
           <h2 id="release-title" className="text-[13.5px] text-ink">
-            发布{appName === null ? '' : ` · ${appName}`}
+            {appName === null ? t('release.title') : t('release.titleWithApp', { app: appName })}
           </h2>
           <p className="mt-0.5 text-[11.5px] leading-relaxed text-faint">
-            把当前提交冻结成一个版本，推到本地备份库。备份库是标准裸库，{' '}
-            <span className="text-muted">git clone 出来就是这一版的完整代码</span>。
+            {t('release.header.body.before')}
+            <span className="text-muted">{t('release.header.body.emphasis')}</span>
+            {t('release.header.body.after')}
           </p>
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3.5">
           <div className="rounded-lg border border-line bg-panel px-3 py-2">
             <div className="flex items-baseline gap-2">
-              <span className="text-[11.5px] text-muted">这一版</span>
+              <span className="text-[11.5px] text-muted">{t('release.thisVersion')}</span>
               {headCommit === null ? (
-                <span className="text-[11.5px] text-warn">还没有任何提交</span>
+                <span className="text-[11.5px] text-warn">{t('release.noCommits')}</span>
               ) : (
                 <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink">
                   {headCommit.message.split('\n')[0]}
@@ -588,9 +607,7 @@ export function ReleaseDialog({
           */}
           {usedCacheAt !== null && !checking && (
             <p className="text-[10.5px] leading-relaxed text-faint">
-              这是 <span className="text-muted">{relativeTime(usedCacheAt)}</span> 对
-              <span className="text-muted">同一版代码</span>的检查结果 —— 代码没变，就直接用了，没重跑。
-              想再看一遍点「重新检查」。
+              {t('release.check.cacheNote', { time: relativeTime(usedCacheAt, { t, locale }) })}
             </p>
           )}
 
@@ -599,26 +616,26 @@ export function ReleaseDialog({
           {blocked !== null && (
             <div className="space-y-2">
               <div className="flex items-baseline gap-2">
-                <span className="text-[11.5px] text-bad">检查没通过，先别发</span>
-                <span className="text-[10.5px] text-faint">修好再点发布；确实要发就点「仍然发布」</span>
+                <span className="text-[11.5px] text-bad">{t('release.check.failed')}</span>
+                <span className="text-[10.5px] text-faint">{t('release.check.failedHint')}</span>
               </div>
               <GateList checks={blocked} />
             </div>
           )}
 
           <label className="block space-y-1.5">
-            <span className="text-[11.5px] text-muted">发布说明（可选）</span>
+            <span className="text-[11.5px] text-muted">{t('release.notes.label')}</span>
             <textarea
               value={notes}
               maxLength={2000}
               rows={3}
               disabled={publishing}
-              placeholder="这一版改了什么、为什么要发"
+              placeholder={t('release.notes.placeholder')}
               onChange={(event) => setNotes(event.target.value)}
               className="min-h-[76px] w-full resize-none rounded-lg border border-line bg-panel px-2.5 py-2 text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-faint focus:border-brand/50 disabled:opacity-60"
             />
             <span className="block text-[10.5px] text-faint">
-              会写进这次 tag 的正文，拿备份库的人也能看到。
+              {t('release.notes.hint')}
             </span>
           </label>
 
@@ -647,11 +664,11 @@ export function ReleaseDialog({
                 </span>
               </div>
               <div className="space-y-1">
-                <span className="text-[10.5px] text-faint">检查</span>
+                <span className="text-[10.5px] text-faint">{t('release.result.checks')}</span>
                 <GateList checks={result.gate.checks} />
               </div>
               <div className="space-y-1">
-                <span className="text-[10.5px] text-faint">备份库</span>
+                <span className="text-[10.5px] text-faint">{t('release.result.backup')}</span>
                 <div className="flex items-center gap-1">
                   <code className="min-w-0 flex-1 truncate rounded bg-panel px-2 py-1 font-mono text-[10.5px] text-muted">
                     {result.backupPath}
@@ -660,7 +677,7 @@ export function ReleaseDialog({
                 </div>
               </div>
               <div className="space-y-1">
-                <span className="text-[10.5px] text-faint">克隆这一版的完整代码</span>
+                <span className="text-[10.5px] text-faint">{t('release.result.clone')}</span>
                 <div className="flex items-center gap-1">
                   <code className="min-w-0 flex-1 truncate rounded bg-panel px-2 py-1 font-mono text-[10.5px] text-muted">
                     git clone {result.backupPath}
@@ -675,10 +692,13 @@ export function ReleaseDialog({
               */}
               {result.remote !== null && (
                 <div className="space-y-1 border-t border-ok/20 pt-2">
-                  <span className="text-[10.5px] text-faint">远端</span>
+                  <span className="text-[10.5px] text-faint">{t('release.result.remote')}</span>
                   {result.remote.ok ? (
                     <p className="text-[11px] leading-relaxed text-ok">
-                      已推到 {remote === null ? '远端仓库' : shortUrl(remote.url)}（{result.remote.refs} 个 ref）
+                      {t('release.result.pushed', {
+              target: remote === null ? t('release.result.remoteFallback') : shortUrl(remote.url),
+              count: result.remote.refs,
+            })}
                     </p>
                   ) : (
                     <div className="space-y-1.5">
@@ -694,10 +714,10 @@ export function ReleaseDialog({
                           data-tenon-action="remote-retry"
                           onClick={() => void pushAgain()}
                         >
-                          {pushingRemote ? '推送中…' : '再推一次'}
+                          {pushingRemote ? t('release.remote.pushing') : t('release.remote.retry')}
                         </Button>
                         <span className="text-[10.5px] text-faint">
-                          这一版已经发出去了，补推不会多出一个版本号
+                          {t('release.remote.pushNote')}
                         </span>
                       </div>
                     </div>
@@ -713,7 +733,7 @@ export function ReleaseDialog({
           */}
           <div className="space-y-1.5 rounded-lg border border-line bg-panel-2 px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11.5px] text-muted">拿去部署</span>
+              <span className="text-[11.5px] text-muted">{t('release.deploy.title')}</span>
               <Button
                 variant="outline"
                 size="sm"
@@ -721,7 +741,7 @@ export function ReleaseDialog({
                 data-tenon-action="export-static"
                 onClick={() => void runExport('static')}
               >
-                {exporting === 'static' ? `导出中… ${exportElapsed}s` : '导出静态包'}
+                {exporting === 'static' ? t('release.export.running', { seconds: exportElapsed }) : t('release.export.static')}
               </Button>
               <Button
                 variant="outline"
@@ -730,7 +750,7 @@ export function ReleaseDialog({
                 data-tenon-action="export-docker"
                 onClick={() => void runExport('docker')}
               >
-                {exporting === 'docker' ? `导出中… ${exportElapsed}s` : '导出 Docker'}
+                {exporting === 'docker' ? t('release.export.running', { seconds: exportElapsed }) : t('release.export.docker')}
               </Button>
             </div>
             <p className="text-[10.5px] leading-relaxed text-faint">
@@ -749,15 +769,15 @@ export function ReleaseDialog({
                   <code className="min-w-0 flex-1 truncate rounded bg-panel px-2 py-1 font-mono text-[10.5px] text-muted">
                     {exported.dir}
                   </code>
-                  <CopyButton text={exported.dir} label="复制路径" />
+                  <CopyButton text={exported.dir} label={t('release.copyPath')} />
                 </div>
                 <p className="text-[10.5px] text-faint">
                   {Math.round(exported.bytes / 1024 / 1024)}MB · {exported.files} 个文件 ·{' '}
                   {exported.target === 'docker'
-                    ? 'Docker 上下文（cd 进去 docker compose up -d）'
+                    ? t('release.export.dockerContext')
                     : exported.hasApi
-                      ? '静态包 · 含后端（迁移会自动跑）'
-                      : '静态包 · 纯前端'}
+                      ? t('release.export.staticWithApi')
+                      : t('release.export.staticOnly')}
                   。产物里的 README 写了怎么起。
                 </p>
               </div>
@@ -765,9 +785,9 @@ export function ReleaseDialog({
           </div>
 
           <div className="space-y-1.5">
-            <span className="text-[11.5px] text-muted">发布历史</span>
+            <span className="text-[11.5px] text-muted">{t('release.history.title')}</span>
             {releases.length === 0 ? (
-              <p className="text-[11.5px] text-faint">还没有发布过。</p>
+              <p className="text-[11.5px] text-faint">{t('release.history.empty')}</p>
             ) : (
               <ul className="divide-y divide-line-soft rounded-lg border border-line">
                 {releases.map((release) => (
@@ -780,9 +800,9 @@ export function ReleaseDialog({
                     {release.gateStatus === 'forced' && (
                       <span
                         className="shrink-0 rounded border border-warn/40 px-1 py-px text-[9.5px] text-warn"
-                        title={release.gateSummary ?? '检查没通过仍然发布'}
+                        title={release.gateSummary ?? t('release.forced.title')}
                       >
-                        带问题
+                        {t('release.forced.badge')}
                       </span>
                     )}
                     {release.notes !== null && (
@@ -803,13 +823,13 @@ export function ReleaseDialog({
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft px-4 py-2.5">
           {confirming && (
             <p className="w-full text-right text-[10.5px] leading-tight text-warn">
-              再点一次就真的发出去 —— 历史里会标「带问题」
+              {t('release.action.confirmNotice')}
             </p>
           )}
           {/* 逃生舱在最左：看得见，但不是主按钮 */}
           {forceButton()}
           <Button variant="ghost" size="sm" disabled={publishing} onClick={onClose}>
-            关闭
+            {t('release.close')}
           </Button>
           <Button
             variant="primary"

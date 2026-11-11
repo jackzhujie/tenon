@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { App } from '@tenon/protocol'
 import { ChevronDownIcon, PencilIcon, PlusIcon, TrashIcon } from '../../components/icons.js'
 import { cn } from '../../lib/cn.js'
+import { useT } from '../../lib/i18n.js'
 
 export interface AppMenuProps {
   apps: App[]
@@ -15,6 +16,7 @@ export interface AppMenuProps {
 }
 
 export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRename }: AppMenuProps) {
+  const { t } = useT()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   /** 正在等二次确认的那一行。删除是**不可逆**的，不做这一步的话一次误点就没了 */
@@ -83,7 +85,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
           open && 'bg-panel-3',
         )}
       >
-        <span className="truncate text-ink">{activeApp?.name ?? '选择应用'}</span>
+        <span className="truncate text-ink">{activeApp?.name ?? t('apps.select')}</span>
         <ChevronDownIcon className={cn('size-3 shrink-0 text-faint transition-transform', open && 'rotate-180')} />
       </button>
 
@@ -91,7 +93,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
         <div data-tenon-app-menu className="absolute top-full left-0 z-40 mt-1 w-64 overflow-hidden rounded-lg border border-line bg-panel-2 shadow-xl shadow-black/40">
           <div className="max-h-72 overflow-y-auto py-1">
             {apps.length === 0 && (
-              <p className="px-3 py-2 text-[12px] text-faint">还没有应用</p>
+              <p className="px-3 py-2 text-[12px] text-faint">{t('apps.empty')}</p>
             )}
             {apps.map((app) => {
               const isPending = pending === app.id
@@ -115,7 +117,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
                           onClick={() => setPending(null)}
                           className="rounded border border-line px-2 py-0.5 text-[11px] text-muted transition-colors hover:text-ink disabled:opacity-40"
                         >
-                          取消
+                          {t('common.cancel')}
                         </button>
                         <button
                           type="button"
@@ -130,7 +132,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
                           }}
                           className="rounded bg-bad/90 px-2 py-0.5 text-[11px] font-medium text-[#1a0f0e] transition-colors hover:bg-bad disabled:opacity-40"
                         >
-                          {deleting ? '删除中…' : '删除'}
+                          {deleting ? t('apps.deleting') : t('apps.delete')}
                         </button>
                       </div>
                     </div>
@@ -161,7 +163,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
                           onClick={() => setRenaming(null)}
                           className="rounded border border-line px-2 py-0.5 text-[11px] text-muted transition-colors hover:text-ink disabled:opacity-40"
                         >
-                          取消
+                          {t('common.cancel')}
                         </button>
                         <button
                           type="button"
@@ -170,7 +172,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
                           onClick={() => commitRename(app.id)}
                           className="rounded bg-brand/90 px-2 py-0.5 text-[11px] font-medium text-[#20120a] transition-colors hover:bg-brand disabled:opacity-40"
                         >
-                          {saving ? '保存中…' : '保存'}
+                          {saving ? t('apps.saving') : t('apps.save')}
                         </button>
                       </div>
                     </div>
@@ -209,7 +211,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
                       */}
                       <button
                         type="button"
-                        title={`重命名「${app.name}」`}
+                        title={t('apps.renameTitle', { name: app.name })}
                         data-tenon-action="rename-app"
                         onClick={() => startRename(app)}
                         className="shrink-0 rounded p-1 text-[11px] text-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus:opacity-100"
@@ -218,7 +220,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
                       </button>
                       <button
                         type="button"
-                        title={`删除「${app.name}」`}
+                        title={t('apps.deleteTitle', { name: app.name })}
                         data-tenon-action="delete-app"
                         onClick={() => setPending(app.id)}
                         className="mr-2 shrink-0 rounded p-1 text-[11px] text-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-bad focus:opacity-100"
@@ -241,7 +243,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-muted transition-colors hover:bg-panel-3 hover:text-ink"
             >
               <PlusIcon className="size-3.5" />
-              新建应用
+              {t('apps.new')}
             </button>
           </div>
         </div>

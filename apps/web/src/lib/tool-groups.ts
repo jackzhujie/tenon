@@ -16,6 +16,8 @@
  * - **不跨类型合并**：`write`/`edit`/`subagent` 永远独立
  */
 
+import type { TFunction } from './i18n.js'
+
 /** 只读工具名（这三个查代码、不可能写盘） */
 const READ_ONLY_TOOLS = new Set(['read', 'ls', 'glob', 'grep'])
 
@@ -186,7 +188,7 @@ export function groupActivities<A extends Activity>(activities: readonly A[]): A
 }
 
 /** 收起时那一行的说明："读取 3 个文件 · 执行 7 条命令" */
-export function describeExploration(items: readonly Activity[]): string {
+export function describeExploration(items: readonly Activity[], t: TFunction): string {
   let files = 0
   let commands = 0
   let others = 0
@@ -196,9 +198,9 @@ export function describeExploration(items: readonly Activity[]): string {
     else others += 1
   }
   const parts: string[] = []
-  if (files > 0) parts.push(`读取 ${files} 个文件`)
-  if (commands > 0) parts.push(`执行 ${commands} 条命令`)
-  if (others > 0) parts.push(`查看 ${others} 项`)
+  if (files > 0) parts.push(t('tool.summary.files', { count: files }))
+  if (commands > 0) parts.push(t('tool.summary.commands', { count: commands }))
+  if (others > 0) parts.push(t('tool.summary.others', { count: others }))
   return parts.join(' · ')
 }
 

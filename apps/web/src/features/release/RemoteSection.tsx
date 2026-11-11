@@ -19,6 +19,7 @@
 import { useCallback, useState } from 'react'
 import type { ReleaseRemote } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
+import { useT } from '../../lib/i18n.js'
 import { rpc } from '../../lib/rpc.js'
 
 interface RemoteSectionProps {
@@ -36,6 +37,7 @@ export function shortUrl(url: string): string {
 
 export function RemoteSection({ appId, disabled, remote, onChange }: RemoteSectionProps) {
   const [open, setOpen] = useState(false)
+  const { t } = useT()
   const [url, setUrl] = useState(remote?.url ?? '')
   const [username, setUsername] = useState(remote?.username ?? '')
   const [token, setToken] = useState('')
@@ -83,15 +85,18 @@ export function RemoteSection({ appId, disabled, remote, onChange }: RemoteSecti
   return (
     <div className="space-y-1.5 rounded-lg border border-line bg-panel-2 px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11.5px] text-muted">远端仓库</span>
+        {/* ---- */}
+        <span className="text-[11.5px] text-muted">{t('remote.title')}</span>
         {remote === null ? (
-          <span className="text-[10.5px] text-faint">未配置 · 可选，配了就同时推一份到 GitHub 等</span>
+          <span className="text-[10.5px] text-faint">{t('remote.notConfigured')}</span>
         ) : (
           <span className="min-w-0 flex-1 truncate text-[10.5px] text-ink">
             {shortUrl(remote.url)}
             <span className="ml-1.5 text-faint">
               {remote.branch}
-              {remote.hasToken ? ` · 令牌 ${remote.tokenHint ?? ''}` : ' · 无令牌'}
+              {remote.hasToken
+                ? t('remote.branchToken', { branch: '', hint: remote.tokenHint ?? '' })
+                : t('remote.branchNoToken', { branch: '' })}
             </span>
           </span>
         )}
@@ -104,7 +109,7 @@ export function RemoteSection({ appId, disabled, remote, onChange }: RemoteSecti
               data-tenon-action="remote-clear"
               onClick={() => void clear()}
             >
-              清除
+              {t('remote.clear')}
             </Button>
           )}
           <Button
@@ -114,26 +119,25 @@ export function RemoteSection({ appId, disabled, remote, onChange }: RemoteSecti
             data-tenon-action="remote-toggle"
             onClick={() => setOpen((value) => !value)}
           >
-            {open ? '收起' : remote === null ? '配置' : '修改'}
+            {open ? t('remote.toggle.collapse') : remote === null ? t('remote.toggle.configure') : t('remote.toggle.edit')}
           </Button>
         </div>
       </div>
 
       {remote !== null && !open && (
         <p className="text-[10.5px] leading-relaxed text-faint">
-          每次发布都会推一份到这里（分支 + 版本标签）。推失败**不会**让这次发布作废 ——
-          本地备份库已经是完整的一版，可以稍后「再推一次」。
+          {t('remote.note')}
         </p>
       )}
 
       {open && (
         <div className="space-y-2 rounded-lg border border-line bg-panel px-2.5 py-2">
           <label className="block space-y-1">
-            <span className="text-[10.5px] text-muted">仓库地址（只收 https）</span>
+            <span className="text-[10.5px] text-muted">{t('remote.urlLabel')}</span>
             <input
               value={url}
               disabled={disabled || busy}
-              placeholder="https://github.com/me/my-app.git"
+              placeholder={t('remote.urlPlaceholder')}
               spellCheck={false}
               onChange={(event) => setUrl(event.target.value)}
               className="w-full rounded border border-line bg-panel-2 px-2 py-1.5 font-mono text-[11px] text-ink outline-none placeholder:text-faint focus:border-brand/50 disabled:opacity-60"
@@ -142,18 +146,18 @@ export function RemoteSection({ appId, disabled, remote, onChange }: RemoteSecti
 
           <div className="flex gap-2">
             <label className="block min-w-0 flex-1 space-y-1">
-              <span className="text-[10.5px] text-muted">用户名（可选）</span>
+              <span className="text-[10.5px] text-muted">{t('remote.usernameLabel')}</span>
               <input
                 value={username}
                 disabled={disabled || busy}
-                placeholder="GitLab 填 oauth2"
+                placeholder={t('remote.usernamePlaceholder')}
                 spellCheck={false}
                 onChange={(event) => setUsername(event.target.value)}
                 className="w-full rounded border border-line bg-panel-2 px-2 py-1.5 font-mono text-[11px] text-ink outline-none placeholder:text-faint focus:border-brand/50 disabled:opacity-60"
               />
             </label>
             <label className="block w-24 space-y-1">
-              <span className="text-[10.5px] text-muted">分支</span>
+              <span className="text-[10.5px] text-muted">{t('remote.branchLabel')}</span>
               <input
                 value={branch}
                 disabled={disabled || busy}
@@ -166,16 +170,16 @@ export function RemoteSection({ appId, disabled, remote, onChange }: RemoteSecti
 
           <label className="block space-y-1">
             <span className="text-[10.5px] text-muted">
-              访问令牌
+              {t('remote.tokenLabel')}
               {remote?.hasToken === true && (
-                <span className="ml-1 text-faint">（已存 {remote.tokenHint ?? ''}，留空表示不改）</span>
+                <span className="ml-1 text-faint">{t('remote.tokenSaved', { hint: remote.tokenHint ?? '' })}</span>
               )}
             </span>
             <input
               value={token}
               type="password"
               disabled={disabled || busy}
-              placeholder={remote?.hasToken === true ? '留空则保持原令牌' : 'ghp_… 或 glpat-…'}
+              placeholder={remote?.hasToken === true ? t('remote.tokenKeep') : t('remote.tokenNew')}
               spellCheck={false}
               autoComplete="off"
               onChange={(event) => setToken(event.target.value)}
@@ -184,8 +188,9 @@ export function RemoteSection({ appId, disabled, remote, onChange }: RemoteSecti
           </label>
 
           <p className="text-[10.5px] leading-relaxed text-faint">
-            令牌加密存在本机（AES-256-GCM），不会回显。GitHub 用 Fine-grained token，
-            权限勾 <span className="text-muted">Contents: Read and write</span> 并选中这个仓库。
+            {t('remote.encrypt.before')}
+            <span className="text-muted">{t('remote.encrypt.emphasis')}</span>
+            {t('remote.encrypt.after')}
           </p>
 
           <div className="flex items-center gap-2">
@@ -196,9 +201,9 @@ export function RemoteSection({ appId, disabled, remote, onChange }: RemoteSecti
               data-tenon-action="remote-save"
               onClick={() => void save()}
             >
-              {busy ? '保存中…' : '保存'}
+              {busy ? t('remote.saveSaving') : t('remote.save')}
             </Button>
-            <span className="text-[10.5px] text-faint">保存后不会立刻推送 —— 下次发布时一起推</span>
+            <span className="text-[10.5px] text-faint">{t('remote.savedHint')}</span>
           </div>
 
           {error !== null && (

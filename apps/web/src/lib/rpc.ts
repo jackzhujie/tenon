@@ -7,6 +7,7 @@
 import type { RpcInput, RpcMethod, RpcOutput } from '@tenon/protocol'
 import { TRANSPORT } from '@tenon/protocol/browser'
 import { authHeaders, endpointUrl, resolveEndpoint, type TenonEndpoint } from './transport.js'
+import { getLocale, translate } from './i18n.js'
 
 /** 失败信封里的 `error`，原样保留 `code` 让调用方能分支处理（例如 409 冲突） */
 export class TenonRpcError extends Error {
@@ -58,7 +59,10 @@ export async function rpc<M extends RpcMethod>(
     // 网络层失败（server 没起、被防火墙拦）。给一句人能看懂的话，别把 TypeError 抛到界面上
     throw new TenonRpcError(
       'NETWORK',
-      `连不上 Tenon 服务（${url.host}）${err instanceof Error ? `：${err.message}` : ''}`,
+      translate(getLocale(), 'error.rpc.unreachable', {
+        host: url.host,
+        detail: err instanceof Error ? `: ${err.message}` : '',
+      }),
       0,
       undefined,
     )
@@ -71,7 +75,7 @@ export async function rpc<M extends RpcMethod>(
   } catch {
     throw new TenonRpcError(
       'BAD_RESPONSE',
-      `服务返回了非 JSON 响应（HTTP ${response.status}）`,
+      translate(getLocale(), 'error.rpc.notJson', { status: response.status }),
       response.status,
       text.slice(0, 400),
     )
@@ -79,12 +83,20 @@ export async function rpc<M extends RpcMethod>(
 
   if (isFailure(payload)) {
     const code = typeof payload.error.code === 'string' ? payload.error.code : 'INTERNAL'
-    const message = typeof payload.error.message === 'string' ? payload.error.message : '请求失败'
+    const message =
+      typeof payload.error.message === 'string'
+        ? payload.error.message
+        : translate(getLocale(), 'error.rpc.failed')
     throw new TenonRpcError(code, message, response.status, payload.error.details)
   }
 
   if (!response.ok) {
-    throw new TenonRpcError('HTTP_ERROR', `请求失败（HTTP ${response.status}）`, response.status, payload)
+    throw new TenonRpcError(
+      'HTTP_ERROR',
+      translate(getLocale(), 'error.rpc.failedStatus', { status: response.status }),
+      response.status,
+      payload,
+    )
   }
 
   return (payload as { data: RpcOutput<M> }).data

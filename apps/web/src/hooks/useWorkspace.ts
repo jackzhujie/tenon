@@ -33,6 +33,16 @@ import { rpc, TenonRpcError } from '../lib/rpc.js'
 import { EventStream, type StreamState } from '../lib/stream.js'
 // 走 `/browser` 子路径：主入口会把整张 zod 表带进产物
 import { budgetMessage } from '@tenon/protocol/browser'
+import { getLocale, translate } from '../lib/i18n.js'
+import type { MessageKey, MessageParams } from '../lib/i18n.js'
+
+/**
+ * 非组件代码（hook 里的提前返回、异步回调）取文案。
+ *
+ * 这些地方拿不到 `useT()` —— 而它们返回的 `message` 会原样显示在错误条上，
+ * 留成中文就是半翻译。`getLocale()` 读的是 Provider 写下的当前语言。
+ */
+const msg = (key: MessageKey, params?: MessageParams): string => translate(getLocale(), key, params)
 
 export interface ToolActivity {
   toolCallId: string
@@ -878,7 +888,7 @@ export function useWorkspace(): Workspace {
   const publish = useCallback(
     async (notes: string, force?: boolean): Promise<PublishOutcome> => {
       const appId = activeAppIdRef.current
-      if (appId === null) return { ok: false, message: '还没有选中应用', code: 'APP_NOT_FOUND', checks: null }
+      if (appId === null) return { ok: false, message: msg('error.noAppSelected'), code: 'APP_NOT_FOUND', checks: null }
       dispatch({ kind: 'publishing', publishing: true })
       try {
         const trimmed = notes.trim()
@@ -912,7 +922,7 @@ export function useWorkspace(): Workspace {
    */
   const checkRelease = useCallback(async (): Promise<CheckOutcomeResult> => {
     const appId = activeAppIdRef.current
-    if (appId === null) return { ok: false, message: '还没有选中应用' }
+    if (appId === null) return { ok: false, message: msg('error.noAppSelected') }
     try {
       return { ok: true, result: await rpc('release.check', { appId }) }
     } catch (err) {
@@ -927,7 +937,7 @@ export function useWorkspace(): Workspace {
   const setBudget = useCallback(
     async (maxCostUsd: number | null, maxTokens: number | null): Promise<Outcome> => {
       const appId = activeAppIdRef.current
-      if (appId === null) return { ok: false, message: '还没有选中应用' }
+      if (appId === null) return { ok: false, message: msg('error.noAppSelected') }
       try {
         const result = await rpc('budget.set', { appId, maxCostUsd, maxTokens })
         dispatch({ kind: 'budget.set', snapshot: result.snapshot })

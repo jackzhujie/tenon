@@ -12,12 +12,14 @@ import { useInspectorSelection } from '../hooks/useInspectorSelection.js'
 import { UpdateBanner } from '../features/update/UpdateBanner.js'
 import { cn } from '../lib/cn.js'
 import { releaseHint } from '../lib/release-hint.js'
+import { useT } from '../lib/i18n.js'
 
 function BootScreen({ label }: { label: string }) {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="flex flex-col items-center gap-3">
         <span className="flex size-8 items-center justify-center rounded-lg bg-brand text-[15px] font-medium text-[#20120a]">
+          {/* i18n-ignore 品牌字，不是文案 */}
           榫
         </span>
         <p className="text-[12px] text-faint">{label}</p>
@@ -27,6 +29,7 @@ function BootScreen({ label }: { label: string }) {
 }
 
 function ErrorBar({ message, onDismiss }: { message: string; onDismiss(): void }) {
+  const { t } = useT()
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-center px-6">
       <div className="pointer-events-auto flex max-w-[80%] items-start gap-3 rounded-lg border border-bad/30 bg-[#241413] px-3.5 py-2 shadow-lg shadow-black/50">
@@ -36,7 +39,7 @@ function ErrorBar({ message, onDismiss }: { message: string; onDismiss(): void }
           onClick={onDismiss}
           className="shrink-0 text-[11px] text-bad/60 hover:text-bad"
         >
-          知道了
+          {t('common.gotIt')}
         </button>
       </div>
     </div>
@@ -44,6 +47,7 @@ function ErrorBar({ message, onDismiss }: { message: string; onDismiss(): void }
 }
 
 export function App() {
+  const { t } = useT()
   const workspace = useWorkspace()
   const { state } = workspace
   const [creating, setCreating] = useState(false)
@@ -80,7 +84,7 @@ export function App() {
   if (state.booting) {
     return (
       <BootScreen
-        label={state.error === null ? '正在连接本地服务…' : `连不上本地服务：${state.error}`}
+        label={state.error === null ? t('boot.connecting') : t('boot.failed', { error: state.error })}
       />
     )
   }

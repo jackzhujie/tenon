@@ -19,13 +19,15 @@ import { Button } from '../../components/ui/Button.js'
 import { ChevronDownIcon } from '../../components/icons.js'
 import { cn } from '../../lib/cn.js'
 import { buildLogPrompt } from '../../lib/log-prompt.js'
+import { useT } from '../../lib/i18n.js'
+import type { LogsKey } from '../../lib/messages/logs.js'
 
-const SOURCE_LABEL: Record<LogSource, string> = {
-  web: '前端',
-  api: '后端',
-  vite: '构建',
-  db: '数据',
-  tenon: '平台',
+const SOURCE_KEY: Record<LogSource, LogsKey> = {
+  web: 'log.source.web',
+  api: 'log.source.api',
+  vite: 'log.source.vite',
+  db: 'log.source.db',
+  tenon: 'log.source.tenon',
 }
 
 /** 颜色只做很轻的区分：日志的主体是文字，不是色块 */
@@ -48,10 +50,10 @@ const SOURCES: LogSource[] = ['web', 'api', 'vite', 'db', 'tenon']
 
 type LevelFilter = 'all' | 'warn' | 'error'
 
-const LEVEL_FILTER_LABEL: Record<LevelFilter, string> = {
-  all: '全部',
-  warn: '警告+',
-  error: '仅错误',
+const FILTER_KEY: Record<LevelFilter, LogsKey> = {
+  all: 'log.filter.all',
+  warn: 'log.filter.warn',
+  error: 'log.filter.error',
 }
 
 function clockOf(at: number): string {
@@ -78,6 +80,7 @@ export interface LogPanelProps {
 }
 
 export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
+  const { t } = useT()
   const [open, setOpen] = useState(false)
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all')
   const [hiddenSources, setHiddenSources] = useState<LogSource[]>([])
@@ -125,12 +128,12 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
           type="button"
           onClick={() => setOpen((value) => !value)}
           className="flex items-center gap-1.5 text-[11.5px] text-muted hover:text-ink"
-          title={open ? '收起日志' : '展开日志'}
+          title={open ? t('log.collapse') : t('log.expand')}
         >
           <ChevronDownIcon
             className={cn('size-3 transition-transform', open ? 'rotate-0' : '-rotate-90')}
           />
-          日志
+          {t('log.title')}
         </button>
 
         {errorCount > 0 && (
@@ -139,7 +142,7 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
               'rounded-full px-1.5 py-px text-[10px] leading-4',
               'bg-bad/15 text-bad',
             )}
-            title={`${errorCount} 条错误`}
+            title={t('log.errors', { count: errorCount })}
           >
             {errorCount} 错误
           </span>
@@ -172,9 +175,11 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
                         'rounded px-1.5 py-0.5 text-[10px] leading-4 transition-colors',
                         off ? 'text-faint/50 hover:text-muted' : cn('bg-panel-2', SOURCE_CLASS[source]),
                       )}
-                      title={off ? `显示${SOURCE_LABEL[source]}日志` : `隐藏${SOURCE_LABEL[source]}日志`}
+                      title={off
+                        ? t('log.showSource', { source: t(SOURCE_KEY[source]) })
+                        : t('log.hideSource', { source: t(SOURCE_KEY[source]) })}
                     >
-                      {SOURCE_LABEL[source]}
+                      {t(SOURCE_KEY[source])}
                     </button>
                   )
                 })}
@@ -187,9 +192,9 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
                   )
                 }
                 className="rounded px-1.5 py-0.5 text-[10px] leading-4 text-faint hover:text-muted"
-                title="点一下提高过滤级别"
+                title={t('log.raiseFilter')}
               >
-                {LEVEL_FILTER_LABEL[levelFilter]}
+                {t(FILTER_KEY[levelFilter])}
               </button>
               <Button
                 variant="ghost"
@@ -197,9 +202,9 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
                 className="px-1.5 text-[10.5px] text-faint hover:text-ink"
                 onClick={onClear}
                 disabled={logs.length === 0}
-                title="清空日志"
+                title={t('log.clearTitle')}
               >
-                清空
+                {t('log.clear')}
               </Button>
             </>
           )}
@@ -218,8 +223,8 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
           {visible.length === 0 && (
             <p className="px-3 py-4 text-[11.5px] text-faint">
               {logs.length === 0
-                ? '还没有日志。启动预览后，构建、后端与页面里的错误会实时出现在这里。'
-                : '当前筛选下没有日志。'}
+                ? t('log.empty.never')
+                : t('log.empty.filtered')}
             </p>
           )}
 
@@ -257,7 +262,7 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
                     )}
                   />
                   <span className={cn('shrink-0 text-[10px] leading-5', SOURCE_CLASS[entry.source])}>
-                    {SOURCE_LABEL[entry.source]}
+                    {t(SOURCE_KEY[entry.source])}
                   </span>
                   <span
                     className={cn(
@@ -275,15 +280,15 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
                 {entry.level === 'error' && onAskFix !== undefined && (
                   <button
                     type="button"
-                    onClick={() => onAskFix(buildLogPrompt(logs, entry))}
+                    onClick={() => onAskFix(buildLogPrompt(logs, entry, t))}
                     /*
                      * **常显**，不做 hover 才出现：错误行的价值就是"这一下能点"，
                      * 藏起来等于没有（用户第一反应就是"点了没反应"）。
                      */
                     className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-4 text-faint transition-colors hover:bg-bad/15 hover:text-bad"
-                    title="把这条（含前后几行）发给 Agent 修"
+                    title={t('log.askFix.title')}
                   >
-                    发给 Agent
+                    {t('log.askFix.button')}
                   </button>
                 )}
 

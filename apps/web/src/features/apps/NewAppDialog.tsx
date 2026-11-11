@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { TemplateInfo } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import { cn } from '../../lib/cn.js'
+import { useT } from '../../lib/i18n.js'
 
 /** 第一次打开就该选中它：唯一一个建完能直接看到东西的模板 */
 const DEFAULT_TEMPLATE_ID = 'react-vite'
@@ -15,6 +16,7 @@ export interface NewAppDialogProps {
 }
 
 export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialogProps) {
+  const { t } = useT()
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState('')
   const [brief, setBrief] = useState('')
@@ -84,21 +86,21 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
       >
         <div className="border-b border-line-soft px-4 py-3">
           <h2 id="new-app-title" className="text-[13.5px] text-ink">
-            新建应用
+            {t('apps.new')}
           </h2>
           <p className="mt-0.5 text-[11.5px] text-faint">
-            说一句要做什么就行。技术栈由 Agent 按需求决定，需要后端时它会自己加上。
+            {t('apps.new.body')}
           </p>
         </div>
 
         <div className="space-y-4 px-4 py-3.5">
           <label className="block space-y-1.5">
-            <span className="text-[11.5px] text-muted">名称</span>
+            <span className="text-[11.5px] text-muted">{t('apps.new.name')}</span>
             <input
               ref={inputRef}
               value={name}
               maxLength={64}
-              placeholder="例如：报销单审批"
+              placeholder={t('apps.new.namePlaceholder')}
               disabled={pending}
               onChange={(event) => setName(event.target.value)}
               onKeyDown={(event) => {
@@ -113,14 +115,14 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
 
           <label className="block space-y-1.5">
             <span className="text-[11.5px] text-muted">
-              要做什么 <span className="text-faint">（可选，建完直接发给 Agent）</span>
+              {t('apps.new.brief')} <span className="text-faint">{t('apps.new.briefHint')}</span>
             </span>
             <textarea
               ref={briefRef}
               value={brief}
               rows={3}
               maxLength={600}
-              placeholder="例如：一个报销单审批工具，能提交、审批、看历史；数据要能存下来"
+              placeholder={t('apps.new.briefPlaceholder')}
               disabled={pending}
               onChange={(event) => setBrief(event.target.value)}
               onKeyDown={(event) => {
@@ -136,7 +138,7 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
 
           <div className="flex items-center justify-between">
             <span className="text-[11.5px] text-faint">
-              技术栈：<span className="text-muted">由 Agent 决定</span>
+              {t('apps.new.stack.before')}<span className="text-muted">{t('apps.new.stack.emphasis')}</span>
             </span>
             <button
               type="button"
@@ -144,12 +146,12 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
               onClick={() => setAdvanced((current) => !current)}
               className="text-[11px] text-faint underline-offset-2 hover:text-muted hover:underline"
             >
-              {advanced ? '收起' : '我要自己选'}
+              {advanced ? t('apps.new.collapse') : t('apps.new.advancedShow')}
             </button>
           </div>
 
           <div className={cn('space-y-1.5', advanced ? '' : 'hidden')}>
-            <span className="text-[11.5px] text-muted">模板</span>
+            <span className="text-[11.5px] text-muted">{t('apps.new.template')}</span>
             <div className="grid gap-1.5">
               {templates.map((template) => (
                 <button
@@ -172,7 +174,7 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
                 </button>
               ))}
               {templates.length === 0 && (
-                <p className="text-[11.5px] text-faint">模板列表没拉到，将使用默认的 react-vite。</p>
+                <p className="text-[11.5px] text-faint">{t('apps.new.templateFailed')}</p>
               )}
             </div>
           </div>
@@ -180,7 +182,7 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
 
         <div className="flex justify-end gap-2 border-t border-line-soft px-4 py-2.5">
           <Button variant="ghost" size="sm" disabled={pending} onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -188,7 +190,7 @@ export function NewAppDialog({ open, templates, onClose, onCreate }: NewAppDialo
             disabled={pending || name.trim() === ''}
             onClick={() => void submit()}
           >
-            {pending ? '创建中…' : '创建'}
+            {pending ? t('apps.new.creating') : t('apps.new.create')}
           </Button>
         </div>
       </div>

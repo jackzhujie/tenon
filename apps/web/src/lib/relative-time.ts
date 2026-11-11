@@ -11,20 +11,34 @@
  *
  * 但 `round → floor` 统一了：90 秒时 `round` 会说"2 分钟前"（还没到 2 分钟），
  * `floor` 说"1 分钟前"。后者才是人的直觉。
+ *
+ * 文案走 `t()`，日期格式走 locale —— 英文用 `11/5`，中文也是 `11/5`，
+ * 但月份名称一旦要写全（`Nov 5`）就必须分开，所以这里就按 locale 分。
  */
+import type { Locale, TFunction } from './i18n.js'
+
+export interface TimeWords {
+  t: TFunction
+  locale: Locale
+}
 
 /**
  * @param at 过去某个时刻的时间戳（毫秒）
+ * @param words 文案函数与 locale（组件里 `useT()` 直接给）
  * @param beyondDay 超过一天之后怎么显示：`days` = 「2 天前」，`date` = 「11/5」
  */
-export function relativeTime(at: number, beyondDay: 'days' | 'date' = 'days'): string {
+export function relativeTime(at: number, words: TimeWords, beyondDay: 'days' | 'date' = 'days'): string {
+  const { t, locale } = words
   const delta = Date.now() - at
   // 时钟回拨或未来时间：不显示"-3 分钟前"这种让人困惑的东西
-  if (delta < 60_000) return '刚刚'
-  if (delta < 3_600_000) return `${String(Math.floor(delta / 60_000))} 分钟前`
-  if (delta < 86_400_000) return `${String(Math.floor(delta / 3_600_000))} 小时前`
+  if (delta < 60_000) return t('time.justNow')
+  if (delta < 3_600_000) return t('time.minutesAgo', { count: Math.floor(delta / 60_000) })
+  if (delta < 86_400_000) return t('time.hoursAgo', { count: Math.floor(delta / 3_600_000) })
   if (beyondDay === 'date') {
-    return new Date(at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+    return new Date(at).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', {
+      month: 'numeric',
+      day: 'numeric',
+    })
   }
-  return `${String(Math.floor(delta / 86_400_000))} 天前`
+  return t('time.daysAgo', { count: Math.floor(delta / 86_400_000) })
 }

@@ -3,6 +3,7 @@ import { Button } from '../../components/ui/Button.js'
 import type { SelectionContext } from '@tenon/protocol'
 import { selectionLabel } from '../../lib/selection.js'
 import type { StreamState } from '../../lib/stream.js'
+import { useT } from '../../lib/i18n.js'
 
 /**
  * 从外面（比如日志面板的「发给 Agent」）塞进输入框的一段文本。
@@ -37,6 +38,7 @@ export function Composer({
   onClearSelection,
   prefill = null,
 }: ComposerProps) {
+  const { t } = useT()
   const [value, setValue] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   /** IME 组合中按 Enter 是「确认候选词」，不是「发送」。中文输入必须挡住这一下 */
@@ -86,17 +88,19 @@ export function Composer({
             <div className="mb-1.5 flex items-center gap-2 border-b border-line-soft pb-1.5">
               <span className="flex max-w-full items-center gap-1.5 rounded-md bg-brand-dim/70 px-1.5 py-0.5 text-[11px] text-brand-soft">
                 <span className="shrink-0">◱</span>
-                <span className="truncate font-mono">{selectionLabel(selection)}</span>
+                <span className="truncate font-mono">{selectionLabel(selection, t)}</span>
                 <button
                   type="button"
-                  title="不带这个上下文"
+                  title={t('chat.composer.selectionTitle')}
                   onClick={onClearSelection}
                   className="shrink-0 text-brand-soft/60 hover:text-brand-soft"
                 >
                   ✕
                 </button>
               </span>
-              <span className="truncate text-[10.5px] text-faint">这一轮会带上它</span>
+              <span className="truncate text-[10.5px] text-faint">
+                {t('chat.composer.selectionWillInclude')}
+              </span>
             </div>
           )}
           <textarea
@@ -105,10 +109,10 @@ export function Composer({
             rows={1}
             placeholder={
               disabled
-                ? '先选择一个应用'
+                ? t('chat.composer.placeholder.disabled')
                 : connected
-                  ? '说说你想做什么，Enter 发送，Shift+Enter 换行'
-                  : '正在连接本地服务…'
+                  ? t('chat.composer.placeholder.ready')
+                  : t('chat.composer.placeholder.connecting')
             }
             disabled={disabled || !connected}
             onChange={(event) => setValue(event.target.value)}
@@ -128,25 +132,25 @@ export function Composer({
           />
           <div className="mt-1 flex items-center gap-2">
             {stream === 'reconnecting' && (
-              <span className="text-[11px] text-warn">连接断开，正在重连…</span>
+              <span className="text-[11px] text-warn">{t('chat.stream.reconnecting')}</span>
             )}
             {stream === 'failed' && (
-              <span className="text-[11px] text-bad">连接已断开，刷新页面重试</span>
+              <span className="text-[11px] text-bad">{t('chat.stream.failed')}</span>
             )}
             <span className="ml-auto" />
             {submitting ? (
               <Button size="sm" variant="outline" onClick={onStop}>
-                停止
+                {t('chat.composer.stop')}
               </Button>
             ) : (
               <Button size="sm" variant="primary" disabled={!canSend} onClick={send}>
-                发送
+                {t('chat.composer.send')}
               </Button>
             )}
           </div>
         </div>
         <p className="mt-2 px-1 text-[10.5px] leading-relaxed text-faint">
-          每一轮对话结束会自动提交一次 git，可随时回滚。
+          {t('chat.composer.footer')}
         </p>
       </div>
     </div>

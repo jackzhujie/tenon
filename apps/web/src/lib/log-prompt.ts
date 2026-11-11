@@ -10,15 +10,8 @@
  * 纯函数：在这里拼好文本，`LogPanel` 只负责把它塞进输入框（测试见
  * `apps/web/test/log-prompt.test.ts`）。
  */
-import type { LogEntry, LogSource } from '@tenon/protocol'
-
-const SOURCE_LABEL: Record<LogSource, string> = {
-  web: '前端',
-  api: '后端',
-  vite: '构建',
-  db: '数据',
-  tenon: '平台',
-}
+import type { LogEntry } from '@tenon/protocol'
+import type { TFunction } from './i18n.js'
 
 /** 堆栈太长会把输入框撑爆；保留前面一段就够定位（真要全部，用户可以自己复制） */
 const MAX_DETAIL_CHARS = 3000
@@ -31,35 +24,36 @@ function clockOf(at: number): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
-function oneLine(entry: LogEntry): string {
-  const repeat = entry.repeat > 1 ? `（重复 ${entry.repeat} 次）` : ''
-  return `[${entry.level}] ${SOURCE_LABEL[entry.source]} ${clockOf(entry.at)}  ${entry.message}${repeat}`
+function oneLine(entry: LogEntry, t: TFunction): string {
+  const repeat = entry.repeat > 1 ? t('log.prompt.repeat', { count: entry.repeat }) : ''
+  return `[${entry.level}] ${t(`log.source.${entry.source}` as 'log.source.web')} ${clockOf(entry.at)}  ${entry.message}${repeat}`
 }
 
 export function buildLogPrompt(
   entries: readonly LogEntry[],
   target: LogEntry,
+  t: TFunction,
   contextLines: number = DEFAULT_CONTEXT,
 ): string {
   const index = entries.findIndex((entry) => entry.id === target.id)
   const before =
-    index < 0 ? [] : entries.slice(Math.max(0, index - Math.max(0, contextLines)), index).map(oneLine)
+    index < 0
+      ? []
+      : entries
+          .slice(Math.max(0, index - Math.max(0, contextLines)), index)
+          .map((entry) => oneLine(entry, t))
 
   const detail =
     target.detail === null
       ? ''
       : `\n\n\`\`\`\n${target.detail.slice(0, MAX_DETAIL_CHARS)}${
-          target.detail.length > MAX_DETAIL_CHARS ? '\n…（截断）' : ''
+          target.detail.length > MAX_DETAIL_CHARS ? t('log.prompt.truncated') : ''
         }\n\`\`\``
 
-  const lines = [
-    '这条运行日志报错了，帮我定位并修掉。**先读相关代码再改，别照着报错文本猜**。',
-    '',
-    oneLine(target) + detail,
-  ]
+  const lines = [t('log.prompt.intro'), '', oneLine(target, t) + detail]
   if (before.length > 0) {
-    lines.push('', '前面几行日志（上下文）：', ...before)
+    lines.push('', t('log.prompt.context'), ...before)
   }
-  lines.push('', '改完告诉我：改了哪个文件、为什么这么改。')
+  lines.push('', t('log.prompt.outro'))
   return lines.join('\n')
 }

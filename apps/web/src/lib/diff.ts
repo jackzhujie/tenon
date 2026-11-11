@@ -5,6 +5,7 @@
  * 三个连续的改动之间只跳 1 行时不该插"跳过 1 行"，文件开头/结尾不该留空的省略占位。
  */
 import type { DiffFile, DiffLine } from '@tenon/protocol'
+import type { TFunction } from './i18n.js'
 
 /** 改动行上下各留几行。GitHub 默认 3，这里跟它一致 */
 export const DEFAULT_CONTEXT = 3
@@ -71,12 +72,6 @@ export function diffTotals(files: DiffFile[]): DiffTotals {
   return { files: files.length, insertions, deletions, added, modified, deleted }
 }
 
-export const STATUS_LABEL: Record<DiffFile['status'], string> = {
-  added: '新增',
-  modified: '修改',
-  deleted: '删除',
-}
-
 export const STATUS_SIGN: Record<DiffFile['status'], string> = {
   added: 'A',
   modified: 'M',
@@ -95,7 +90,7 @@ export function shortPath(path: string): string {
 }
 
 /** 回滚确认里给人看的一句话 */
-export function revertHint(sha: string, message: string): string {
+export function revertHint(sha: string, message: string, t: TFunction): string {
   const first = message.split('\n')[0] ?? message
-  return `回滚 ${sha.slice(0, 7)}「${first}」的改动？会生成一条新的回滚提交，历史不丢。`
+  return t('diff.revert.hint', { sha: sha.slice(0, 7), message: first })
 }

@@ -15,6 +15,7 @@
  * 真链路由 `pnpm e2e:inspector` 在真 Chromium 里跑。
  */
 import type { SelectionContext, SelectionLoc } from '@tenon/protocol'
+import type { TFunction } from './i18n.js'
 
 /** 必须与 `packages/runtime-sdk/src/browser/tenon-inspector.ts` 的 `MESSAGE_SOURCE` 一致 */
 export const INSPECTOR_SOURCE = 'tenon-inspector'
@@ -203,16 +204,16 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** 对话输入框上方那个上下文 chip 的文字 */
-export function selectionLabel(selection: SelectionContext | null): string {
+export function selectionLabel(selection: SelectionContext | null, t: TFunction): string {
   if (selection === null) return ''
   if (selection.kind === 'region') {
     const count = selection.elements?.length ?? 0
-    return count === 0 ? '已框选区域' : `已框选 ${String(count)} 个元素`
+    return count === 0 ? t('selection.region') : t('selection.elements', { count })
   }
   if (selection.loc !== undefined) {
     const tail = selection.loc.file.split('/').pop() ?? selection.loc.file
-    const hint = selection.loc.kind === 'component-impl' ? ' · 组件库' : ''
+    const hint = selection.loc.kind === 'component-impl' ? t('selection.componentLibrary') : ''
     return `${tail}:${String(selection.loc.line)}${hint}`
   }
-  return selection.selector ?? '已选中元素'
+  return selection.selector ?? t('selection.element')
 }

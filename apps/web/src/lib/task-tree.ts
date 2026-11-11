@@ -18,6 +18,7 @@
  *    "父节点也在同一会话里"的链往上数。
  */
 import type { TaskGraph, TaskGraphNode } from '@tenon/protocol'
+import type { TFunction } from './i18n.js'
 
 export interface TreeRow {
   readonly node: TaskGraphNode
@@ -89,7 +90,7 @@ export function buildConversationTrees(graph: TaskGraph | null): ConversationTre
  * 子 Agent 的步骤有卡片可挂，主对话的没有 —— 原来那行"主对话 · 等模型"在面板里，
  * 面板拆掉之后这句话要有个去处：放进实时气泡（它正是"此刻"的位置）。
  */
-export function rootActivity(graph: TaskGraph | null): string | null {
+export function rootActivity(graph: TaskGraph | null, t: TFunction): string | null {
   if (graph === null) return null
   const root = graph.nodes.find(
     (node) => node.scope === 'root' && node.kind === 'generation' && ACTIVE.has(node.status),
@@ -97,15 +98,15 @@ export function rootActivity(graph: TaskGraph | null): string | null {
   if (root === undefined) return null
   switch (root.phase) {
     case 'prepare':
-      return '整理上下文'
+      return t('agent.activity.prepare')
     case 'request':
-      return '等模型回复'
+      return t('agent.activity.request')
     case 'tools':
-      return '还在串工具'
+      return t('agent.activity.tools')
     case 'call':
-      return '调度工具'
+      return t('agent.activity.call')
     case 'execute':
-      return '执行中'
+      return t('agent.activity.execute')
     default:
       return null
   }

@@ -12,6 +12,7 @@
 import { useState } from 'react'
 import { cn } from '../../lib/cn.js'
 import type { AppUpdate, AppUpdateState } from '../../hooks/useAppUpdate.js'
+import { useT } from '../../lib/i18n.js'
 
 /** 哪些阶段需要让人看见。`idle` / `checking` / `current` 都属于"没事"，不占地方 */
 function isVisible(state: AppUpdateState): boolean {
@@ -24,6 +25,7 @@ function isVisible(state: AppUpdateState): boolean {
 }
 
 export function UpdateBanner({ update }: { update: AppUpdate }) {
+  const { t } = useT()
   const { state } = update
   /**
    * 「以后再说」记住的是**哪一次提示**，不是"这个阶段"。
@@ -92,7 +94,7 @@ export function UpdateBanner({ update }: { update: AppUpdate }) {
             onClick={() => act(update.download)}
             className="text-brand-soft hover:text-brand"
           >
-            下载
+            {t('update.download')}
           </button>
         )}
         {state.phase === 'ready' && (
@@ -101,7 +103,7 @@ export function UpdateBanner({ update }: { update: AppUpdate }) {
             onClick={() => act(update.install)}
             className="text-brand-soft hover:text-brand"
           >
-            重启安装
+            {t('update.restart')}
           </button>
         )}
         {isError && (
@@ -110,7 +112,7 @@ export function UpdateBanner({ update }: { update: AppUpdate }) {
             onClick={() => act(update.check)}
             className="text-bad/80 hover:text-bad"
           >
-            重试
+            {t('update.retry')}
           </button>
         )}
         <button
@@ -118,7 +120,7 @@ export function UpdateBanner({ update }: { update: AppUpdate }) {
           onClick={() => setDismissed(key)}
           className="text-faint hover:text-muted"
         >
-          以后再说
+          {t('update.later')}
         </button>
       </span>
     </div>

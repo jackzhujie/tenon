@@ -10,27 +10,30 @@ import { cn } from '../lib/cn.js'
 import type { ActiveModel, Outcome } from '../hooks/useWorkspace.js'
 import { releaseBadge, releaseTooltip, type ReleaseHint } from '../lib/release-hint.js'
 import type { StreamState } from '../lib/stream.js'
+import { useT } from '../lib/i18n.js'
+import type { MessageKey } from '../lib/i18n.js'
 
-const STREAM_LABEL: Record<StreamState, string> = {
-  connecting: '连接中',
-  open: '已连接',
-  reconnecting: '重连中',
-  failed: '已断开',
-  stopped: '未连接',
+const STREAM_KEY: Record<StreamState, MessageKey> = {
+  connecting: 'header.stream.connecting',
+  open: 'header.stream.open',
+  reconnecting: 'header.stream.reconnecting',
+  failed: 'header.stream.failed',
+  stopped: 'header.stream.stopped',
 }
 
 function StreamDot({ state }: { state: StreamState }) {
+  const { t } = useT()
   const ok = state === 'open'
   const bad = state === 'failed'
   return (
-    <span className="flex items-center gap-1.5" title={`事件流：${STREAM_LABEL[state]}`}>
+    <span className="flex items-center gap-1.5" title={t('header.stream.tooltip', { state: t(STREAM_KEY[state]) })}>
       <span
         className={cn(
           'size-1.5 rounded-full',
           ok ? 'bg-ok' : bad ? 'bg-bad' : 'bg-warn tenon-pulse',
         )}
       />
-      <span className="text-[10.5px] text-faint">{STREAM_LABEL[state]}</span>
+      <span className="text-[10.5px] text-faint">{t(STREAM_KEY[state])}</span>
     </span>
   )
 }
@@ -74,10 +77,12 @@ export function Header({
   unreleased,
   onRelease,
 }: HeaderProps) {
+  const { t } = useT()
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-panel/80 px-3">
       <div className="flex items-center gap-2 pr-1">
         <span className="flex size-6 items-center justify-center rounded-md bg-brand text-[12px] font-medium text-[#20120a]">
+          {/* i18n-ignore 品牌字，不是文案 */}
           榫
         </span>
         <span className="text-[12.5px] tracking-tight text-ink">Tenon</span>
@@ -94,7 +99,7 @@ export function Header({
         onRename={onRenameApp}
       />
 
-      <Button variant="ghost" size="sm" className="px-1.5" title="新建应用" onClick={onCreate}>
+      <Button variant="ghost" size="sm" className="px-1.5" title={t('header.newApp')} onClick={onCreate}>
         <PlusIcon className="size-3.5" />
       </Button>
 
@@ -114,13 +119,11 @@ export function Header({
           size="sm"
           disabled={activeApp === null}
           title={
-            unreleased === null
-              ? '把这个版本冻结下来并推到备份库'
-              : releaseTooltip(unreleased)
+            unreleased === null ? t('header.releaseHint') : releaseTooltip(unreleased, t)
           }
           onClick={onRelease}
         >
-          发布
+          {t('release.action.publish')}
           {/* 有了这个数字，「现在值不值得点开预检」不用点进去才知道 */}
           {unreleased !== null && (
             <span className="rounded-sm bg-brand/20 px-1 font-mono text-[10px] leading-4 text-brand-soft">

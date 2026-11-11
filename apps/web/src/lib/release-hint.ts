@@ -60,15 +60,16 @@ export function releaseHint(
   return { count, saturated: truncated && count >= commits.length, ever: true }
 }
 
+import type { TFunction } from './i18n.js'
+
 /** 按钮上那个小徽标的文字（`saturated` 时带 `+`） */
 export function releaseBadge(hint: ReleaseHint): string {
   return hint.saturated ? `${hint.count}+` : `${hint.count}`
 }
 
 /** 鼠标悬停时的一句话：说清"这些是什么"与"点进去能干什么" */
-export function releaseTooltip(hint: ReleaseHint): string {
-  if (!hint.ever) {
-    return `还没发布过（最近 ${hint.saturated ? `${hint.count}+` : hint.count} 个版本都没发）。点「发布」跑一次预检，通过了就把这一版冻结下来。`
-  }
-  return `上次发布之后又改了 ${hint.saturated ? `至少 ${hint.count}` : hint.count} 个版本。点「发布」跑一次预检。`
+export function releaseTooltip(hint: ReleaseHint, t: TFunction): string {
+  // 数字带 `+` 表示"至少" —— 调用方给的是同一个参数，措辞差异交给文案表
+  if (!hint.ever) return t('release.hint.never', { count: releaseBadge(hint) })
+  return t('release.hint.behind', { count: releaseBadge(hint) })
 }

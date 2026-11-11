@@ -8,6 +8,8 @@
  * 会把整个 pi 打进前端产物（体积从 300KB 跳到 3MB 那种）。
  */
 import type { TaskGraphNode } from '@tenon/protocol'
+import type { TFunction } from './i18n.js'
+import type { ChatKey } from './messages/chat.js'
 
 const ROLE_LABEL: Record<string, string> = {
   builder: 'Builder',
@@ -24,26 +26,30 @@ export function roleLabel(role: string | null): string | null {
 }
 
 /** pi 的细阶段是宿主枚举，直接显示等于让用户读内部实现 */
-const PHASE_TEXT: Record<string, string> = {
-  prepare: '准备上下文',
-  request: '等模型',
-  tools: '串工具',
-  call: '调度工具',
-  execute: '执行中',
+const PHASE_KEY: Record<string, ChatKey> = {
+  prepare: 'agent.phase.prepare',
+  request: 'agent.phase.request',
+  tools: 'agent.phase.tools',
+  call: 'agent.phase.call',
+  execute: 'agent.phase.execute',
 }
 
-export function statusText(node: TaskGraphNode): string {
+export function statusText(node: TaskGraphNode, t: TFunction): string {
   switch (node.status) {
     case 'pending':
-      return '排队'
-    case 'running':
-      return PHASE_TEXT[node.phase ?? ''] ?? '运行中'
+      return t('agent.status.pending')
+    case 'running': {
+      const key = PHASE_KEY[node.phase ?? '']
+      return key === undefined ? t('agent.status.running') : t(key)
+    }
     case 'waiting':
-      return node.waitingOn.length > 0 ? `等 ${node.waitingOn.length} 个子任务` : '等待'
+      return node.waitingOn.length > 0
+        ? t('agent.status.waitingFor', { count: node.waitingOn.length })
+        : t('agent.status.waiting')
     case 'sleeping':
-      return '等重试'
+      return t('agent.status.retrying')
     case 'completing':
-      return '收尾'
+      return t('agent.status.completing')
   }
 }
 
@@ -62,14 +68,14 @@ export function dotClass(status: TaskGraphNode['status']): string {
   }
 }
 
-export function titleOf(node: TaskGraphNode): string {
+export function titleOf(node: TaskGraphNode, t: TFunction): string {
   if (node.kind === 'generation') {
-    if (node.scope === 'root') return '主对话'
-    return roleLabel(node.role) ?? '子 Agent'
+    if (node.scope === 'root') return t('agent.title.root')
+    return roleLabel(node.role) ?? t('agent.title.subagent')
   }
   if (node.kind === 'tool') {
     const label = roleLabel(node.role)
-    return label === null ? '工具调用' : `派活 ${label}`
+    return label === null ? t('agent.title.tool') : t('agent.title.delegated', { role: label })
   }
   return node.kind
 }
