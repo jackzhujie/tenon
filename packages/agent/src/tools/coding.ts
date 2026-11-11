@@ -11,9 +11,16 @@
  *
  * 安全边界（M1 = 本地单用户，边界靠"够用"而非"完备"）：
  * - 文件工具：`path` 必须在 `repo/` 之内，越界直接返回错误结果（不抛异常，让模型自己改）。
- * - bash：`cwd` 强制钉在 `repo/`；环境变量按名字洗掉密钥与 `TENON_*`（生成的应用子进程会继承）。
- *   不做系统调用级别的沙箱 —— 那是 M7 的 `gondolin` / 权限清单（DESIGN §15.3）。
+ * - bash：`cwd` 强制钉在 `repo/`；环境变量按名字洗掉密钥与 `TENON_*`（生成的应用子进程会继承）；
+ *   外加 `bashGuard` 拦两类**能静态看出来**的越界（cd 出界 / 碰宿主凭据目录）。
+ * - **不做系统调用级别的沙箱** —— 那是 M7 的 `gondolin` / 权限清单（DESIGN §15.3）。
+ *
+ * ⚠️ `bashGuard` 是**护栏不是沙箱**：它只看命令字符串，绕过它很容易
+ * （`node -e`、`bash -c "$(…)"`、任何 `postinstall` 脚本都能出去）。
+ * 它的价值是减少模型手滑（走错目录、改错文件），**不能**当作安全边界宣传 ——
+ * 那会让人以为风险已经没了，比没有护栏更危险。边界写清在 `SECURITY.md`。
  */
+import { homedir } from 'node:os'
 import { resolve, sep } from 'node:path'
 import type { Extension, ToolExecutionApi, ToolRegistration } from '@earendil-works/pi-durable'
 import { defineExtension, section } from '@earendil-works/pi-durable'
@@ -53,6 +60,97 @@ export function isInside(root: string, candidate: string): boolean {
   const absolute = resolve(root, candidate)
   const prefix = root.endsWith(sep) ? root : `${root}${sep}`
   return absolute === root || absolute.startsWith(prefix)
+}
+
+/**
+ * 一出现就拒的目录名：里面放的是凭据，不是代码。
+ *
+ * 为什么不把整个 HOME 都算禁区：应用仓库自己就在 `~/.tenon/apps/<id>/repo` 里，
+ * 而 `~/.npm`（依赖缓存）、`~/.gitconfig` 又必须让子进程能读到 —— 所以只钉这几个。
+ */
+const PRIVATE_NAMES = ['.ssh', '.aws', '.gnupg', '.netrc', '.config/gh'] as const
+
+/** `cd` / `pushd`：目标可能不存在（`cd && ls` 会被 shell 当成"回家"）。`-` 也不可预测 */
+const CD_PATTERN = /(?:^|[;&|(\n])\s*(?:cd|pushd)(?:\s+([^\s;&|)\n]+))?/g
+
+/** `~` / `$HOME` / `${HOME}` 一律展开成真实的 home —— 后面要靠它算绝对路径 */
+function expandHome(text: string): string {
+  const home = homedir()
+  return text.replace(/\$\{HOME\}/g, home).replace(/\$HOME\b/g, home).replace(/(^|[\s"'=:(])~(?=\/|$)/gm, `$1${home}`)
+}
+
+/**
+ * 命令里出现的、指向 `~/.tenon` 的路径片段。
+ *
+ * 为什么要单独拦它：`~/.tenon/tenon.db` 里有**所有应用**的数据与加密后的密钥，
+ * `~/.tenon/apps/<别的 id>` 是别人的工作区 —— 这两件事跟"文件工具只能读 repo"是同一条规则，
+ * 只是 bash 绕过了文件工具。而当前应用自己的 repo 也在 `.tenon` 下面，所以判的是**在不在 repo 内**。
+ */
+const TENON_PATH = /[^\s"'`;|&()<>]*\.tenon[^\s"'`;|&()<>]*/g
+
+/**
+ * bash 的护栏，**不是沙箱**（见文件头的 ⚠️）。
+ *
+ * 三条规则，只拦能静态确定的：
+ * 1. `cd` / `pushd` 的目标出 `repo/` —— 这一条最要紧，因为它**一次改变后续所有相对路径的含义**，
+ *    而 cwd 钉在 repo 是我们对模型的承诺。
+ * 2. 命令里出现 `.tenon` 下**repo 之外**的路径 —— 那是别的应用的数据，或存密钥的库文件。
+ * 3. 命令里出现宿主凭据目录（`~/.ssh` 等）。
+ *
+ * 刻意**不拦**：到 `/tmp`、`/etc` 的绝对路径，`curl`，`node -e`，`npm install`（要跑任意 postinstall）。
+ * 拦了会挡掉正常流程，而挡不住的部分不会因为这几条变少 —— 那是沙箱的事。
+ * 含 `$` / 反引号的片段**算不出就放行**：静态解析猜错的方向是把正常命令打死。
+ */
+export function bashGuard(repoDir: string): (args: Record<string, unknown>) => string | undefined {
+  return (args) => {
+    const command = args['command']
+    if (typeof command !== 'string' || command.trim() === '') return undefined
+    return checkCommand(repoDir, command)
+  }
+}
+
+/** 纯函数，单独 export 是为了能直接测：不用起 harness */
+export function checkCommand(repoDir: string, command: string): string | undefined {
+  const home = homedir()
+
+  for (const match of command.matchAll(CD_PATTERN)) {
+    const target = match[1]
+    // 没有参数（`cd && make`）等价于 `cd ~`；`cd -` 回到上一个目录，两个都不可预测
+    if (target === undefined || target === '-') {
+      return '拒绝：`cd` 没有指定目录（等价于回 home），而命令只能在应用工作区里跑。要换目录请用工作区内的相对路径。'
+    }
+    // `$(...)` / `$VAR` 这类静态算不出来，交给运行时；猜错方向是把正常命令打死
+    if (/[$`]/.test(target)) continue
+    if (!isInside(repoDir, expandHome(target))) {
+      return `拒绝：这条命令把工作目录切到了应用工作区之外（${target}）。所有文件都在工作区（repo/）里，请改用相对路径。`
+    }
+  }
+
+  const expanded = expandHome(command)
+
+  for (const match of expanded.matchAll(TENON_PATH)) {
+    const path = match[0]
+    // 只是提到这个名字（`grep .tenon README.md`）不算访问；必须是路径形状
+    if (!path.includes('/')) continue
+    if (isInside(repoDir, path)) continue
+    return `拒绝：${path} 不在这个应用的工作区里 —— 那里是别的应用的数据或本机的密钥库。这个应用只能碰 repo/ 里的文件。`
+  }
+
+  // 路径要当字面量比：home 里可能带 `.` / `+`，不转义会变成通配符（用户名带点的机器上必踩）
+  const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // 分隔符也要归一：Windows 上 home 是 `C:\Users\x`，而模型两种写法都会出现
+  const slash = (text: string): string => text.replace(/\\/g, '/')
+
+  for (const name of PRIVATE_NAMES) {
+    // 前后都要是路径边界：`~/.ssh`、`/Users/x/.ssh/id_rsa` 都算；`foo.ssh2` 不算
+    const target = literal(slash(`${home}/${name}`))
+    const pattern = new RegExp(`(^|[\\s"'=:(])${target}(?=[/\\s"'\`;|&)]|$)`)
+    if (pattern.test(slash(expanded))) {
+      return `拒绝：命令访问了 ~/${name} —— 那是宿主凭据所在，不属于这个应用。要在项目里配置凭据，请用环境变量或工作区内的文件。`
+    }
+  }
+
+  return undefined
 }
 
 function textOf(content: SourceUpdate['content']): string {
@@ -169,6 +267,9 @@ export function createCodingTools(options: CodingToolsOptions): ToolRegistration
       guard,
     }),
     adapt(bash as unknown as AnySourceTool, {
+      // bash 是唯一能绕开 pathGuard 的工具：文件工具只认 args.path，而命令里可以写任何路径。
+      // 所以护栏放在**进执行器之前**，拒绝时把话说清让模型自己改（与文件工具同一套语义）
+      guard: bashGuard(repoDir),
       replay: 'unsafe',
       outputLimits: BASH_OUTPUT_LIMITS,
     }),
