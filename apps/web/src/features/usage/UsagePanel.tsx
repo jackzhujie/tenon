@@ -397,7 +397,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
           */}
           <div className="border-t border-line-soft px-3 py-2">
             <p className="mb-1.5 text-[11px] text-faint">
-              全局额度（所有应用合计；两道闸，任一撞上都发不出去）
+              全局额度（所有应用合计）
             </p>
 
             <label className="flex items-center gap-2 py-0.5 text-[11.5px] text-muted">
