@@ -48,6 +48,7 @@ export const shellEn = {
   'update.retry': 'Retry',
   'update.later': 'Later',
   'update.newVersion': 'Tenon {version} is available',
+  'locale.switch': 'Switch language',
 
   /* ---- 网络层错误（lib/rpc.ts，不是服务端返回的） ---- */
   'error.rpc.unreachable': 'Cannot reach the Tenon service ({host}){detail}',
@@ -110,6 +111,7 @@ export const shellZh: Record<keyof typeof shellEn, string> = {
   'update.retry': '重试',
   'update.later': '以后再说',
   'update.newVersion': '有新版本 {version}',
+  'locale.switch': '切换语言',
 
   'error.rpc.unreachable': '连不上 Tenon 服务（{host}）{detail}',
   'error.rpc.notJson': '服务返回了非 JSON 响应（HTTP {status}）',

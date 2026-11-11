@@ -82,7 +82,7 @@ describe('工具层（write / edit / bash）', () => {
     })
     // 建应用 1 个 + 这一轮 1 个
     expect(commits).toHaveLength(2)
-    expect(commits[0]?.message).toContain('一轮对话')
+    expect(commits[0]?.message).toContain('one turn')
   })
 
   it('edit 能改已有文件（read → edit 这条最常见的组合）', async () => {

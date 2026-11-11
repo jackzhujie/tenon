@@ -17,19 +17,21 @@ import { useCallback, useState } from 'react'
 import type { RpcOutput } from '@tenon/protocol'
 import { rpc } from '../../lib/rpc.js'
 import { cn } from '../../lib/cn.js'
+import { useT } from '../../lib/i18n.js'
+import type { SettingsKey } from '../../lib/messages/settings.js'
 
 type Report = RpcOutput<'storage.report'>
 type CategoryKey = Report['apps'][number]['categories'][number]['key']
 type CleanKind = 'deps' | 'snapshots' | 'backups-gc'
 
-const CATEGORY_LABEL: Record<CategoryKey, string> = {
-  code: '代码',
-  git: 'Git',
-  deps: '依赖',
-  database: '数据库',
-  snapshots: '快照',
-  exports: '导出',
-  metadata: '会话',
+const CATEGORY_KEY: Record<CategoryKey, SettingsKey> = {
+  code: 'storage.kind.code',
+  git: 'storage.kind.git',
+  deps: 'storage.kind.deps',
+  database: 'storage.kind.database',
+  snapshots: 'storage.kind.snapshots',
+  exports: 'storage.kind.exports',
+  metadata: 'storage.kind.metadata',
 }
 
 function formatBytes(bytes: number): string {
@@ -46,6 +48,7 @@ interface Outcome {
 }
 
 export function StoragePanel() {
+  const { t } = useT()
   const [open, setOpen] = useState(false)
   const [report, setReport] = useState<Report | null>(null)
   const [busy, setBusy] = useState(false)
@@ -117,9 +120,9 @@ export function StoragePanel() {
           'rounded-md border border-line bg-panel-2 px-2 py-1 text-[11px] text-muted',
           'hover:text-ink',
         )}
-        title="看看 ~/.tenon 占了多少、能清什么"
+        title={t('storage.tip')}
       >
-        存储
+        {t('storage.title')}
         {report !== null && <span className="ml-1 text-[10px] text-faint">{formatBytes(report.totalBytes)}</span>}
       </button>
 
@@ -134,11 +137,11 @@ export function StoragePanel() {
               */}
               <div
                 className="text-[11.5px] text-ink"
-                title="按文件大小累加；Finder 与 du 按块对齐统计，通常会更大一些"
+                title={t('storage.sizeTip')}
               >
-                占用（按文件大小）
+                {t('storage.sizeLabel')}
               </div>
-              <div className="text-[10px] text-faint">{report?.root ?? '正在盘点…'}</div>
+              <div className="text-[10px] text-faint">{report?.root ?? t('storage.scanning')}</div>
             </div>
             <button
               type="button"
@@ -146,7 +149,7 @@ export function StoragePanel() {
               disabled={busy}
               className="rounded border border-line px-2 py-0.5 text-[10.5px] text-faint hover:text-ink disabled:opacity-40"
             >
-              {busy ? '处理中…' : '重新盘点'}
+              {busy ? t('storage.busy') : t('storage.rescan')}
             </button>
           </div>
 
@@ -178,22 +181,22 @@ export function StoragePanel() {
                         .sort((a, b) => b.bytes - a.bytes)
                         .map((item) => (
                           <span key={item.key} className={item.reclaimable ? 'text-warn/80' : undefined}>
-                            {CATEGORY_LABEL[item.key]} {formatBytes(item.bytes)}
-                            {item.key === 'snapshots' && `（${app.snapshotCount} 份）`}
+                            {t(CATEGORY_KEY[item.key])} {formatBytes(item.bytes)}
+                            {item.key === 'snapshots' && t('storage.snapshotCount', { count: app.snapshotCount })}
                           </span>
                         ))}
                     </div>
                   </div>
                 ))}
                 {report.apps.length === 0 && (
-                  <p className="px-1 py-2 text-[10.5px] text-faint">还没有应用。</p>
+                  <p className="px-1 py-2 text-[10.5px] text-faint">{t('storage.noApps')}</p>
                 )}
               </div>
 
               <div className="space-y-1.5 border-t border-line-soft pt-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[10.5px] text-muted">
-                    依赖（删了下一次预览会重装）
+                    {t('storage.deps.label')}
                     <span className="ml-1 text-faint">{formatBytes(depsBytes)}</span>
                   </div>
                   <button
@@ -207,13 +210,13 @@ export function StoragePanel() {
                         : 'border-line text-faint hover:text-ink',
                     )}
                   >
-                    {confirm === 'deps' ? `确定释放 ${formatBytes(depsBytes)}？` : '清理依赖'}
+                    {confirm === 'deps' ? t('storage.deps.confirm', { size: formatBytes(depsBytes) }) : t('storage.deps.clean')}
                   </button>
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[10.5px] text-muted">
-                    库快照
+                    {t('storage.snapshots.title')}
                     <span className="ml-1 text-faint">
                       {snapshotCount} 份（{formatBytes(snapshotBytes)}）· 每应用留最近
                       <select
@@ -230,7 +233,7 @@ export function StoragePanel() {
                           </option>
                         ))}
                       </select>
-                      份
+                      {t('storage.unit.snapshots')}
                     </span>
                   </div>
                   <button
@@ -243,17 +246,17 @@ export function StoragePanel() {
                         ? 'border-warn/60 bg-warn/15 text-warn'
                         : 'border-line text-faint hover:text-ink',
                     )}
-                    title="按平均大小估算；实际释放量以清理结果为准"
+                    title={t('storage.snapshots.tip')}
                   >
                     {confirm === 'snapshots'
-                      ? `确定释放 ≈${formatBytes(estimatedSnapshotFreed)}？`
-                      : `清理旧快照 ≈${formatBytes(estimatedSnapshotFreed)}`}
+                      ? t('storage.snapshots.confirm', { size: formatBytes(estimatedSnapshotFreed) })
+                      : t('storage.snapshots.clean', { size: formatBytes(estimatedSnapshotFreed) })}
                   </button>
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[10.5px] text-muted">
-                    备份裸库
+                    {t('storage.gc.title')}
                     <span className="ml-1 text-faint">
                       {report.backups.length} 个 · {formatBytes(report.backupsBytes)}
                     </span>
@@ -263,14 +266,14 @@ export function StoragePanel() {
                     disabled={busy || report.backups.length === 0}
                     onClick={() => void clean('backups-gc')}
                     className="rounded border border-line px-2 py-0.5 text-[10.5px] text-faint hover:text-ink disabled:opacity-40"
-                    title="只打包松散对象，不删除任何可达提交"
+                    title={t('storage.gc.tip')}
                   >
-                    压缩
+                    {t('storage.gc.action')}
                   </button>
                 </div>
 
                 <p className="pt-1 text-[9.5px] leading-relaxed text-faint">
-                  代码、数据库、会话不做清理入口：它们是这个应用本身。
+                  {t('storage.footnote')}
                 </p>
               </div>
 

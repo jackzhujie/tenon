@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // 脚本会 import 界面侧的纯函数做验收（`e2e-inspector` 用 `lib/selection`），
+    // 顺着它的 import 链会摸到 `.tsx`（`i18n.tsx`）。这里不开 jsx 的话，
+    // `tsc` 报的是 TS6142「模块解析到 .tsx 但 --jsx 没设」，看起来像路径写错了
+    "jsx": "react-jsx"
+  },
   "include": ["scripts/**/*.ts"]
 }

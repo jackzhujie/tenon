@@ -192,7 +192,7 @@ export class AppStore {
         })
       }
       await initRepo(paths.repoDir)
-      await commitAll(paths.repoDir, `chore: 初始化应用「${input.name}」`, { appId: id })
+      await commitAll(paths.repoDir, `chore: create app "${input.name}"`, { appId: id })
     } catch (err) {
       // 建盘失败 → 把库行删掉，别留一个指向空目录的应用
       this.db.run('DELETE FROM apps WHERE id = ?', id)

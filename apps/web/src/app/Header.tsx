@@ -1,5 +1,6 @@
 import type { App, BudgetDimension, UsageSnapshot } from '@tenon/protocol'
 import { AppMenu } from '../features/apps/AppMenu.js'
+import { LocaleToggle } from './LocaleToggle.js'
 import { PluginsPanel } from '../features/plugins/PluginsPanel.js'
 import { ModelPanel } from '../features/settings/ModelPanel.js'
 import { StoragePanel } from '../features/settings/StoragePanel.js'
@@ -81,7 +82,11 @@ export function Header({
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-panel/80 px-3">
       <div className="flex items-center gap-2 pr-1">
-        <span className="flex size-6 items-center justify-center rounded-md bg-brand text-[12px] font-medium text-[#20120a]">
+        {/* data-brand：品牌字不进文案表，也不该被"英文界面有没有中文"的普查当成漏网文案 */}
+        <span
+          data-brand="tenon"
+          className="flex size-6 items-center justify-center rounded-md bg-brand text-[12px] font-medium text-[#20120a]"
+        >
           {/* i18n-ignore 品牌字，不是文案 */}
           榫
         </span>
@@ -113,6 +118,7 @@ export function Header({
         />
         <PluginsPanel appId={activeApp?.id ?? null} />
         <StoragePanel />
+        <LocaleToggle />
         <StreamDot state={stream} />
         <Button
           variant="outline"

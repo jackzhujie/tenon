@@ -25,7 +25,13 @@ let running: RunningServer | undefined
 afterEach(async () => {
   await running?.close()
   running = undefined
-  if (dir !== undefined) await rm(dir, { recursive: true, force: true })
+  /*
+   * `maxRetries`：`close()` 之后还有一个短命的异步写（这一轮的 git 收尾）在落盘，
+   * 把目录腾空的瞬间它会再写回来 —— macOS 的 APFS 上于是撞成
+   * `ENOTEMPTY: directory not empty`（`rm` 删完再 rmdir 时目录又非空了）。
+   * 本机快盘上几十次才见一次，正好在 920 项全量跑里撞上了。
+   */
+  if (dir !== undefined) await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   dir = undefined
 })
 

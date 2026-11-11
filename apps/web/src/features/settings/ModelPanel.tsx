@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ModelPrice, ProviderProfile } from '@tenon/protocol'
 import { rpc } from '../../lib/rpc.js'
 import { cn } from '../../lib/cn.js'
+import { useT } from '../../lib/i18n.js'
 import type { ActiveModel } from '../../hooks/useWorkspace.js'
 
 interface ModelState {
@@ -50,7 +51,7 @@ const EMPTY_FORM: Form = { label: '', baseUrl: 'https://api.openai.com/v1', mode
 const PRESETS: { label: string; baseUrl: string; modelId: string }[] = [
   { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', modelId: 'deepseek-chat' },
   { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-4o-mini' },
-  { label: '本地 LM Studio', baseUrl: 'http://127.0.0.1:1234/v1', modelId: 'local-model' },
+  { label: 'Local LM Studio', baseUrl: 'http://127.0.0.1:1234/v1', modelId: 'local-model' },
 ]
 
 export interface ModelPanelProps {
@@ -61,6 +62,7 @@ export interface ModelPanelProps {
 }
 
 export function ModelPanel({ model, onChanged }: ModelPanelProps) {
+  const { t } = useT()
   const [open, setOpen] = useState(false)
   const [profiles, setProfiles] = useState<ProviderProfile[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -94,21 +96,21 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
   /** 把后端回的 applied 翻译成一句人话 —— 这是用户最关心的"现在能用了吗" */
   function report(applied: ModelState): void {
     if (applied.model === null) {
-      setNotice({ tone: 'bad', text: applied.error ?? '保存了，但没能用起来' })
+      setNotice({ tone: 'bad', text: applied.error ?? t('model.notice.saveFailed') })
       return
     }
     setNotice({
       tone: 'ok',
       text: applied.changed
-        ? `已生效：${applied.model.modelId}（不用重启）`
-        : `设置没变：${applied.model.modelId}`,
+        ? t('model.notice.applied', { model: applied.model.modelId })
+        : t('model.notice.unchanged', { model: applied.model.modelId }),
     })
   }
 
   async function save(): Promise<void> {
     if (form === null) return
     if (form.label.trim() === '' || form.modelId.trim() === '') {
-      setNotice({ tone: 'bad', text: '名称和模型 id 都得填' })
+      setNotice({ tone: 'bad', text: t('model.error.nameAndId') })
       return
     }
     setBusy('save')
@@ -139,7 +141,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
     const input = Number(priceForm.input)
     const output = Number(priceForm.output)
     if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) {
-      setNotice({ tone: 'bad', text: '价格要填非负数字（美元 / 百万 token）' })
+      setNotice({ tone: 'bad', text: t('model.error.price') })
       return
     }
     setBusy('price')
@@ -229,17 +231,21 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
             ? 'border-line bg-panel-2 text-muted hover:text-ink'
             : 'border-warn/50 bg-warn/10 text-warn',
         )}
-        title={configured ? `当前模型：${model.modelId}（点这里换）` : '还没配置模型，点这里填一个 API Key'}
+        title={
+      configured
+        ? t('model.tip.configured', { model: model.modelId })
+        : t('model.tip.unconfigured')
+    }
       >
-        {configured ? (model.mode === 'faux' ? '假模型 · 仅验证链路' : model.modelId) : '未配置模型'}
+        {configured ? (model.mode === 'faux' ? t('model.faux') : model.modelId) : t('model.unconfigured')}
       </button>
 
       {open && (
         <div className="absolute right-0 top-9 z-50 w-[460px] rounded-lg border border-line bg-panel p-3 shadow-xl">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[12px] text-ink">模型</span>
+            <span className="text-[12px] text-ink">{t('model.title')}</span>
             <span className="font-mono text-[10px] text-faint">
-              {configured ? `${model.mode} · ${model.providerId}` : '未配置'}
+              {configured ? `${model.mode} · ${model.providerId}` : t('model.unconfigured')}
             </span>
           </div>
 
@@ -251,7 +257,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
 
           {profiles.length === 0 && form === null && (
             <p className="mb-2 text-[11px] text-faint">
-              还没有提供商。填一个 API Key 就能开始 —— 密钥存在本机的加密库里，不会上传，也不会进日志。
+              {t('model.empty.providers')}
             </p>
           )}
 
@@ -263,10 +269,10 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[12px] text-ink">{profile.label}</span>
                       {activeId === profile.id && (
-                        <span className="rounded border border-ok/40 px-1 text-[9.5px] text-ok">当前</span>
+                        <span className="rounded border border-ok/40 px-1 text-[9.5px] text-ok">{t('model.badge.current')}</span>
                       )}
                       {!profile.hasApiKey && (
-                        <span className="rounded border border-warn/40 px-1 text-[9.5px] text-warn">缺密钥</span>
+                        <span className="rounded border border-warn/40 px-1 text-[9.5px] text-warn">{t('model.badge.noKey')}</span>
                       )}
                       {/*
                         没有价格 → 钱永远算不出来。用一个显眼的标签说出来，
@@ -274,12 +280,12 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                       */}
                       {prices.every((price) => price.profileId !== profile.id) && (
                         <span className="rounded border border-warn/40 px-1 text-[9.5px] text-warn">
-                          未定价
+                          {t('model.unpriced')}
                         </span>
                       )}
                     </div>
                     <div className="truncate font-mono text-[9.5px] text-faint">
-                      {profile.modelId} · {profile.baseUrl ?? '默认端点'}
+                      {profile.modelId} · {profile.baseUrl ?? t('model.defaultEndpoint')}
                     </div>
                     {prices
                       .filter((price) => price.profileId === profile.id)
@@ -297,7 +303,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                             disabled={busy !== null}
                             onClick={() => void removePrice(price)}
                             className="text-faint hover:text-bad disabled:opacity-40"
-                            title="删掉这条价格"
+                            title={t('model.price.deleteTitle')}
                           >
                             ×
                           </button>
@@ -324,7 +330,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                       }}
                       className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-ink disabled:opacity-40"
                     >
-                      价格
+                      {t('model.price.title')}
                     </button>
                     <button
                       type="button"
@@ -332,7 +338,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                       onClick={() => void test(profile)}
                       className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-ink disabled:opacity-40"
                     >
-                      {busy === `test:${profile.id}` ? '测试中…' : '测试'}
+                      {busy === `test:${profile.id}` ? t('model.test.testing') : t('model.test.action')}
                     </button>
                     {activeId !== profile.id && (
                       <button
@@ -341,7 +347,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                         onClick={() => void activate(profile)}
                         className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-ink disabled:opacity-40"
                       >
-                        用这个
+                        {t('model.use')}
                       </button>
                     )}
                     <button
@@ -359,7 +365,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                       }}
                       className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-ink disabled:opacity-40"
                     >
-                      改
+                      {t('model.edit')}
                     </button>
                     <button
                       type="button"
@@ -367,7 +373,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                       onClick={() => void remove(profile)}
                       className="rounded border border-line px-1.5 py-0.5 text-[10px] text-faint hover:text-bad disabled:opacity-40"
                     >
-                      删
+                      {t('model.remove')}
                     </button>
                   </div>
                 </div>
@@ -383,7 +389,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <label className="flex flex-col gap-0.5 text-[10px] text-faint">
-                  输入
+                  {t('model.price.input')}
                   <input
                     value={priceForm.input}
                     onChange={(event) => setPriceForm({ ...priceForm, input: event.target.value })}
@@ -392,7 +398,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                   />
                 </label>
                 <label className="flex flex-col gap-0.5 text-[10px] text-faint">
-                  输出
+                  {t('model.price.output')}
                   <input
                     value={priceForm.output}
                     onChange={(event) => setPriceForm({ ...priceForm, output: event.target.value })}
@@ -408,14 +414,14 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                   onClick={() => void savePrice()}
                   className="rounded-md border border-brand/50 bg-brand/10 px-2 py-1 text-[11px] text-brand disabled:opacity-40"
                 >
-                  {busy === 'price' ? '保存中…' : '保存价格'}
+                  {busy === 'price' ? t('model.price.saving') : t('model.price.save')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setPriceForm(null)}
                   className="rounded-md border border-line px-2 py-1 text-[11px] text-faint hover:text-ink"
                 >
-                  取消
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
@@ -430,7 +436,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
               }}
               className="rounded-md border border-line bg-panel-2 px-2 py-1 text-[11px] text-muted hover:text-ink"
             >
-              添加提供商
+              {t('model.addProvider')}
             </button>
           ) : (
             <div className="rounded-md border border-line bg-panel-2 p-2">
@@ -462,16 +468,16 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
 
               <div className="grid grid-cols-2 gap-2">
                 <label className="flex flex-col gap-0.5 text-[10px] text-faint">
-                  名称
+                  {t('model.field.name')}
                   <input
                     value={form.label}
                     onChange={(event) => setForm({ ...form, label: event.target.value })}
                     className="rounded border border-line bg-panel px-1.5 py-1 text-[11px] text-ink"
-                    placeholder="我的 DeepSeek"
+                    placeholder={t('model.field.namePlaceholder')}
                   />
                 </label>
                 <label className="flex flex-col gap-0.5 text-[10px] text-faint">
-                  模型 id
+                  {t('model.field.modelId')}
                   <input
                     value={form.modelId}
                     onChange={(event) => setForm({ ...form, modelId: event.target.value })}
@@ -491,7 +497,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
               </label>
 
               <label className="mt-2 flex flex-col gap-0.5 text-[10px] text-faint">
-                API Key{form.id === undefined ? '' : '（留空 = 不改）'}
+                API Key{form.id === undefined ? '' : t('model.field.apiKeyKeep')}
                 <input
                   type="password"
                   value={form.apiKey}
@@ -509,22 +515,23 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
                   onClick={() => void save()}
                   className="rounded-md border border-brand/50 bg-brand/10 px-2 py-1 text-[11px] text-brand disabled:opacity-40"
                 >
-                  {busy === 'save' ? '保存中…' : '保存并启用'}
+                  {busy === 'save' ? t('model.price.saving') : t('model.saveEnabling')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setForm(null)}
                   className="rounded-md border border-line px-2 py-1 text-[11px] text-faint hover:text-ink"
                 >
-                  取消
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
           )}
 
           <div className="mt-2 border-t border-line pt-2 text-[10px] text-faint">
-            密钥存在本机加密库里（不进环境变量、不进日志、不上传）。保存后立刻生效，不需要重启。
-            价格不填也能用，只是<span className="text-warn">算不出花了多少钱</span>
+            {t('model.note.encrypted')}
+            {t('model.note.price.before')}
+    <span className="text-warn">{t('model.note.price.emphasis')}</span>
             ，「按美元设额度」也就不起作用。
           </div>
         </div>

@@ -11,14 +11,16 @@ import {
 } from '../../components/icons.js'
 import { cn } from '../../lib/cn.js'
 import { INSPECTOR_HASH_KEY } from '../../lib/selection.js'
+import { useT } from '../../lib/i18n.js'
+import type { PreviewKey } from '../../lib/messages/preview.js'
 
 type StageState = Readiness['deps']
 
-const STAGE_LABEL: Record<keyof Readiness, string> = {
-  deps: '依赖',
-  db: '数据',
-  server: '服务',
-  preview: '首屏',
+const STAGE_KEY: Record<keyof Readiness, PreviewKey> = {
+  deps: 'preview.step.deps',
+  db: 'preview.step.db',
+  server: 'preview.step.server',
+  preview: 'preview.step.preview',
 }
 
 /** 顺序就是起服务的顺序，进度条按它推进 */
@@ -31,12 +33,13 @@ function stageDot(state: StageState): string {
 }
 
 function StagePills({ readiness }: { readiness: Readiness }) {
+  const { t } = useT()
   return (
     <div className="flex items-center gap-2.5">
       {STAGES.map((key) => (
         <span key={key} className="flex items-center gap-1">
           <span className={cn('size-1.5 rounded-full', stageDot(readiness[key]))} />
-          <span className="text-[10.5px] text-faint">{STAGE_LABEL[key]}</span>
+          <span className="text-[10.5px] text-faint">{t(STAGE_KEY[key])}</span>
         </span>
       ))}
     </div>
@@ -79,6 +82,7 @@ export function PreviewPanel({
   onStart,
   onToggleFullscreen,
 }: PreviewPanelProps) {
+  const { t } = useT()
   const [reloadKey, setReloadKey] = useState(0)
 
   // 换了应用就把 iframe 换掉，别让上一个应用的页面留在里面
@@ -97,31 +101,31 @@ export function PreviewPanel({
   const reached = STAGES.filter((key) => readiness[key] === 'ready').length
   const stageHint =
     readiness.deps !== 'ready'
-      ? '首次启动会安装依赖，请稍等…'
+      ? t('preview.wait.deps')
       : readiness.db !== 'ready'
-        ? '正在启动应用数据库（本地是 WASM 版 PostgreSQL）…'
+        ? t('preview.wait.db')
         : readiness.server !== 'ready'
-          ? '正在启动后端服务…'
-          : '等待首屏响应…'
+          ? t('preview.wait.server')
+          : t('preview.wait.firstScreen')
 
   return (
     /* 同 ChatPanel：`flex-1` 少了，下面的 `relative flex-1` 会塌成 0 高，
        空态文字就贴在标题栏下沿，而不是居中 */
     <div className="flex min-h-0 flex-1 flex-col bg-[#080706]">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line-soft bg-panel/50 px-3">
-        <span className="text-[11.5px] text-muted">预览</span>
+        <span className="text-[11.5px] text-muted">{t('preview.title')}</span>
         {state === 'starting' && <StagePills readiness={readiness} />}
         {state === 'ready' && preview?.gatewayPort != null && (
           <span className="font-mono text-[10.5px] text-faint">:{preview.gatewayPort}</span>
         )}
-        {state === 'failed' && <span className="text-[11px] text-bad">启动失败</span>}
+        {state === 'failed' && <span className="text-[11px] text-bad">{t('preview.failed')}</span>}
 
         <span className="ml-auto flex items-center gap-0.5">
           <Button
             variant="ghost"
             size="sm"
             className="px-1.5"
-            title="看看这一版改了什么"
+            title={t('preview.openDiff')}
             disabled={appId === null}
             onClick={onOpenDiff}
           >
@@ -131,7 +135,7 @@ export function PreviewPanel({
             variant="ghost"
             size="sm"
             className="px-1.5"
-            title="刷新页面"
+            title={t('preview.reload')}
             disabled={url === null}
             onClick={() => setReloadKey((value) => value + 1)}
           >
@@ -141,7 +145,7 @@ export function PreviewPanel({
             variant="ghost"
             size="sm"
             className="px-1.5"
-            title="重启预览（改了依赖或配置后用）"
+            title={t('preview.restart')}
             disabled={appId === null}
             onClick={() => onStart(true)}
           >
@@ -152,7 +156,7 @@ export function PreviewPanel({
               variant="ghost"
               size="sm"
               className="px-1.5"
-              title="在新标签页打开"
+              title={t('preview.openTab')}
               onClick={() => window.open(url, '_blank', 'noreferrer')}
             >
               <ExternalIcon className="size-3.5" />
@@ -162,7 +166,7 @@ export function PreviewPanel({
             variant="ghost"
             size="sm"
             className="px-1.5"
-            title={fullscreen ? '退出全屏' : '预览全屏'}
+            title={fullscreen ? t('preview.fullscreenOff') : t('preview.fullscreenOn')}
             onClick={onToggleFullscreen}
           >
             {fullscreen ? <MinimizeIcon className="size-3.5" /> : <MaximizeIcon className="size-3.5" />}
@@ -173,15 +177,15 @@ export function PreviewPanel({
       <div className="relative min-h-0 flex-1">
         {appId === null && (
           <Centered>
-            <p className="text-[12.5px] text-faint">选择一个应用后在这里预览</p>
+            <p className="text-[12.5px] text-faint">{t('preview.empty.pick')}</p>
           </Centered>
         )}
 
         {appId !== null && state === 'stopped' && (
           <Centered>
-            <p className="text-[12.5px] text-muted">预览未启动</p>
+            <p className="text-[12.5px] text-muted">{t('preview.empty.notStarted')}</p>
             <Button variant="outline" size="sm" onClick={() => onStart(false)}>
-              启动预览
+              {t('preview.start')}
             </Button>
           </Centered>
         )}
@@ -206,11 +210,11 @@ export function PreviewPanel({
         {appId !== null && state === 'failed' && (
           <Centered>
             <p className="max-w-[52ch] text-[12px] leading-relaxed text-bad">
-              {preview?.error ?? '预览启动失败'}
+              {preview?.error ?? t('preview.error')}
             </p>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => onStart(true)}>
-                重试
+                {t('preview.retry')}
               </Button>
             </div>
           </Centered>
@@ -230,7 +234,7 @@ export function PreviewPanel({
              * hash 只在浏览器里存在。应用侧的 inspector 从 `location.hash` 读它。
              */
             src={inspectorToken === null ? url : `${url}#${INSPECTOR_HASH_KEY}=${inspectorToken}`}
-            title="应用预览"
+            title={t('preview.iframeTitle')}
             className="size-full border-0 bg-white"
           />
         )}

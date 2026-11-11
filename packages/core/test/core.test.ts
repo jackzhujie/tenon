@@ -78,7 +78,7 @@ describe('应用注册表', () => {
       const { gitops } = await import('../src/index.js')
       const commits = await gitops.log(paths.repoDir, 5)
       expect(commits).toHaveLength(1)
-      expect(commits[0]?.message).toContain('初始化应用')
+      expect(commits[0]?.message).toContain('create app')
     } finally {
       core.close()
     }

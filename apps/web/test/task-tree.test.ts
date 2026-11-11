@@ -6,6 +6,7 @@
  * 2. **主对话的节点不能混进子会话的树** —— 混进去就会出现"Explore 下面挂着主对话"
  */
 import { describe, expect, it } from 'vitest'
+import { makeT } from '../src/lib/i18n.js'
 import type { TaskGraph, TaskGraphNode } from '@tenon/protocol'
 import { buildConversationTrees, rootActivity } from '../src/lib/task-tree.js'
 
@@ -26,6 +27,8 @@ function node(partial: Partial<TaskGraphNode> & Pick<TaskGraphNode, 'id' | 'conv
 function graph(nodes: TaskGraphNode[], rootConversationId = '1'): TaskGraph {
   return { rootConversationId, nodes }
 }
+
+const zh = makeT('zh')
 
 describe('子会话的树', () => {
   it('按会话分组：一个子会话一张卡片，主对话的节点不进来', () => {
@@ -92,23 +95,35 @@ describe('子会话的树', () => {
 describe('主对话活动', () => {
   it('把 pi 的 phase 说成人话', () => {
     expect(
-      rootActivity(graph([node({ id: 'a', conversationId: '1', scope: 'root', phase: 'request' })])),
+      rootActivity(
+        graph([node({ id: 'a', conversationId: '1', scope: 'root', phase: 'request' })]),
+        zh,
+      ),
     ).toBe('等模型回复')
     expect(
-      rootActivity(graph([node({ id: 'a', conversationId: '1', scope: 'root', phase: 'tools' })])),
+      rootActivity(
+        graph([node({ id: 'a', conversationId: '1', scope: 'root', phase: 'tools' })]),
+        zh,
+      ),
     ).toBe('还在串工具')
   })
 
   it('没在跑就返回 null（不要一句常驻的废话）', () => {
-    expect(rootActivity(graph([]))).toBeNull()
+    expect(rootActivity(graph([]), zh)).toBeNull()
     expect(
-      rootActivity(graph([node({ id: 'a', conversationId: '1', scope: 'root', status: 'completing' })])),
+      rootActivity(
+        graph([node({ id: 'a', conversationId: '1', scope: 'root', status: 'completing' })]),
+        zh,
+      ),
     ).toBeNull()
   })
 
   it('不认识的新 phase 不显示（别把宿主枚举抛给用户）', () => {
     expect(
-      rootActivity(graph([node({ id: 'a', conversationId: '1', scope: 'root', phase: 'future-phase' })])),
+      rootActivity(
+        graph([node({ id: 'a', conversationId: '1', scope: 'root', phase: 'future-phase' })]),
+        zh,
+      ),
     ).toBeNull()
   })
 })

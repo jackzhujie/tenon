@@ -61,7 +61,8 @@
     "e2e:backend": "tsx scripts/e2e-add-backend.ts",
     "e2e:auth": "tsx scripts/e2e-add-auth.ts",
     "shot:auth": "tsx scripts/shot-auth.ts",
-    "shot:plugins": "tsx scripts/shot-plugins.ts"
+    "shot:plugins": "tsx scripts/shot-plugins.ts",
+    "shot:locale": "tsx scripts/shot-locale.ts"
   },
   "devDependencies": {
     "@earendil-works/chord": "1.4.0",

@@ -27,7 +27,10 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useT()
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
-      <div className="flex size-11 items-center justify-center rounded-xl border border-line bg-panel-2 text-lg text-brand">
+      <div
+        data-brand="tenon"
+        className="flex size-11 items-center justify-center rounded-xl border border-line bg-panel-2 text-lg text-brand"
+      >
         {/* i18n-ignore 品牌字，不是文案 */}
         榫
       </div>

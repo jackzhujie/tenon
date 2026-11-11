@@ -431,8 +431,13 @@ export class ChatService {
     // 进程正在退出：这一轮没跑完，别在这时候去动 git
     if (this.closed) return
     const paths = appPaths(this.options.home, app.id)
+    /*
+     * 提交信息用**英文**：它是 git 历史，会跟着仓库离开这台机器（push 到远端、被 clone、
+     * 出现在别人的 `git log` 里）。界面文案要双语，历史记录不该跟着界面语言变 ——
+     * 否则同一个仓库在中英文两台机器上提交出来的历史是两种语言，grep 都搜不齐。
+     */
     const result = await gitops
-      .commitAll(paths.repoDir, `chat: ${status === 'done' ? '一轮对话' : `未完成（${status}）`}`, {
+      .commitAll(paths.repoDir, `chat: ${status === 'done' ? 'one turn' : `incomplete (${status})`}`, {
         appId: app.id,
         submissionId: String(submissionId),
       })

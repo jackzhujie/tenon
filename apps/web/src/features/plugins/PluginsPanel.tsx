@@ -22,6 +22,8 @@ import type {
 } from '@tenon/protocol'
 import { rpc } from '../../lib/rpc.js'
 import { cn } from '../../lib/cn.js'
+import { useT } from '../../lib/i18n.js'
+import type { PluginsKey } from '../../lib/messages/plugins.js'
 
 interface ComponentList {
   components: InstalledComponent[]
@@ -36,10 +38,10 @@ interface ComponentList {
  */
 type HubCheck = RpcOutput<'hub.check'>
 
-const SOURCE_LABEL: Record<InstalledComponent['source'], string> = {
-  bundled: '内置',
-  hub: 'Hub',
-  local: '本地',
+const SOURCE_KEY: Record<InstalledComponent['source'], PluginsKey> = {
+  bundled: 'plugin.source.bundled',
+  hub: 'plugin.source.hub',
+  local: 'plugin.source.local',
 }
 
 /** 商店里的一行：本机可装的（bundled / 已下载的 hub 包）与 Hub 目录里的都归到这里 */
@@ -60,6 +62,7 @@ export interface PluginsPanelProps {
 }
 
 export function PluginsPanel({ appId }: PluginsPanelProps) {
+  const { t } = useT()
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<'installed' | 'store'>('installed')
   const [data, setData] = useState<ComponentList | null>(null)
@@ -136,14 +139,14 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
           return
         }
         setError(null)
-        setNotice(result.downloaded ? '已从 Hub 下载并装到这个应用' : '已装到这个应用')
+        setNotice(result.downloaded ? t('plugin.notice.installedFromHub') : t('plugin.notice.installed'))
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
         setBusy(null)
       }
     },
-    [appId, load, check],
+    [appId, load, check, t],
   )
 
   const removeFromApp = useCallback(
@@ -154,14 +157,14 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
         const result = await rpc('component.remove', { appId, id })
         await load()
         setError(null)
-        setNotice(result.removed ? '已移除（包还在本机，可以再装回来）' : '本来就没装')
+        setNotice(result.removed ? t('plugin.notice.removed') : t('plugin.notice.notInstalled'))
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
         setBusy(null)
       }
     },
-    [appId, load],
+    [appId, load, t],
   )
 
   /**
@@ -178,8 +181,8 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
         setError(null)
         setNotice(
           result.reloadedApps > 0
-            ? `已更新到 v${result.version}，${result.reloadedApps} 个应用已重新加载`
-            : `已装好 v${result.version}。没有应用在用这个版本（版本区间不接受它），需要改装配声明`,
+            ? t('plugin.notice.updated', { version: result.version, count: result.reloadedApps })
+            : t('plugin.notice.updatedNoUser', { version: result.version }),
         )
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
@@ -187,7 +190,7 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
         setBusy(null)
       }
     },
-    [load, check],
+    [load, check, t],
   )
 
   useEffect(() => {
@@ -273,9 +276,9 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
           'rounded-md border border-line bg-panel-2 px-2 py-1 text-[11px] text-muted',
           'hover:text-ink disabled:opacity-40',
         )}
-        title="这个应用装了哪些组件 / 还能装什么"
+        title={t('plugin.tip')}
       >
-        插件
+        {t('plugin.title')}
         {installed.length > 0 && <span className="ml-1 text-[10px] text-faint">{installed.length}</span>}
       </button>
 
@@ -285,8 +288,8 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
             <div className="flex items-center gap-1">
               {(
                 [
-                  ['installed', `已装 ${installed.length}`],
-                  ['store', '商店'],
+                  ['installed', t('plugin.tab.installed', { count: installed.length })],
+                  ['store', t('plugin.tab.store')],
                 ] as const
               ).map(([value, label]) => (
                 <button
@@ -315,7 +318,7 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
             <>
               {installed.length === 0 && problems.length === 0 && (
                 <p className="text-[11px] text-faint">
-                  还没装组件。切到「商店」装一个，或者跟 Agent 说一句（比如「加上 AI 小助手」）。
+                  {t('plugin.empty.installed')}
                 </p>
               )}
 
@@ -327,7 +330,7 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                         <div className="flex items-center gap-1.5">
                           <span className="truncate text-[12px] text-ink">{component.name}</span>
                           <span className="shrink-0 rounded border border-line px-1 text-[9.5px] text-faint">
-                            {SOURCE_LABEL[component.source]}
+                            {t(SOURCE_KEY[component.source])}
                           </span>
                           <span className="shrink-0 font-mono text-[9.5px] text-faint">
                             v{component.version}
@@ -343,16 +346,16 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                             disabled={busy === component.id}
                             onChange={() => void toggle(component)}
                           />
-                          {component.enabled ? '启用' : '已关闭'}
+                          {component.enabled ? t('plugin.enabled') : t('plugin.disabled')}
                         </label>
                         <button
                           type="button"
                           disabled={busy !== null}
                           onClick={() => void removeFromApp(component.id)}
-                          title="从这个应用移除（包还在本机，可以再装回来）"
+                          title={t('plugin.remove.title')}
                           className="rounded border border-line px-1 text-[10px] text-faint hover:text-bad disabled:opacity-40"
                         >
-                          {busy === `rm:${component.id}` ? '…' : '移除'}
+                          {busy === `rm:${component.id}` ? '…' : t('plugin.remove')}
                         </button>
                       </div>
                     </div>
@@ -362,7 +365,7 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                       </div>
                     )}
                     {!component.loaded && component.enabled && (
-                      <div className="mt-1 text-[10px] text-warn">没加载起来（原因见下）</div>
+                      <div className="mt-1 text-[10px] text-warn">{t('plugin.loadFailed')}</div>
                     )}
                   </li>
                 ))}
@@ -398,7 +401,7 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                         「随包内置 / 环境变量」这一句是为了回答"我这个包为什么连的是这个地址"。
                         没有它就是：用户在另一台机器上装了同一个 dmg，看到的地址却是本机环境变量决定的。
                       */}
-                      <span className="ml-1">· {hub.origin === 'file' ? '随包内置' : '环境变量'}</span>
+                      <span className="ml-1">· {hub.origin === 'file' ? t('plugin.hub.bundled') : t('plugin.hub.env')}</span>
                     </span>
                     <button
                       type="button"
@@ -409,14 +412,14 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                       }}
                       className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-ink disabled:opacity-40"
                     >
-                      {checking ? '检查中…' : '检查更新'}
+                      {checking ? t('plugin.checkUpdates.checking') : t('plugin.checkUpdates.action')}
                     </button>
                   </div>
 
                   {updates !== null && updates.reachable === false && (
                     // 连不上**不是故障**：内置组件不依赖 Hub，说一句就够，别做成红色错误
                     <div className="mt-1">
-                      连不上 Hub（不影响已装的组件）：{updates.error ?? '未知原因'}
+                      {t('plugin.updates.unreachable', { reason: updates.error ?? t('plugin.updates.unknown') })}
                     </div>
                   )}
 
@@ -429,8 +432,8 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                               (item) => item.installedVersion !== null,
                             )
                             return mine.length === 0
-                              ? '本机还没有从 Hub 装的组件（内置组件跟软件版本走）。'
-                              : `已装的 ${mine.length} 个 Hub 组件都是最新的。`
+                              ? t('plugin.updates.noneInstalled')
+                              : t('plugin.updates.allCurrent', { count: mine.length })
                           })()}
                         </span>
                       ) : (
@@ -450,7 +453,7 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                                   onClick={() => void updatePackage(item.id)}
                                   className="shrink-0 rounded border border-brand/50 bg-brand/10 px-1.5 py-0.5 text-[10px] text-brand disabled:opacity-40"
                                 >
-                                  {busy === `hub:${item.id}` ? '更新中…' : '更新'}
+                                  {busy === `hub:${item.id}` ? t('plugin.updates.updating') : t('plugin.updates.update')}
                                 </button>
                               </div>
                               {item.notes !== null && (
@@ -485,7 +488,7 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                     /* 配了但不对（只给了一半 / 文件坏了）：这是"商店为什么是空的"的答案 */
                     <span className="text-warn">Hub 配置有问题：{hub.note}</span>
                   ) : (
-                    '官方 Hub 筹备中：现在只有随包发布的内置组件。'
+                    t('plugin.store.hubPending')
                   )}
                 </span>
                 {hub?.configured === true && (
@@ -498,24 +501,24 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                     }}
                     className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:text-ink disabled:opacity-40"
                   >
-                    {checking ? '读取中…' : '刷新'}
+                    {checking ? t('plugin.store.refreshing') : t('plugin.store.refresh')}
                   </button>
                 )}
               </div>
 
               {updates !== null && updates.reachable === false && (
                 <p className="mb-2 text-[10px] text-faint">
-                  连不上 Hub：{updates.error ?? '未知原因'}。本机已有的仍然可以装。
+                  {t('plugin.store.unreachable', { reason: updates.error ?? t('plugin.updates.unknown') })}
                 </p>
               )}
 
               {store.length === 0 ? (
                 <p className="text-[11px] text-faint">
                   {hub?.configured !== true
-                    ? '没有可装的内置组件。'
+                    ? t('plugin.store.noBundled')
                     : updates === null
-                      ? '正在读取 Hub 目录…'
-                      : '这个应用已经装了所有能装的组件。'}
+                      ? t('plugin.store.readingHub')
+                      : t('plugin.store.allInstalled')}
                 </p>
               ) : (
                 <ul className="flex flex-col gap-1.5">
@@ -526,14 +529,14 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                           <div className="flex items-center gap-1.5">
                             <span className="truncate text-[12px] text-ink">{item.name}</span>
                             <span className="shrink-0 rounded border border-line px-1 text-[9.5px] text-faint">
-                              {SOURCE_LABEL[item.source]}
+                              {t(SOURCE_KEY[item.source])}
                             </span>
                             <span className="shrink-0 font-mono text-[9.5px] text-faint">
                               v{item.version}
                             </span>
                             {item.paid && (
                               <span className="shrink-0 rounded border border-warn/40 px-1 text-[9.5px] text-warn">
-                                付费
+                                {t('plugin.paid')}
                               </span>
                             )}
                           </div>
@@ -543,16 +546,16 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                           type="button"
                           disabled={busy !== null || item.paid}
                           onClick={() => void installIntoApp(item.id)}
-                          title={item.paid ? '付费组件还没有购买流程' : undefined}
+                          title={item.paid ? t('plugin.paid.tip') : undefined}
                           className="shrink-0 rounded border border-brand/50 bg-brand/10 px-1.5 py-0.5 text-[10px] text-brand disabled:opacity-40"
                         >
                           {busy === `app:${item.id}`
                             ? item.needsDownload
-                              ? '下载中…'
-                              : '安装中…'
+                              ? t('plugin.installing.downloading')
+                              : t('plugin.installing.installing')
                             : item.needsDownload
-                              ? '下载并安装'
-                              : '装到此应用'}
+                              ? t('plugin.install.download')
+                              : t('plugin.install.add')}
                         </button>
                       </div>
                       {item.description !== '' && (

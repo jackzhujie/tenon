@@ -3,6 +3,7 @@
  * `context` 是**生成应用的页面**发来的，用户和 Agent 都能改那份代码。
  */
 import { describe, expect, it } from 'vitest'
+import { makeT } from '../src/lib/i18n.js'
 import {
   harvestInspectorMessage,
   INSPECTOR_SOURCE,
@@ -40,6 +41,8 @@ function harvest(patch: Record<string, unknown> = {}): ReturnType<typeof harvest
   }
   return harvestInspectorMessage({ data, eventOrigin, expectedOrigin, expectedToken })
 }
+
+const zh = makeT('zh')
 
 describe('harvestInspectorMessage', () => {
   it('三道都过就收下，并把字段搬到协议形状上', () => {
@@ -151,7 +154,7 @@ describe('originOf', () => {
 
 describe('selectionLabel', () => {
   it('元素给 文件名:行', () => {
-    expect(selectionLabel({ kind: 'element', loc: { file: 'src/pages/a.tsx', line: 12, column: 3 } })).toBe(
+    expect(selectionLabel({ kind: 'element', loc: { file: 'src/pages/a.tsx', line: 12, column: 3 } }, zh)).toBe(
       'a.tsx:12',
     )
   })
@@ -161,19 +164,19 @@ describe('selectionLabel', () => {
       selectionLabel({
         kind: 'element',
         loc: { file: 'src/components/ui/button.tsx', line: 8, column: 3, kind: 'component-impl' },
-      }),
+      }, zh),
     ).toBe('button.tsx:8 · 组件库')
   })
 
   it('框选给数量', () => {
-    expect(selectionLabel({ kind: 'region', elements: [{ selector: 'a' }, { selector: 'b' }] })).toBe(
+    expect(selectionLabel({ kind: 'region', elements: [{ selector: 'a' }, { selector: 'b' }] }, zh)).toBe(
       '已框选 2 个元素',
     )
   })
 
   it('没有 loc 时退回 selector，再退到兜底文案', () => {
-    expect(selectionLabel({ kind: 'element', selector: 'main > h1' })).toBe('main > h1')
-    expect(selectionLabel({ kind: 'element' })).toBe('已选中元素')
-    expect(selectionLabel(null)).toBe('')
+    expect(selectionLabel({ kind: 'element', selector: 'main > h1' }, zh)).toBe('main > h1')
+    expect(selectionLabel({ kind: 'element' }, zh)).toBe('已选中元素')
+    expect(selectionLabel(null, zh)).toBe('')
   })
 })

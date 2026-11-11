@@ -313,7 +313,7 @@ export class PreviewManager {
     const run = new PreviewRun(appId)
     run.startedAt = Date.now()
     this.runs.set(appId, run)
-    this.pushLog(appId, { source: 'tenon', level: 'info', message: '开始启动预览' })
+    this.pushLog(appId, { source: 'tenon', level: 'info', message: 'starting preview' })
     this.emit(run)
     void this.execute(run)
     return this.status(appId)
@@ -395,7 +395,7 @@ export class PreviewManager {
    */
   async ensureDeps(appId: string): Promise<DepsResult> {
     if (this.options.installDeps === false) {
-      return { installed: false, command: 'install (已禁用)', durationMs: 0 }
+      return { installed: false, command: 'install (disabled)', durationMs: 0 }
     }
     const running = this.installing.get(appId)
     if (running !== undefined) return running.task
@@ -411,11 +411,11 @@ export class PreviewManager {
         ...(this.options.log === undefined ? {} : { onLog: this.options.log }),
       })
       if (result.installed) {
-        this.options.log?.(`[tenon] 依赖装好了（${result.durationMs}ms）`)
+        this.options.log?.(`[tenon] deps installed (${result.durationMs}ms)`)
         this.pushLog(appId, {
           source: 'tenon',
           level: 'info',
-          message: `依赖已安装（${result.durationMs}ms）`,
+          message: `dependencies installed (${result.durationMs}ms)`,
         })
       }
       return result
@@ -479,7 +479,7 @@ export class PreviewManager {
         this.pushLog(run.appId, {
           source: 'db',
           level: 'info',
-          message: `应用数据库就绪 ${dbUrl.host}`,
+          message: `app database ready ${dbUrl.host}`,
         })
       }
       run.readiness.db = 'ready'
@@ -562,7 +562,7 @@ export class PreviewManager {
         if (run.cancelled || run.state !== 'ready') return
         run.state = 'failed'
         run.readiness.preview = 'failed'
-        run.error = `dev server 退出了（code=${info.code ?? 'null'} signal=${info.signal ?? '-'}）`
+        run.error = `dev server exited (code=${info.code ?? 'null'} signal=${info.signal ?? '-'})`
         this.pushLog(run.appId, {
           source: 'vite',
           level: 'error',
@@ -594,7 +594,7 @@ export class PreviewManager {
           if (run.cancelled || run.state !== 'ready') return
           run.state = 'failed'
           run.readiness.server = 'failed'
-          run.error = `后端退出了（code=${info.code ?? 'null'} signal=${info.signal ?? '-'}）`
+          run.error = `backend exited (code=${info.code ?? 'null'} signal=${info.signal ?? '-'})`
           this.pushLog(run.appId, {
             source: 'api',
             level: 'error',
@@ -620,12 +620,12 @@ export class PreviewManager {
       run.state = 'ready'
       this.emit(run, true)
       this.options.log?.(
-        `[tenon] 预览就绪 ${gateway.url}（应用 ${run.appId}${run.apiPort === null ? '' : `，后端 :${run.apiPort}`}）`,
+        `[tenon] preview ready ${gateway.url} (app ${run.appId}${run.apiPort === null ? '' : `, api :${run.apiPort}`})`,
       )
       this.pushLog(run.appId, {
         source: 'tenon',
         level: 'info',
-        message: `预览就绪 ${gateway.url}${run.apiPort === null ? '' : `（后端 :${run.apiPort}）`}`,
+        message: `preview ready ${gateway.url}${run.apiPort === null ? '' : ` (api :${run.apiPort})`}`,
       })
     } catch (err) {
       if (run.cancelled) return
@@ -676,8 +676,8 @@ export class PreviewManager {
       run.readiness.db = 'failed'
     } else if (stage === 'server') run.readiness.server = 'failed'
     else run.readiness.preview = 'failed'
-    this.options.log?.(`[tenon] 预览失败（应用 ${run.appId}）：${run.error}`)
-    this.pushLog(run.appId, inputFromError(stage === 'db' ? 'db' : stage === 'server' ? 'api' : 'tenon', err, '预览失败：'))
+    this.options.log?.(`[tenon] preview failed (app ${run.appId}): ${run.error}`)
+    this.pushLog(run.appId, inputFromError(stage === 'db' ? 'db' : stage === 'server' ? 'api' : 'tenon', err, 'preview failed: '))
     this.emit(run)
     await this.teardown(run)
   }

@@ -115,13 +115,14 @@ function scanSources(): Hit[] {
     const raw = readFileSync(file, 'utf8').split('\n')
     const code = stripBlockComments(raw)
     code.forEach((line, index) => {
+      const here = raw[index] ?? ''
       // 豁免可以在本行，也可以在**上一行** —— JSX 里 `{/* ... */}` 只能写在外面
-      if (raw[index].includes(IGNORE_MARK)) return
-      if (index > 0 && raw[index - 1].includes(IGNORE_MARK)) return
+      if (here.includes(IGNORE_MARK)) return
+      if (index > 0 && (raw[index - 1] ?? '').includes(IGNORE_MARK)) return
       const stripped = stripLineComment(line)
       if (!HAN.test(stripped)) return
       if (!looksLikeCopy(stripped)) return
-      hits.push({ file, line: index + 1, text: raw[index].trim().slice(0, 120) })
+      hits.push({ file, line: index + 1, text: here.trim().slice(0, 120) })
     })
   }
   return hits

@@ -289,7 +289,7 @@ export function ReleaseDialog({
     } finally {
       setPushingRemote(false)
     }
-  }, [appId, result])
+  }, [appId, result, t])
 
   const runCheck = useCallback(async (): Promise<void> => {
     setChecking(true)
@@ -358,7 +358,7 @@ export function ReleaseDialog({
     setError(null)
     setResult(null)
     void bootstrap()
-  }, [open, bootstrap])
+  }, [open, bootstrap, t])
 
   // 计时：只在"正在检查"期间走，每半秒刷一次（刷太勤没有意义，人眼也看不出）
   useEffect(() => {

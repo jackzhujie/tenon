@@ -105,6 +105,17 @@ fan-out 读四十个文件、过滤、汇总，只有它 `text()` 出来的一�
 不是提示词拦的，是它**根本没被注进沙箱**；`bash` 也没给 —— 命令一条条在转录里可审，
 脚本里四十条命令只有脚本自己看得到（§4.14 / DESIGN §5.9）。
 
+**而且它说两种话**：界面文案有中英两套（`apps/web/src/lib/messages/*.ts`，键是扁平的
+`feature.thing.detail`，中文表声明成 `Record<Key, string>` —— 少一条编译期就报，不会出现
+"英文界面里夹一句中文"）。默认跟随系统语言，**认不出来一律英文**（国际产品的默认值不该是中文），
+顶栏一个按钮切换，选择存服务端 `ui.locale`。首屏是**先 await 一次 `settings.get` 再 render**：
+慢十几毫秒换来"不闪"，否则中文系统上设过英文的人每次启动都要先看一屏中文。
+内核自己写（~150 行），不上 i18next —— 只用到插值与单复数，而那套要带 40KB 运行时进来；
+更要紧的是 key 的类型由英文表推导，`t('release.titel')` 拼错当场 `tsc` 报错，
+三百多个 key 的规模上这就是"敢不敢重构"的差别。
+`pnpm check:i18n` 守住回流（三种文案形状 + `i18n-ignore` 标记），`pnpm shot:locale` 是真界面验收：
+切得动、重载后还记得住、**英文界面上一个 CJK 都不许剩**（全页普查，不是逐条核对）。
+
 先跑这几条验证它还活着：
 
 ```bash
@@ -118,6 +129,8 @@ pnpm e2e:diff                    # ★ 36 项改动链路：git.log / git.show /
 pnpm e2e:release                 # ★ 44 项发布链路：预检只读 → 门禁拦截 → 打 tag + 推本地裸库，用系统 git 做 fsck --strict 与 clone 验收
 pnpm e2e:e2e                     # ★ 9 项自验收：真 Electron 里由 e2e 子 Agent 点页面 —— 注入的 bug 被断言抓到、修好后同一条断言通过
 pnpm e2e:fullstack              # ★ 全栈真机链路：PGlite 起库 → 迁移 → Vite+Nest 双进程 → CRUD 经网关 → 重启后数据还在
+pnpm check:i18n                  # 文案回流：界面里不该出现裸中文（漏写文案表）
+pnpm shot:locale                 # ★ 语言真界面验收：中文首屏 → 切英文 → 重载仍英文，且英文页面上没有 CJK
 pnpm pack:desktop               # 打包成 apps/desktop/release/mac/Tenon.app
 pnpm smoke:desktop:packaged     # 8 项桌面冒烟：真的起 .app、加载界面、退出后不留孤儿进程
 ```
@@ -198,6 +211,8 @@ GUI 类（`apps` / `component` / `inspector` / `e2e` / `real` / `packaged`）**�
 | **平台** | 首发 **macOS + Windows**；Linux M7 |
 | **插件分发** | M5 bundled 内置 → M6 Hub 官方独源 → M7 第三方上架；**同一 manifest + 同一加载器，只差 `source`**；解析优先级 `hub > bundled`（内置插件也能热更新）|
 | 商业化 | 个人免费（含全部核心能力）；企业版卖协作/SSO/RBAC/私有 Hub；License = AGPL-3.0（Server）+ Apache-2.0（Runtime SDK/模板/生成物）+ 双许可 |
+| **界面语言** | **中英两套，跟随系统、英文兜底**；真相存服务端 `settings.ui.locale`，本机 `localStorage` 只做首屏缓存（避免闪）。切入口在顶栏，不藏在设置里 |
+| **系统生成的文本** | **分两类，别一刀切**：界面里给用户的反馈（错误消息、检查项结论）该跟界面语言走；**控制台日志与 git 历史一律英文** —— 它们会被粘进 issue、跟着仓库离开这台机器、被 `git log` 和 grep 读，两种语言的历史等于搜不齐 |
 
 ---
 
@@ -3559,6 +3574,10 @@ DoD 写的是「快照保留策略」。真去量发现**大头不是快照**：
 | **护栏只处理能静态确定的，含 `$` 就放行** | `cd $(mktemp -d)`、`cd "$WORK/sub"` 一律放行：静态解析猜错的方向是**把正常命令打死**，模型收到莫名其妙的拒绝后会开始换各种写法，那一轮就废了。所以宁可漏，漏的部分由"这是护栏不是沙箱"的措辞兜住 |
 | **纯函数测试全绿 ≠ 护栏接上了** | 少写一行 `guard: bashGuard(repoDir)`，`checkCommand` 那 29 项照样全绿。必须有一条接线级的：从 `createCodingTools` 取出 bash 真的 `execute` 一次。**验证这条测试本身有效的方法**是临时把 `guard:` 摘掉 —— 它应该红（红在 `exec` 层报"working directory does not exist"，而那条命令一次都不会真执行：测试里的 repoDir 故意不存在） |
 | **`isInside(root, x)` 里 root 自己也要归一** | 只归一 candidate 不够：`resolve(candidate)` 会把结果统一成平台分隔符，而 root 若带着另一种分隔符（`C:\Users\x/.tenon/...` —— 用 `/` 拼 homedir 时很常见），`startsWith` 就永远不成立，**明明在里面的路径被判成外面**。表现是"护栏把正常命令全拦了"，POSIX 上一次都现不出来。`pathGuard` 用的是同一个函数，只是生产代码传的恰好是 `path.join` 出来的全反斜杠路径，所以四年没露 —— 是 Windows CI 第一次跑新测试时抓到的 |
+| **"系统生成的文案"不是一类东西，别一刀切** | 界面里给用户的反馈（错误消息、检查项结论）该跟界面语言走；**控制台日志与 git 提交信息必须英文** —— 它们会被粘进 issue、跟着仓库离开这台机器、被 `git log` 与 grep 读，同一份仓库在中英文机器上产生两种语言的历史等于搜不齐。判定口诀：**会离开这台机器的写英文，只在界面上出现的做双语**。先按这条把提交信息（`chat: one turn` / `chore: create app "x"`）与预览日志改掉了；服务端错误消息与门禁摘要还欠着，它们属于"该双语"那一类 |
+| **"英文界面上没有中文"只能全页普查，而且要留故意的口子** | 逐条核对不可行（我们不知道哪一处漏了），只能把渲染出来的文本全扫一遍找 CJK —— 连 `title` / `placeholder` / `aria-label` 一起扫（它们同样摆在脸上）。但这会误伤两类**故意**的中文：品牌字（榫）与语言按钮上那个「中」。给它们打标记（`data-brand` / `data-locale-toggle`）并在扫描器里跳过；**不要**往白名单里加文字，那样下次真漏了就再也报不出来 |
+| **无 GUI 会话里跑 Electron 要 `--no-sandbox --disable-gpu`** | CI、SSH、被外部沙箱包着跑的 agent 都算。不带这两个参数时子进程报 `sandbox initialization failed: Operation not permitted` + `GPU process exited unexpectedly: exit_code=6`，窗口一个都不渲染 —— 看着像 Electron 装坏了。`shot:locale` 因此带上它们（截图脚本不进产品包，代价可接受） |
+| **生成脚本的模板字符串里不能出现反引号** | `scripts/*.ts` 里常把 electron 主进程脚本写成模板字符串。注释里随手写一句 `` `[data-brand]` `` 就把外层字符串截断，报错是 `ReferenceError: data is not defined`（报在注释那一行，看着像语法没问题）—— 模板字符串里的注释一律用引号，不用反引号 |
 
 
 ---

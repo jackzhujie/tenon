@@ -94,6 +94,12 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # 也快（不到 1 秒）。放在这里是因为它守的东西**只在人写代码时才会破**：
+      # 界面文案没走 lib/messages 的翻译表。晚发现的话，那条中文会一直藏在英文界面里，
+      # 而只有走到那个分支的用户才看得见 —— 比一次 lint 报错难查得多
+      - name: 界面文案（不许绕过翻译表）
+        run: pnpm check:i18n
+
       # 类型错了就不必等测试
       - name: 类型检查（18 个 project）
         run: pnpm typecheck

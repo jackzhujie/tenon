@@ -16,6 +16,9 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { BudgetDimension, RpcOutput, UsageAppUsage, UsageSnapshot, UsageTotals } from '@tenon/protocol'
+import { useT } from '../../lib/i18n.js'
+import type { UsageKey } from '../../lib/messages/usage.js'
+import type { TFunction } from '../../lib/i18n.js'
 // 走 `/browser` 子路径：主入口会把整张 zod 表带进产物（见 protocol/browser.ts 的说明）
 import { budgetMessage, formatCost, formatTokens } from '@tenon/protocol/browser'
 import { Button } from '../../components/ui/Button.js'
@@ -37,10 +40,10 @@ const DOT_CLASS: Record<UsageSnapshot['level'], string> = {
   over: 'bg-bad',
 }
 
-const LEVEL_TEXT: Record<UsageSnapshot['level'], string> = {
-  ok: '正常',
-  warn: '快用完了',
-  over: '已用完',
+const LEVEL_KEY: Record<UsageSnapshot['level'], UsageKey> = {
+  ok: 'usage.level.ok',
+  warn: 'usage.level.warn',
+  over: 'usage.level.over',
 }
 
 /** 空 = 不设限；负数/非数字 = 填错了 */
@@ -52,8 +55,8 @@ function parseLimit(raw: string): number | null | 'bad' {
 }
 
 /** 额度那一行的展示：没设就说"不设限"，别显示一个假的 0 */
-function limitText(limit: number | null, format: (value: number) => string): string {
-  return limit === null ? '不设限' : format(limit)
+function limitText(limit: number | null, format: (value: number) => string, t: TFunction): string {
+  return limit === null ? t('common.unlimited') : format(limit)
 }
 
 export interface UsagePanelProps {
@@ -66,6 +69,7 @@ export interface UsagePanelProps {
 }
 
 export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanelProps) {
+  const { t } = useT()
   const [open, setOpen] = useState(false)
   const [tokensInput, setTokensInput] = useState('')
   const [costInput, setCostInput] = useState('')
@@ -156,14 +160,14 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
   }, [open])
 
   const level = usage?.level ?? 'ok'
-  const chip = usage === null ? '用量' : formatTokens(usage.totals.totalTokens)
+  const chip = usage === null ? t('usage.chip') : formatTokens(usage.totals.totalTokens)
   /*
    * 没配价格时**不能显示 $0.00**：那不是"便宜"，是"没算"。用户看到 $0 会以为
    * 离额度还很远，于是拿它当保护伞 —— 这是这个面板最容易骗人的一格。
    */
   const cost =
-    usage === null ? '' : usage.priced ? formatCost(usage.totals.costUsd) : '未定价'
-  const costOf = (usd: number): string => (usage?.priced === true ? formatCost(usd) : '未定价')
+    usage === null ? '' : usage.priced ? formatCost(usage.totals.costUsd) : t('usage.unpriced')
+  const costOf = (usd: number): string => (usage?.priced === true ? formatCost(usd) : t('usage.unpriced'))
 
   /*
    * 解释横幅看 `exceeded`，不只认事件。
@@ -179,7 +183,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
     const tokens = parseLimit(tokensInput)
     const limit = parseLimit(costInput)
     if (tokens === 'bad' || limit === 'bad') {
-      setError('上限要填一个不小于 0 的数；留空 = 这条不设限')
+      setError(t('usage.error.limit'))
       return
     }
     setSaving(true)
@@ -197,7 +201,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
     const monthly = parseLimit(gMonthlyCost)
     const lifetime = parseLimit(gLifetimeCost)
     if (monthly === 'bad' || lifetime === 'bad') {
-      setGError('上限要填一个不小于 0 的数；留空 = 这条不设限')
+      setGError(t('usage.error.limit'))
       return
     }
     setGSaving(true)
@@ -233,7 +237,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
           'hover:bg-panel-3 disabled:cursor-not-allowed disabled:opacity-40',
           open && 'bg-panel-3',
         )}
-        title={usage === null ? '这个应用的用量' : `累计 ${chip} tokens · ${cost}；点开设额度`}
+        title={usage === null ? t('usage.tip.app') : t('usage.tip.cumulative', { tokens: chip, cost })}
       >
         <span className={cn('size-1.5 rounded-full', DOT_CLASS[level], level === 'over' && 'tenon-pulse')} />
         <span
@@ -256,7 +260,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
          */
         <div className="absolute top-full right-0 z-40 mt-1 w-72 overflow-hidden rounded-lg border border-line bg-panel-2 shadow-xl shadow-black/40">
           <div className="flex items-center gap-2 border-b border-line-soft px-3 py-2">
-            <span className="text-[12px] text-ink">用量与额度</span>
+            <span className="text-[12px] text-ink">{t('usage.title')}</span>
             {usage !== null && (
               <span
                 className={cn(
@@ -268,7 +272,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
                       : 'bg-panel-3 text-faint',
                 )}
               >
-                {LEVEL_TEXT[level]}
+                {t(LEVEL_KEY[level])}
               </span>
             )}
           </div>
@@ -282,13 +286,13 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
           {/* 全部应用：跨应用汇总。放最上面，因为"我到底花了多少"是打开这个面板的第一个问题 */}
           <div className="space-y-1 border-b border-line-soft px-3 py-2">
             <div className="flex items-baseline gap-2">
-              <span className="text-[11.5px] text-muted">全部应用</span>
+              <span className="text-[11.5px] text-muted">{t('usage.allApps')}</span>
               <span className="ml-auto font-mono text-[11.5px] tabular-nums text-ink">
                 {total === null
                   ? totalError === null
                     ? '…'
                     : '—'
-                  : `${formatTokens(total.totals.totalTokens)} · ${total.priced ? formatCost(total.totals.costUsd) : '未定价'}`}
+                  : `${formatTokens(total.totals.totalTokens)} · ${total.priced ? formatCost(total.totals.costUsd) : t('usage.unpriced')}`}
               </span>
             </div>
             {total !== null &&
@@ -309,7 +313,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
               </p>
             )}
             {total !== null && total.apps.every((app) => !app.known) && total.apps.length > 0 && (
-              <p className="text-[10px] leading-4 text-faint">这些应用还没跑过一轮，没有账本</p>
+              <p className="text-[10px] leading-4 text-faint">{t('usage.noLedger')}</p>
             )}
             {totalError !== null && (
               <p className="text-[10px] leading-4 text-warn">读不到汇总：{totalError}</p>
@@ -317,9 +321,9 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
           </div>
 
           <div className="space-y-1 px-3 py-2">
-            <Row label="本应用累计" value={usage === null ? '—' : `${chip} · ${cost}`} />
+            <Row label={t('usage.row.appTotal')} value={usage === null ? '—' : `${chip} · ${cost}`} />
             <Row
-              label="这一轮"
+              label={t('usage.row.thisTurn')}
               value={
                 usage === null
                   ? '—'
@@ -347,24 +351,24 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
                 value={tokensInput}
                 onChange={(event) => setTokensInput(event.target.value)}
                 inputMode="numeric"
-                placeholder="不设限"
+                placeholder={t('common.unlimited')}
                 className="h-6 min-w-0 flex-1 rounded border border-line bg-panel px-1.5 font-mono text-[11.5px] text-ink placeholder:text-faint/60 focus:border-brand/60 focus:outline-none"
               />
               <span className="shrink-0 font-mono text-[10px] text-faint">
-                {limitText(usage?.budget.maxTokens ?? null, formatTokens)}
+                {limitText(usage?.budget.maxTokens ?? null, formatTokens, t)}
               </span>
             </label>
             <label className="flex items-center gap-2 py-0.5 text-[11.5px] text-muted">
-              <span className="w-20 shrink-0">美元</span>
+              <span className="w-20 shrink-0">{t('usage.unit.usd')}</span>
               <input
                 value={costInput}
                 onChange={(event) => setCostInput(event.target.value)}
                 inputMode="decimal"
-                placeholder="不设限"
+                placeholder={t('common.unlimited')}
                 className="h-6 min-w-0 flex-1 rounded border border-line bg-panel px-1.5 font-mono text-[11.5px] text-ink placeholder:text-faint/60 focus:border-brand/60 focus:outline-none"
               />
               <span className="shrink-0 font-mono text-[10px] text-faint">
-                {limitText(usage?.budget.maxCostUsd ?? null, formatCost)}
+                {limitText(usage?.budget.maxCostUsd ?? null, formatCost, t)}
               </span>
             </label>
 
@@ -372,7 +376,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
 
             <div className="mt-2 flex items-center gap-1.5">
               <Button size="sm" variant="primary" disabled={saving} onClick={() => void save()}>
-                {saving ? '保存中…' : '保存'}
+                {saving ? t('common.saving') : t('common.save')}
               </Button>
               <Button
                 size="sm"
@@ -383,10 +387,10 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
                   setCostInput('')
                 }}
               >
-                清空
+                {t('common.clear')}
               </Button>
               <span className="ml-auto text-[10px] text-faint">
-                真值在服务端，重启不丢
+                {t('usage.note.server')}
               </span>
             </div>
           </div>
@@ -397,42 +401,43 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
           */}
           <div className="border-t border-line-soft px-3 py-2">
             <p className="mb-1.5 text-[11px] text-faint">
-              全局额度（所有应用合计）
+              {t('usage.global.title')}
             </p>
 
             <label className="flex items-center gap-2 py-0.5 text-[11.5px] text-muted">
-              <span className="w-20 shrink-0">每月封顶</span>
+              <span className="w-20 shrink-0">{t('usage.global.monthly')}</span>
               <input
                 value={gMonthlyCost}
                 onChange={(event) => setGMonthlyCost(event.target.value)}
                 inputMode="decimal"
-                placeholder="不设限"
+                placeholder={t('common.unlimited')}
                 data-tenon-global-monthly
                 className="h-6 min-w-0 flex-1 rounded border border-line bg-panel px-1.5 font-mono text-[11.5px] text-ink placeholder:text-faint/60 focus:border-brand/60 focus:outline-none"
               />
               <span className="shrink-0 font-mono text-[10px] text-faint">
-                {global === null ? '' : `本月 ${formatCost(global.monthUsed.costUsd)}`}
+                {global === null ? '' : t('usage.global.monthUsed', { cost: formatCost(global.monthUsed.costUsd) })}
               </span>
             </label>
 
             <label className="flex items-center gap-2 py-0.5 text-[11.5px] text-muted">
-              <span className="w-20 shrink-0">总量封顶</span>
+              <span className="w-20 shrink-0">{t('usage.global.totalCap')}</span>
               <input
                 value={gLifetimeCost}
                 onChange={(event) => setGLifetimeCost(event.target.value)}
                 inputMode="decimal"
-                placeholder="不设限"
+                placeholder={t('common.unlimited')}
                 data-tenon-global-lifetime
                 className="h-6 min-w-0 flex-1 rounded border border-line bg-panel px-1.5 font-mono text-[11.5px] text-ink placeholder:text-faint/60 focus:border-brand/60 focus:outline-none"
               />
               <span className="shrink-0 font-mono text-[10px] text-faint">
-                {global === null ? '' : `累计 ${formatCost(global.totalUsed.costUsd)}`}
+                {global === null ? '' : t('usage.global.totalUsed', { cost: formatCost(global.totalUsed.costUsd) })}
               </span>
             </label>
 
             <p className="mt-1 text-[10px] leading-relaxed text-faint">
-              每月那道按<span className="text-muted">自然月</span>算，下月 1 日自动回到零；
-              总量那道不会自己解开，撞上就得手动调高或清空。
+              {t('usage.global.note.before')}
+            <span className="text-muted">{t('usage.global.note.emphasis')}</span>
+              {t('usage.global.note.after')}
               {global !== null && global.unreadable > 0 && (
                 <span className="text-warn">
                   {' '}
@@ -445,7 +450,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
 
             <div className="mt-2 flex items-center gap-1.5">
               <Button size="sm" variant="primary" disabled={gSaving} onClick={() => void saveGlobal()}>
-                {gSaving ? '保存中…' : '保存'}
+                {gSaving ? t('common.saving') : t('common.save')}
               </Button>
               <Button
                 size="sm"
@@ -456,9 +461,9 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
                   setGLifetimeCost('')
                 }}
               >
-                清空
+                {t('common.clear')}
               </Button>
-              <span className="ml-auto text-[10px] text-faint">置空 = 那道闸不设限</span>
+              <span className="ml-auto text-[10px] text-faint">{t('usage.global.emptyHint')}</span>
             </div>
           </div>
         </div>
@@ -480,6 +485,7 @@ function AppRow({
   priced: boolean
   current: boolean
 }) {
+  const { t } = useT()
   return (
     <div className="flex items-baseline gap-2 text-[11px]">
       <span className={cn('size-1 shrink-0 rounded-full', DOT_CLASS[app.level])} />
@@ -487,7 +493,9 @@ function AppRow({
         {app.name}
       </span>
       <span className="shrink-0 font-mono text-[10px] tabular-nums text-faint">
-        {app.known ? `${formatTokens(app.totals.totalTokens)} · ${priced ? formatCost(app.totals.costUsd) : '未定价'}` : '还没跑过'}
+        {app.known
+                  ? `${formatTokens(app.totals.totalTokens)} · ${priced ? formatCost(app.totals.costUsd) : t('usage.unpriced')}`
+                  : t('usage.notRun')}
       </span>
     </div>
   )

@@ -278,7 +278,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
            * 而"这一轮改了什么"是评审唯一的输入。
            */
           const repoDir = appPaths(core.home, app.id).repoDir
-          const committed = await gitops.commitAll(repoDir, 'chore: 锁定依赖版本')
+          const committed = await gitops.commitAll(repoDir, 'chore: lock dependency versions')
           if (committed !== undefined) {
             bus.publish({
               type: 'git.commit',
@@ -348,7 +348,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         })
       }
 
-      const committed = await gitops.commitAll(paths.repoDir, 'chore: 加上后端（NestJS + PostgreSQL）')
+      const committed = await gitops.commitAll(paths.repoDir, 'chore: add a backend (NestJS + PostgreSQL)')
       if (committed !== undefined) {
         bus.publish({ type: 'git.commit', appId: app.id, sha: committed.sha, message: committed.message })
       }
@@ -427,7 +427,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         })
       }
 
-      const committed = await gitops.commitAll(paths.repoDir, 'chore: 加上登录与用户体系')
+      const committed = await gitops.commitAll(paths.repoDir, 'chore: add sign-in and user accounts')
       if (committed !== undefined) {
         bus.publish({ type: 'git.commit', appId: app.id, sha: committed.sha, message: committed.message })
       }

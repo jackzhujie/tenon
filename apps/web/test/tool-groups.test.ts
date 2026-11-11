@@ -5,6 +5,7 @@
  * 不写成教科书里的 `ls -la` —— 要防的是"实际会遇到的命令被判断错"。
  */
 import { describe, expect, it } from 'vitest'
+import { makeT } from '../src/lib/i18n.js'
 import {
   describeExploration,
   groupActivities,
@@ -24,6 +25,8 @@ function read(path: string): Activity {
 function write(path: string): Activity {
   return { toolCallId: `w-${path}`, name: 'write', args: { path }, status: 'ok' }
 }
+
+const zh = makeT('zh')
 
 describe('只读命令判定', () => {
   it('截图里那几条探索命令都是只读', () => {
@@ -111,12 +114,12 @@ describe('编组', () => {
 
 describe('摘要文案', () => {
   it('文件与命令分开数', () => {
-    expect(describeExploration([read('a'), read('b'), bash('ls'), bash('find .')])).toBe(
+    expect(describeExploration([read('a'), read('b'), bash('ls'), bash('find .')], zh)).toBe(
       '读取 2 个文件 · 执行 2 条命令',
     )
   })
 
   it('只有命令时不说"读取 0 个文件"', () => {
-    expect(describeExploration([bash('ls'), bash('pwd')])).toBe('执行 2 条命令')
+    expect(describeExploration([bash('ls'), bash('pwd')], zh)).toBe('执行 2 条命令')
   })
 })

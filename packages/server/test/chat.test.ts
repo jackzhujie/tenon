@@ -133,7 +133,7 @@ describe('对话链路（faux 模型）', () => {
     })
     // 只有建应用那一个 commit：本轮没有文件改动
     expect(commits).toHaveLength(1)
-    expect(commits[0]?.message).toContain('初始化应用')
+    expect(commits[0]?.message).toContain('create app')
   })
 })
 

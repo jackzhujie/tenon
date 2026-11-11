@@ -18,7 +18,11 @@ function BootScreen({ label }: { label: string }) {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="flex flex-col items-center gap-3">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-brand text-[15px] font-medium text-[#20120a]">
+        {/* data-brand：品牌字不翻译（见 Header.tsx 同名标记） */}
+        <span
+          data-brand="tenon"
+          className="flex size-8 items-center justify-center rounded-lg bg-brand text-[15px] font-medium text-[#20120a]"
+        >
           {/* i18n-ignore 品牌字，不是文案 */}
           榫
         </span>

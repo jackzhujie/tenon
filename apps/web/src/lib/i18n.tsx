@@ -31,7 +31,11 @@ import { appsEn, appsZh } from './messages/apps.js'
 import { chatEn, chatZh } from './messages/chat.js'
 import { diffEn, diffZh } from './messages/diff.js'
 import { logsEn, logsZh } from './messages/logs.js'
+import { pluginsEn, pluginsZh } from './messages/plugins.js'
+import { previewEn, previewZh } from './messages/preview.js'
 import { releaseEn, releaseZh } from './messages/release.js'
+import { settingsEn, settingsZh } from './messages/settings.js'
+import { usageEn, usageZh } from './messages/usage.js'
 import { shellEn, shellZh } from './messages/shell.js'
 
 export const LOCALES = ['en', 'zh'] as const
@@ -45,6 +49,10 @@ const en = {
   ...releaseEn,
   ...appsEn,
   ...logsEn,
+  ...previewEn,
+  ...settingsEn,
+  ...pluginsEn,
+  ...usageEn,
 } as const
 
 export type MessageKey = keyof typeof en
@@ -57,6 +65,10 @@ const zh: Record<MessageKey, string> = {
   ...releaseZh,
   ...appsZh,
   ...logsZh,
+  ...previewZh,
+  ...settingsZh,
+  ...pluginsZh,
+  ...usageZh,
 }
 
 export type MessageParams = Record<string, string | number>
@@ -158,7 +170,15 @@ export function I18nProvider({
   children: ReactNode
 }) {
   const [locale, setLocaleState] = useState<Locale>(initial)
-  // 首屏就把全局值对齐，别等到第一次切换
+  /*
+   * 首屏就把全局值对齐，别等到第一次切换 —— 否则第一次渲染后到点切换之间，
+   * `getLocale()` 读到的还是 'en'（非组件代码里的错误消息会用错语言）。
+   *
+   * 这两处赋值被 lint 的 `react-hooks/globals` 盯着，但它是**有意的**：
+   * 非组件代码（rpc 的网络错误、hook 里的提前返回）没有 hook 可调，
+   * 又必须拿到当前语言。只写这一处、只读不参与渲染，切换后重新渲染的仍是 Context。
+   */
+  // eslint-disable-next-line react-hooks/globals -- 见上：给非组件代码读的镜像值
   activeLocale = locale
 
   const setLocale = useCallback(
