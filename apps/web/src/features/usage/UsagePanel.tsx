@@ -15,7 +15,7 @@
  *    0 会被读成"没花钱"，那是错的。
  */
 import { useEffect, useRef, useState } from 'react'
-import type { BudgetDimension, UsageAppUsage, UsageSnapshot, UsageTotals } from '@tenon/protocol'
+import type { BudgetDimension, RpcOutput, UsageAppUsage, UsageSnapshot, UsageTotals } from '@tenon/protocol'
 // 走 `/browser` 子路径：主入口会把整张 zod 表带进产物（见 protocol/browser.ts 的说明）
 import { budgetMessage, formatCost, formatTokens } from '@tenon/protocol/browser'
 import { Button } from '../../components/ui/Button.js'
@@ -74,6 +74,20 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
   /** 跨应用汇总（v1.2.17）。`null` = 还没拉到 —— 与"合计是 0"分开 */
   const [total, setTotal] = useState<UsageTotal | null>(null)
   const [totalError, setTotalError] = useState<string | null>(null)
+  /*
+   * 全局额度（两道闸）。输入框初值从 `budget.global` 拉，**不跟着 usage 变化重置** ——
+   * 全局数变得不频繁，而每次模型回包都清一次输入框会让人没法填。
+   */
+  const [global, setGlobal] = useState<RpcOutput<'budget.global'> | null>(null)
+  /*
+   * 界面上只暴露**美元**。token 那两个维度仍在协议里（`Budget` 复用），只是不给入口 ——
+   * 用户估不出"我这个月能花多少 token"，给了只会乱填；而单应用那边留着 token 栏
+   * 是因为 faux 报 0 美元，只设钱没法验熔断。
+   */
+  const [gMonthlyCost, setGMonthlyCost] = useState('')
+  const [gLifetimeCost, setGLifetimeCost] = useState('')
+  const [gSaving, setGSaving] = useState(false)
+  const [gError, setGError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   // 每次打开都从当前额度重新起稿：上次没保存的输入不该留下来（会被误当成已生效）
@@ -121,6 +135,26 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
     }
   }, [open, usage])
 
+  // 全局额度：只在打开时拉一次。它不随每一轮变化（本月已用由服务端现算），
+  // 所以没必要跟着 `usage` 反复请求
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void rpc('budget.global', {})
+      .then((value) => {
+        if (cancelled) return
+        setGlobal(value)
+        setGMonthlyCost(value.budget.monthly.maxCostUsd?.toString() ?? '')
+        setGLifetimeCost(value.budget.lifetime.maxCostUsd?.toString() ?? '')
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setGError(cause instanceof Error ? cause.message : String(cause))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
   const level = usage?.level ?? 'ok'
   const chip = usage === null ? '用量' : formatTokens(usage.totals.totalTokens)
   /*
@@ -156,6 +190,33 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
       else setError(outcome.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function saveGlobal(): Promise<void> {
+    const monthly = parseLimit(gMonthlyCost)
+    const lifetime = parseLimit(gLifetimeCost)
+    if (monthly === 'bad' || lifetime === 'bad') {
+      setGError('上限要填一个不小于 0 的数；留空 = 这条不设限')
+      return
+    }
+    setGSaving(true)
+    setGError(null)
+    try {
+      await rpc('budget.global.set', {
+        // token 两维原样保留（界面上没有入口），只改钱，不要把已有的 token 闸冲掉
+        monthly: { maxCostUsd: monthly, maxTokens: global?.budget.monthly.maxTokens ?? null },
+        lifetime: { maxCostUsd: lifetime, maxTokens: global?.budget.lifetime.maxTokens ?? null },
+      })
+      // 以服务端回读的为准：它会把负数 / NaN 规整成 null，输入框跟着对齐
+      const fresh = await rpc('budget.global', {})
+      setGlobal(fresh)
+      setGMonthlyCost(fresh.budget.monthly.maxCostUsd?.toString() ?? '')
+      setGLifetimeCost(fresh.budget.lifetime.maxCostUsd?.toString() ?? '')
+    } catch (cause) {
+      setGError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setGSaving(false)
     }
   }
 
@@ -327,6 +388,77 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
               <span className="ml-auto text-[10px] text-faint">
                 真值在服务端，重启不丢
               </span>
+            </div>
+          </div>
+
+          {/*
+            全局额度：所有应用加起来。放在单应用额度**下面**，因为它是更大的那个圈 ——
+            先看"这个应用花了多少"，再看"总共花了多少"。
+          */}
+          <div className="border-t border-line-soft px-3 py-2">
+            <p className="mb-1.5 text-[11px] text-faint">
+              全局额度（所有应用合计；两道闸，任一撞上都发不出去）
+            </p>
+
+            <label className="flex items-center gap-2 py-0.5 text-[11.5px] text-muted">
+              <span className="w-20 shrink-0">每月封顶</span>
+              <input
+                value={gMonthlyCost}
+                onChange={(event) => setGMonthlyCost(event.target.value)}
+                inputMode="decimal"
+                placeholder="不设限"
+                data-tenon-global-monthly
+                className="h-6 min-w-0 flex-1 rounded border border-line bg-panel px-1.5 font-mono text-[11.5px] text-ink placeholder:text-faint/60 focus:border-brand/60 focus:outline-none"
+              />
+              <span className="shrink-0 font-mono text-[10px] text-faint">
+                {global === null ? '' : `本月 ${formatCost(global.monthUsed.costUsd)}`}
+              </span>
+            </label>
+
+            <label className="flex items-center gap-2 py-0.5 text-[11.5px] text-muted">
+              <span className="w-20 shrink-0">总量封顶</span>
+              <input
+                value={gLifetimeCost}
+                onChange={(event) => setGLifetimeCost(event.target.value)}
+                inputMode="decimal"
+                placeholder="不设限"
+                data-tenon-global-lifetime
+                className="h-6 min-w-0 flex-1 rounded border border-line bg-panel px-1.5 font-mono text-[11.5px] text-ink placeholder:text-faint/60 focus:border-brand/60 focus:outline-none"
+              />
+              <span className="shrink-0 font-mono text-[10px] text-faint">
+                {global === null ? '' : `累计 ${formatCost(global.totalUsed.costUsd)}`}
+              </span>
+            </label>
+
+            <p className="mt-1 text-[10px] leading-relaxed text-faint">
+              每月那道按<span className="text-muted">自然月</span>算，下月 1 日自动回到零；
+              总量那道不会自己解开，撞上就得手动调高或清空。
+              {global !== null && global.unreadable > 0 && (
+                <span className="text-warn">
+                  {' '}
+                  有 {global.unreadable} 个应用账本读不到，那两个数里不含它们。
+                </span>
+              )}
+            </p>
+
+            {gError !== null && <p className="mt-1.5 text-[11px] leading-4 text-bad">{gError}</p>}
+
+            <div className="mt-2 flex items-center gap-1.5">
+              <Button size="sm" variant="primary" disabled={gSaving} onClick={() => void saveGlobal()}>
+                {gSaving ? '保存中…' : '保存'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={gSaving}
+                onClick={() => {
+                  setGMonthlyCost('')
+                  setGLifetimeCost('')
+                }}
+              >
+                清空
+              </Button>
+              <span className="ml-auto text-[10px] text-faint">置空 = 那道闸不设限</span>
             </div>
           </div>
         </div>

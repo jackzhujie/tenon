@@ -44,7 +44,24 @@ export * from './stores/providers.js'
 export * from './stores/releases.js'
 export * from './stores/remotes.js'
 export * from './stores/settings.js'
-export { SETTING_KEYS, budgetKey, lastCheckKey, readBudget, readLastCheck, NO_BUDGET } from './setting-keys.js'
+export {
+  SETTING_KEYS,
+  budgetKey,
+  lastCheckKey,
+  readBudget,
+  readLastCheck,
+  NO_BUDGET,
+  GLOBAL_BUDGET_KEY,
+  GLOBAL_BASE_KEY,
+  NO_GLOBAL_BUDGET,
+  currentMonth,
+  hasAnyLimit,
+  readGlobalBudget,
+  readMonthBase,
+  writeGlobalBudget,
+  writeMonthBase,
+} from './setting-keys.js'
+export type { MonthBase } from './setting-keys.js'
 export { PriceStore, type UpsertPriceInput } from './stores/prices.js'
 export {
   ComponentStore,

@@ -10,6 +10,7 @@ import { z } from 'zod'
 import {
   App,
   AvailableComponent,
+  Budget,
   ComponentProblem,
   DiffFile,
   FileNode,
@@ -17,6 +18,7 @@ import {
   GateOutcome,
   GitCommit,
   GitFileChange,
+  GlobalBudget,
   InstalledComponent,
   LogEntry,
   LogLevel,
@@ -395,6 +397,41 @@ export const rpcMethods = {
       maxTokens: z.number().int().nonnegative().nullable().default(null),
     }),
     output: z.object({ snapshot: UsageSnapshot }),
+  },
+
+  /**
+   * 全局额度（两道闸）与"本月已用"。
+   *
+   * 为什么单独一个方法而不是塞进 `usage.total`：那个是"按应用列账"，每次打开面板
+   * 都要扫全部账本；这个只在展开"全局额度"时才需要，而且它**会落月初基线**
+   * （有副作用），和一份纯读的汇总混在一起会让人以为随便调都没事。
+   */
+  'budget.global': {
+    input: z.object({}).default({}),
+    output: z.object({
+      budget: GlobalBudget,
+      /** 基线落在哪个月（`YYYY-MM`）。面板据此说"本月" */
+      month: z.string(),
+      /** 本月已用（服务端算：当前累计 − 月初基线） */
+      monthUsed: UsageTotals,
+      /** 全部应用累计（总量闸用的那个数） */
+      totalUsed: UsageTotals,
+      /**
+       * 账本读不到、因此**没算进上面两个数**的应用数。
+       *
+       * 必须单独一格：不提示的话，用户会以为"合计就是这些"，
+       * 而实际上闸可能因为少算了这几个应用而放行。
+       */
+      unreadable: z.number().int().nonnegative(),
+    }),
+  },
+  /** 保存全局额度。基线不动 —— 改上限不该把本月用量归零 */
+  'budget.global.set': {
+    input: z.object({
+      monthly: Budget,
+      lifetime: Budget,
+    }),
+    output: z.object({ budget: GlobalBudget }),
   },
 
   'files.tree': {

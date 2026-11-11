@@ -13,11 +13,14 @@ import {
   appPaths,
   breached,
   budgetKey,
+  currentMonth,
   files,
   gitops,
   isSchemaChange,
   levelOf,
   readBudget,
+  readGlobalBudget,
+  writeGlobalBudget,
 } from '@tenon/core'
 import {
   ASSEMBLY_FILE,
@@ -623,6 +626,33 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         return { snapshot: await zeroUsage(input.appId, core) }
       }
       return { snapshot: await agent.usage.setBudget(input.appId, budget) }
+    },
+
+    /*
+     * 全局额度（两道闸）。没配模型时也要能读能写：
+     * 用户可以先设好上限，等接上模型立刻生效 —— 与 `budget.set` 同一条原则。
+     * 只是没模型就没有账本，本月/累计一律回 0。
+     */
+    'budget.global': async () => {
+      if (agent.usage === undefined) {
+        return {
+          budget: readGlobalBudget(core.settings),
+          month: currentMonth(new Date()),
+          monthUsed: ZERO_USAGE,
+          totalUsed: ZERO_USAGE,
+          unreadable: 0,
+        }
+      }
+      return agent.usage.globalStatus()
+    },
+
+    'budget.global.set': async (input) => {
+      const budget = { monthly: input.monthly, lifetime: input.lifetime }
+      if (agent.usage === undefined) {
+        writeGlobalBudget(core.settings, budget)
+        return { budget: readGlobalBudget(core.settings) }
+      }
+      return { budget: await agent.usage.setGlobalBudget(budget) }
     },
 
     'files.tree': async (input) => {

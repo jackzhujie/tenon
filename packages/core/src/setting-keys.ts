@@ -1,4 +1,4 @@
-import { ReleaseCheckRecord, type Budget } from '@tenon/protocol'
+import { GlobalBudget as GlobalBudgetSchema, ReleaseCheckRecord, type Budget, type GlobalBudget, type UsageTotals } from '@tenon/protocol'
 import type { SettingsStore } from './stores/settings.js'
 
 /** 产品级设置键（拼写集中在这里，避免各路由各写一份字符串） */
@@ -40,6 +40,85 @@ export function readBudget(settings: SettingsStore, appId: string): Budget {
 /** 负数与 NaN 一律当"没设"：它们只会让比较永远成立，变成一个关不掉的应用 */
 function positiveOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+/* ────────────────────────── 全局额度（两道闸） ────────────────────────── */
+
+/**
+ * 全局额度。不带 id，所以可以直接进常量表。
+ *
+ * 与 `budgetKey(appId)` 的分工：那个管"某一个应用能花多少"（花超的永远是某一轮），
+ * 这个管"总共能花多少"（模型绕圈、连开三个应用，单看每个都不越线）。两者都要有，
+ * 因为单应用闸回答不了"今天一共花了多少"，全局闸又定位不到是哪一步在烧钱。
+ */
+export const GLOBAL_BUDGET_KEY = 'budget.global'
+
+/**
+ * 月度闸的月初基线：`{ month: '2026-11', totals: {...} }`。
+ *
+ * **为什么必须有它**：账本（`harness.usage()`）只有"累计"这一个数，没有时间维度。
+ * 想知道"本月花了多少"只能拿当前累计减去月初那一刻的累计。于是每月第一次判额度时
+ * 落一次基线。
+ *
+ * 已知误差：月初到"第一次开 Tenon"之间的消费会被算进本月（基线落得晚）。方向是
+ * **偏保守**（多算不多放），个人工具可以接受；写在这里是因为它不该被当成精确值。
+ *
+ * 与额度**分开存**：写基线每月一次、改额度偶尔一次，混在一条记录里就会互相覆盖 ——
+ * 改上限顺手把基线冲掉，本月用量直接归零，闸就永远不拦了。
+ */
+export const GLOBAL_BASE_KEY = 'budget.global.monthBase'
+
+export interface MonthBase {
+  /** `YYYY-MM`，**本地时区**。用户说的"这个月"是自己日历上的月，不是 UTC 的 */
+  month: string
+  totals: UsageTotals
+}
+
+export const NO_GLOBAL_BUDGET: GlobalBudget = { monthly: NO_BUDGET, lifetime: NO_BUDGET }
+
+/** `2026-11`。本地时区，与发布版本号的 `versionPrefix` 同一个理由 */
+export function currentMonth(now: Date): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * 读全局额度。**任何异常都退回"不设限"** —— 与 `readBudget` 同一条原则：
+ * 读坏一格不该把整个产品锁死。用 zod 而不是手挡字段，是因为形状以后会变
+ * （比如再加一道闸），手写的校验最容易在加字段时漏一处，而漏掉的后果是
+ * 界面上显示一个 `undefined` 被当成"没设"。
+ */
+export function readGlobalBudget(settings: SettingsStore): GlobalBudget {
+  const raw = settings.get<unknown>(GLOBAL_BUDGET_KEY)
+  if (raw === undefined || raw === null) return NO_GLOBAL_BUDGET
+  const parsed = GlobalBudgetSchema.safeParse(raw)
+  return parsed.success ? parsed.data : NO_GLOBAL_BUDGET
+}
+
+/** 写全局额度。基线不动 —— 见 `GLOBAL_BASE_KEY` 的注释 */
+export function writeGlobalBudget(settings: SettingsStore, budget: GlobalBudget): void {
+  settings.set({
+    [GLOBAL_BUDGET_KEY]: {
+      monthly: { maxCostUsd: positiveOrNull(budget.monthly.maxCostUsd), maxTokens: positiveOrNull(budget.monthly.maxTokens) },
+      lifetime: { maxCostUsd: positiveOrNull(budget.lifetime.maxCostUsd), maxTokens: positiveOrNull(budget.lifetime.maxTokens) },
+    },
+  })
+}
+
+/** 读月初基线。坏了 / 没有 → null（调用方会重新落一次） */
+export function readMonthBase(settings: SettingsStore): MonthBase | null {
+  const raw = settings.get<Partial<MonthBase>>(GLOBAL_BASE_KEY)
+  if (raw === null || typeof raw !== 'object') return null
+  if (typeof raw.month !== 'string' || raw.totals === undefined || raw.totals === null) return null
+  return { month: raw.month, totals: raw.totals }
+}
+
+export function writeMonthBase(settings: SettingsStore, base: MonthBase): void {
+  settings.set({ [GLOBAL_BASE_KEY]: base })
+}
+
+/** 有任意一维设了值，才算"配了闸" —— 都空时不必去遍历所有应用的账本 */
+export function hasAnyLimit(budget: Budget): boolean {
+  return budget.maxCostUsd !== null || budget.maxTokens !== null
 }
 
 /**

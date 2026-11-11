@@ -50,6 +50,38 @@ export function budgetMessage(totals: UsageTotals, budget: Budget, dimension: Bu
   return `这个应用的额度用完了（已用 ${used}，上限 ${limit}）。调高上限，或者换一个应用继续。`
 }
 
+/**
+ * 全局额度撞线时的那句话。
+ *
+ * 与 `budgetMessage` 分开写，因为**用户接下来该做的事完全不同**：应用额度撞了可以
+ * "换个应用继续"，全局额度撞了换到哪儿都一样 —— 只有"等 1 号"或"改上限"两条路。
+ * 把两种情况说成同一句，等于把用户推到三分钟后再次撞墙。
+ *
+ * `window` 必须区分：月度会自己解开，总量不会。用户看到"下月 1 日重置"却撞的是
+ * 总量闸时，会一直等到 1 号然后发现还是发不出去。
+ */
+export function globalBudgetMessage(
+  used: UsageTotals,
+  budget: Budget,
+  dimension: BudgetDimension,
+  window: 'month' | 'total',
+): string {
+  const usedText = dimension === 'cost' ? formatCost(used.costUsd) : `${formatTokens(used.totalTokens)} tokens`
+  const limit =
+    dimension === 'cost' ? formatCost(budget.maxCostUsd ?? 0) : `${formatTokens(budget.maxTokens ?? 0)} tokens`
+
+  if (window === 'month') {
+    return (
+      `本月总额度用完了（本月已用 ${usedText}，上限 ${limit}）。` +
+      '下月 1 日自动重置；要现在继续，就把「每月总额度」调高。'
+    )
+  }
+  return (
+    `总额度用完了（累计已用 ${usedText}，上限 ${limit}）。` +
+    '这道闸不会按月份重置 —— 要继续就得把它调高（或者取消这一项）。'
+  )
+}
+
 function trimZero(value: number): string {
   // 100 以上才取整：见 formatTokens 的注释（跨应用汇总要对得上）
   const fixed = value >= 100 ? value.toFixed(0) : value.toFixed(1)

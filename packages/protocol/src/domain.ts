@@ -374,6 +374,26 @@ export const BudgetDimension = z.enum(['cost', 'tokens'])
 export type BudgetDimension = z.infer<typeof BudgetDimension>
 
 /**
+ * 全局额度的两道闸（DESIGN §5.6 的缺口④）。
+ *
+ * 为什么两道都要：它们回答的是不同的问题。
+ * - `monthly`：这个月我还能花多少 —— 日常真正会撞的那道线，花超了等 1 号自动回来
+ * - `lifetime`：我总共最多接受花多少 —— 保险绳，撞上就得人为改高，不会自己解开
+ *
+ * 只有月度会漏掉"某个应用一天烧掉一个月"这种，只有总量则会在半年后变成一个
+ * 没人记得为什么是这个数的怪数字。两个都在，各自的作用才清楚。
+ */
+export const GlobalBudget = z.object({
+  monthly: Budget,
+  lifetime: Budget,
+})
+export type GlobalBudget = z.infer<typeof GlobalBudget>
+
+/** 撞的是哪道闸。报错与面板都要靠它区分文案 */
+export const BudgetWindow = z.enum(['month', 'total'])
+export type BudgetWindow = z.infer<typeof BudgetWindow>
+
+/**
  * 用量快照 —— **推全量**，跟任务图一个道理：几个数字，推增量要维护
  * "哪个 delta 该加到哪个桶"的状态机，算错一次就长期显示错的余额。
  */

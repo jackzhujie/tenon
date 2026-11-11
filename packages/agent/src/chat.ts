@@ -11,7 +11,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { AgentEvent, AgentEventStream, Cursor } from '@earendil-works/pi-durable'
 import { watchEvents } from '@earendil-works/pi-durable'
 import type { ChatSubmitInput, SseEventInput } from '@tenon/protocol'
-import { budgetMessage, composeWithSelection, TenonError } from '@tenon/protocol'
+import { budgetMessage, composeWithSelection, globalBudgetMessage, TenonError } from '@tenon/protocol'
 import type { AppStore, TenonHome } from '@tenon/core'
 import { appPaths, gitops, hasSchemaChange } from '@tenon/core'
 import type { HarnessPool, RootConversation } from './harness-pool.js'
@@ -336,9 +336,27 @@ export class ChatService {
     // 额度判在**取 harness 之后**（账本在 harness 里），但在**改状态之前** ——
     // 拒绝了就不该让前端看到一次 running。
     if (this.options.usage !== undefined) {
-      const { snapshot, exceeded } = await this.options.usage.startTurn(appId)
+      const { snapshot, exceeded, global } = await this.options.usage.startTurn(appId)
+      /*
+       * 全局闸先报。两者都撞上时必须说全局那一道：应用额度撞了还能"换个应用"，
+       * 全局撞了换到哪儿都一样 —— 文案给错，用户会去试另一个应用然后再次撞墙。
+       */
+      if (global !== null) {
+        throw new TenonError(
+          'BUDGET_EXCEEDED',
+          globalBudgetMessage(global.used, global.budget, global.dimension, global.window),
+          {
+            scope: 'global',
+            window: global.window,
+            dimension: global.dimension,
+            used: global.used,
+            budget: global.budget,
+          },
+        )
+      }
       if (exceeded !== null) {
         throw new TenonError('BUDGET_EXCEEDED', budgetMessage(snapshot.totals, snapshot.budget, exceeded), {
+          scope: 'app',
           dimension: exceeded,
           totals: snapshot.totals,
           budget: snapshot.budget,

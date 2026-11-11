@@ -21,12 +21,30 @@ import type { Harness } from '@earendil-works/pi-durable'
 import type {
   Budget,
   BudgetDimension,
+  BudgetWindow,
+  GlobalBudget,
   SseEventInput,
   UsageSnapshot,
   UsageTotals,
 } from '@tenon/protocol'
 import type { CoreServices } from '@tenon/core'
-import { ZERO_USAGE, addUsage, breached, budgetKey, diffUsage, levelOf, readBudget, sumUsage } from '@tenon/core'
+import {
+  ZERO_USAGE,
+  addUsage,
+  breached,
+  budgetKey,
+  currentMonth,
+  diffUsage,
+  hasAnyLimit,
+  levelOf,
+  readBudget,
+  readGlobalBudget,
+  readMonthBase,
+  sumUsage,
+  writeGlobalBudget,
+  writeMonthBase,
+} from '@tenon/core'
+import type { MonthBase } from '@tenon/core'
 import { agentContext as ctx } from './context.js'
 import type { HarnessPool } from './harness-pool.js'
 
@@ -44,14 +62,32 @@ interface Entry {
 
 export interface UsageServiceOptions {
   pool: HarnessPool
-  core: Pick<CoreServices, 'settings' | 'prices'>
+  /** `apps` 只在判全局额度时用：要列一遍所有应用才知道总共花了多少 */
+  core: Pick<CoreServices, 'settings' | 'prices' | 'apps'>
   publish: (event: SseEventInput) => void
+}
+
+/** 全局闸撞线的结果。`used` 是这个窗口内的量（月度量是差值，不是累计） */
+export interface GlobalBreach {
+  window: BudgetWindow
+  dimension: BudgetDimension
+  /** 撞线时这个窗口用了多少 —— 月度是差值，总量是全量 */
+  used: UsageTotals
+  /** 撞的那一道闸的额度 */
+  budget: Budget
 }
 
 export interface StartTurnResult {
   snapshot: UsageSnapshot
   /** 已经顶到的是哪条线；非 null 时调用方应当拒绝这一轮 */
   exceeded: BudgetDimension | null
+  /**
+   * 全局闸。非 null 时**必须**拒绝这一轮。
+   *
+   * 与 `exceeded` 分开一格而不是合并成一个枚举：两者的处置不同 —— 应用额度撞了
+   * 可以"换个应用"，全局撞了换到哪儿都一样，文案里要说的下一句完全不同。
+   */
+  global: GlobalBreach | null
 }
 
 /** 汇总里的一行：一个应用的全部用量 */
@@ -130,11 +166,122 @@ export class UsageService {
   async startTurn(appId: string): Promise<StartTurnResult> {
     const entry = await this.entry(appId)
     const snapshot = await this.compose(appId, entry)
-    if (snapshot.level === 'over') return { snapshot, exceeded: snapshot.exceeded }
+
+    // 单应用先判：它更具体（能指出是哪个应用），而且**超了就不必再扫一遍全部账本**
+    if (snapshot.level === 'over') {
+      return { snapshot, exceeded: snapshot.exceeded, global: null }
+    }
+
+    const global = await this.checkGlobal()
+    // 全局超了同样不清空基数：面板要能继续显示"上一轮花了多少"，否则用户看到
+    // "花了 0 却不让发"，无从判断该调多少
+    if (global !== null) return { snapshot, exceeded: null, global }
+
     entry.turnBase = entry.totals
     const fresh = await this.compose(appId, entry)
     this.publishIfChanged(appId, entry, fresh)
-    return { snapshot: fresh, exceeded: null }
+    return { snapshot: fresh, exceeded: null, global: null }
+  }
+
+  /** 全局额度（两道闸）。没配过 = 都不设限 */
+  globalBudget(): GlobalBudget {
+    return readGlobalBudget(this.options.core.settings)
+  }
+
+  async setGlobalBudget(budget: GlobalBudget): Promise<GlobalBudget> {
+    writeGlobalBudget(this.options.core.settings, budget)
+    return this.globalBudget()
+  }
+
+  /**
+   * 判全局额度。**先总量、后月度** —— 这个顺序是有意的：
+   *
+   * 两道闸都撞上时，报"总量"才有用。报月度会说"下月 1 日自动重置"，而总量那道闸
+   * 1 号根本不会解开 —— 用户等到 1 号发现还是发不出去，比不告诉他更糟。
+   */
+  private async checkGlobal(): Promise<GlobalBreach | null> {
+    const budget = this.globalBudget()
+    const monthlyOn = hasAnyLimit(budget.monthly)
+    const lifetimeOn = hasAnyLimit(budget.lifetime)
+
+    const month = currentMonth(new Date())
+    const existing = readMonthBase(this.options.core.settings)
+    const needBase = existing === null || existing.month !== month
+
+    // 两维都空、本月基线也在 → 什么都不用做。
+    // **但基线缺了就得补**，哪怕没设闸：用户很可能月中才来设额度，那时本月已经花掉
+    // 的部分若不先记成基线，就会被算成"以前"，面板上的「本月已用」从 0 开始。
+    // 这个坑是集成测试抓到的（先跑一轮、再设额度，本月显示 0）。
+    if (!monthlyOn && !lifetimeOn && !needBase) return null
+
+    const total = await this.total(this.listApps(), { fresh: true })
+    const base = needBase ? this.rollMonthBase(month, total.totals) : (existing as MonthBase)
+
+    if (lifetimeOn) {
+      const dimension = breached(total.totals, budget.lifetime)
+      if (dimension !== null) {
+        return { window: 'total', dimension, used: total.totals, budget: budget.lifetime }
+      }
+    }
+
+    if (monthlyOn) {
+      const monthUsed = diffUsage(total.totals, base.totals)
+      const dimension = breached(monthUsed, budget.monthly)
+      if (dimension !== null) {
+        return { window: 'month', dimension, used: monthUsed, budget: budget.monthly }
+      }
+    }
+    return null
+  }
+
+  /**
+   * 面板要的全局状态：额度、本月已用、累计、读不到账的应用数。
+   *
+   * 与 `checkGlobal` 分开：这个**不判**拦不拦（面板要显示"已经超了"的那个数，
+   * 而不是一个布尔），但它同样会顺手补一次月初基线。
+   */
+  async globalStatus(): Promise<{
+    budget: GlobalBudget
+    /** 基线落在哪个月（`YYYY-MM`）。面板据此说"本月" */
+    month: string
+    monthUsed: UsageTotals
+    totalUsed: UsageTotals
+    /** 账本读不到、因此**没有**算进上面的应用数 —— 不为 0 时面板要提示 */
+    unreadable: number
+  }> {
+    const budget = this.globalBudget()
+    const month = currentMonth(new Date())
+    const existing = readMonthBase(this.options.core.settings)
+
+    const total = await this.total(this.listApps(), { fresh: true })
+    const base =
+      existing !== null && existing.month === month ? existing : this.rollMonthBase(month, total.totals)
+
+    return {
+      budget,
+      month: base.month,
+      monthUsed: diffUsage(total.totals, base.totals),
+      totalUsed: total.totals,
+      unreadable: total.failed.length,
+    }
+  }
+
+  /**
+   * 落一条新的月初基线。
+   *
+   * 「本月」在这个实现里的实际含义是**"自基线那一刻起"** —— 账本（`harness.usage()`）
+   * 只有累计，没有时间维度，回溯不了"某笔花费发生在哪个月"。所以基线落得越早越准：
+   * 现在每轮开始都会补（没有就补），把误差压到"安装到第一次发消息之间"，而那段
+   * 本来就没有花费。
+   */
+  private rollMonthBase(month: string, current: UsageTotals): MonthBase {
+    const base: MonthBase = { month, totals: current }
+    writeMonthBase(this.options.core.settings, base)
+    return base
+  }
+
+  private listApps(): Array<{ id: string; name: string }> {
+    return this.options.core.apps.list().map((app) => ({ id: app.id, name: app.name }))
   }
 
   /**
@@ -155,11 +302,18 @@ export class UsageService {
    *
    * 为什么不去 `acquire()` 每个应用：那会把 N 个应用的会话全部拉活（含 `resume()`，
    * 也就是真的去执行别人被中断的任务）。见 `HarnessPool.readUsageLedger`。
+   *
+   * `fresh`：面板用缓存（15 秒，来回开关不该扫 N 个库），**判额度时必须用真值**。
+   * 拿一份 15 秒前的合计去决定拦不拦，等于给每个用户留了 15 秒的免费额度 ——
+   * 而模型在这 15 秒里足够把额度烧穿。
    */
-  async total(apps: readonly { id: string; name: string }[]): Promise<UsageTotalSnapshot> {
+  async total(
+    apps: readonly { id: string; name: string }[],
+    options: { fresh?: boolean } = {},
+  ): Promise<UsageTotalSnapshot> {
     const key = apps.map((app) => app.id).join(',')
     const cached = this.totalCache
-    if (cached !== null && cached.key === key && Date.now() - cached.at < TOTAL_TTL_MS) {
+    if (options.fresh !== true && cached !== null && cached.key === key && Date.now() - cached.at < TOTAL_TTL_MS) {
       return cached.value
     }
 
