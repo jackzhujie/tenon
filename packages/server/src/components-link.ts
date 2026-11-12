@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { webSocketLink } from '@earendil-works/chord'
 import { COMPONENT_SCRIPT_PATH, type ComponentBridge } from '@tenon/gateway'
+import { getLocale } from '@tenon/protocol'
 import type { ComponentRuntime } from './components.js'
 
 export interface ComponentBridgeOptions {
@@ -53,6 +54,18 @@ export function createComponentBridge(options: ComponentBridgeOptions): AppCompo
 
   return {
     scriptUrl: `${COMPONENT_SCRIPT_PATH}?appId=${encodeURIComponent(options.appId)}`,
+
+    /*
+     * 每次注入 HTML 时现读一次。
+     *
+     * 不从 `options` 传：语言是**进程级偏好**，真相在 `@tenon/protocol` 的 locale
+     * 内核里（服务端启动时读设置、`settings.set` 时更新）。这里再存一份副本，
+     * 就会在"切了语言但这份副本没跟上"的时候给页面注入旧语言 —— 而这种错
+     * 只在刷新预览时才看得见，很容易被当成"没实现"。
+     */
+    get locale() {
+      return getLocale()
+    },
 
     async script() {
       const file = await webFacetFile()

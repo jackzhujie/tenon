@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { PreviewStatus, Readiness } from '@tenon/protocol'
+import { useEffect, useRef, useState } from 'react'
+import { type PreviewStatus, type Readiness, COMPONENT_LOCALE_MESSAGE } from '@tenon/protocol'
 import { Button } from '../../components/ui/Button.js'
 import {
   DiffIcon,
@@ -82,13 +82,29 @@ export function PreviewPanel({
   onStart,
   onToggleFullscreen,
 }: PreviewPanelProps) {
-  const { t } = useT()
+  const { t, locale } = useT()
   const [reloadKey, setReloadKey] = useState(0)
+  const frameRef = useRef<HTMLIFrameElement | null>(null)
 
   // 换了应用就把 iframe 换掉，别让上一个应用的页面留在里面
   useEffect(() => {
     setReloadKey((value) => value + 1)
   }, [appId])
+
+  /*
+   * 切语言后通知预览里的组件。
+   *
+   * 组件跑在 iframe 里（网关的源），拿不到这里的 i18n Context —— 它的文案由网关注入
+   * 的那段引导脚本按 `window.__tenonLocale` 画。这条消息是**已经挂上的组件**唯一的
+   * 更新途径：重载 iframe 也能让新语言生效，但会丢掉页面上正在填的表单。
+   *
+   * `targetOrigin` 只能写 `'*'`：网关端口每次预览随机分配，父页面无法预先知道。
+   * 消息体只有语言，没有别的东西可泄露；收到它的也必须先认 `type`，
+   * 所以即使页面上还有别的 iframe 也无害。
+   */
+  useEffect(() => {
+    frameRef.current?.contentWindow?.postMessage({ type: COMPONENT_LOCALE_MESSAGE, locale }, '*')
+  }, [locale])
 
   const state = preview?.state ?? 'stopped'
   const url = preview?.url ?? null
@@ -228,6 +244,7 @@ export function PreviewPanel({
            * 真正需要更严的隔离时（M2 的探针注入）再一起设计。
            */
           <iframe
+            ref={frameRef}
             key={reloadKey}
             /*
              * token 走 hash 不走 query：query 会进网关与 dev server 的访问日志，

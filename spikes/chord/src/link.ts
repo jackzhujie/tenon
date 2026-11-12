@@ -125,6 +125,8 @@ async function main(): Promise<void> {
       routes: [{ prefix: '/', port: stubPort }],
       components: {
         scriptUrl: '/x.js',
+        // 这个 spike 只关心链路，不关心组件说什么话
+        locale: 'en',
         script: async () => null,
         upgrade: async (req, socket, head) => {
           headLength = head.length

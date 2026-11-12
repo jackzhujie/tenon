@@ -23,7 +23,7 @@ const READY_TIMEOUT_MS = 10_000
 function appIdOf(): string {
   // 网关注入的地址是 `/__tenon/component.js?appId=…`，脚本自己不知道身在哪个应用
   const id = new URL(import.meta.url).searchParams.get('appId')
-  if (id === null || id === '') throw new Error('组件脚本缺少 appId 参数')
+  if (id === null || id === '') throw new Error('component script is missing the appId parameter')
   return id
 }
 
@@ -44,6 +44,61 @@ function el<K extends keyof HTMLElementTagNameMap>(
   if (text !== undefined) node.textContent = text
   return node
 }
+
+/*
+ * ── 语言 ────────────────────────────────────────────────
+ *
+ * 组件跑在应用页面的 iframe 里（网关的源），拿不到 Tenon 界面的 i18n Context。
+ * 语言由网关注入的引导脚本递过来：`window.__tenonLocale` 是首屏那份，
+ * 用户切语言时父页面 `postMessage`，引导脚本改全局并派发 `tenon:locale` 事件。
+ *
+ * 组件这一侧只做两件事：**读一次、听一次**。不要自己加 message 监听 ——
+ * 那段引导脚本是平台给所有组件（包括将来别人写的）准备的唯一入口。
+ */
+type Locale = 'en' | 'zh'
+
+/** 一张表两种语言；`Copy` 把字段名钉死，漏一句编译期就报 */
+interface Copy {
+  name: string
+  open: string
+  placeholder: string
+  send: string
+  thinking: string
+  offline: string
+  /** `{detail}` 会被替换成具体错误 */
+  failed: string
+  unreachable: string
+}
+
+const TEXT: Record<Locale, Copy> = {
+  en: {
+    name: 'AI assistant',
+    open: 'Open the AI assistant',
+    placeholder: 'Ask something…',
+    send: 'Send',
+    thinking: 'Thinking…',
+    offline: 'Disconnected — the next question reconnects',
+    failed: 'Failed: {detail}',
+    unreachable: 'Could not reach the assistant: {detail}',
+  },
+  zh: {
+    name: 'AI 小助手',
+    open: '打开 AI 小助手',
+    placeholder: '问点什么…',
+    send: '发送',
+    thinking: '思考中…',
+    offline: '连接已断开，下次提问会重连',
+    failed: '没成功：{detail}',
+    unreachable: '连不上助手：{detail}',
+  },
+}
+
+function currentLocale(): Locale {
+  return (window as unknown as { __tenonLocale?: unknown }).__tenonLocale === 'zh' ? 'zh' : 'en'
+}
+
+let copy: Copy = TEXT[currentLocale()]
+const fill = (template: string, detail: string): string => template.replace('{detail}', detail)
 
 function mount(appId: string): void {
   // 同一个页面里只装一次（热更新、重复注入都可能发生）
@@ -70,7 +125,7 @@ function mount(appId: string): void {
     // 断线就把 host 丢掉，下次提问重连；留着它只会让之后的调用全部超时
     socket.addEventListener('close', () => {
       if (host === created) host = null
-      statusLine.textContent = '连接已断开，下次提问会重连'
+      setStatus({ kind: 'offline' })
     })
     host = created
     return created
@@ -100,7 +155,7 @@ function mount(appId: string): void {
 
   function withTimeout<T>(work: Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('等太久了，链路可能断了')), ASK_TIMEOUT_MS)
+      const timer = setTimeout(() => reject(new Error('timed out — the link may be down')), ASK_TIMEOUT_MS)
       work.then(
         (value) => {
           clearTimeout(timer)
@@ -126,8 +181,15 @@ function mount(appId: string): void {
     'width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;background:#111;color:#fff;font-size:20px;box-shadow:0 6px 20px rgba(0,0,0,.25)',
     '✦',
   )
-  ball.setAttribute('title', 'AI 小助手')
-  ball.setAttribute('aria-label', 'AI 小助手')
+  /*
+   * `data-tenon-open` 给端到端用。
+   *
+   * 容器的 `data-tenon-component` 在 root 上，点 root **不会**打开面板 ——
+   * 而按 `data-tenon-component` 找元素再 `.click()` 恰好能"跑通"（会去找隐藏的
+   * textarea 与按钮，点击对可见性不敏感），所以这条测试一直是假阳性。
+   * 明确标出球本身，才能验"点得开"。
+   */
+  ball.setAttribute('data-tenon-open', '')
 
   const panel = el(
     'div',
@@ -136,10 +198,14 @@ function mount(appId: string): void {
   const header = el(
     'div',
     'display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#111;color:#fff;font-weight:600',
-    'AI 小助手',
   )
+  /*
+   * 标题单独一个 span，不用 `header.textContent`：切语言时要换掉这段文字，
+   * 而关按钮也是 header 的孩子 —— 整体重写会把按钮一起抹掉。
+   */
+  const headerTitle = el('span', '', copy.name)
   const closeButton = el('button', 'border:none;background:none;color:#fff;cursor:pointer;font-size:16px', '×')
-  header.append(closeButton)
+  header.append(headerTitle, closeButton)
 
   const list = el('div', 'flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px')
   const statusLine = el('div', 'padding:0 12px;color:#888;font-size:12px;min-height:16px')
@@ -148,16 +214,55 @@ function mount(appId: string): void {
     'textarea',
     'flex:1;resize:none;height:38px;padding:8px;border:1px solid #ddd;border-radius:8px;font:inherit;outline:none',
   )
-  input.setAttribute('placeholder', '问点什么…')
   const send = el(
     'button',
     'padding:0 14px;border:none;border-radius:8px;background:#111;color:#fff;cursor:pointer',
-    '发送',
+    copy.send,
   )
   form.append(input, send)
   panel.append(header, list, statusLine, form)
   root.append(panel, ball)
   document.body.append(root)
+
+  /*
+   * 状态栏的文字有五种，切语言时必须按**当前状态**重画 —— 只换静态那几处，
+   * 会把"思考中…"留在英文界面上（而它恰好是最常被看见的一句）。
+   * 所以状态存成数据，文字永远由 `paintStatus` 从当前语言算出来。
+   */
+  type Status =
+    | { kind: 'idle' }
+    | { kind: 'busy' }
+    | { kind: 'offline' }
+    | { kind: 'failed'; detail: string }
+    | { kind: 'unreachable'; detail: string }
+  let status: Status = { kind: 'idle' }
+
+  function paintStatus(): void {
+    if (status.kind === 'idle') statusLine.textContent = ''
+    else if (status.kind === 'busy') statusLine.textContent = copy.thinking
+    else if (status.kind === 'offline') statusLine.textContent = copy.offline
+    else if (status.kind === 'failed') statusLine.textContent = fill(copy.failed, status.detail)
+    else statusLine.textContent = fill(copy.unreachable, status.detail)
+  }
+
+  function setStatus(next: Status): void {
+    status = next
+    paintStatus()
+  }
+
+  /** 切语言：只换文案，不动对话内容（那是数据，不是文案） */
+  function applyCopy(): void {
+    copy = TEXT[currentLocale()]
+    ball.setAttribute('title', copy.open)
+    ball.setAttribute('aria-label', copy.open)
+    headerTitle.textContent = copy.name
+    input.setAttribute('placeholder', copy.placeholder)
+    send.textContent = copy.send
+    paintStatus()
+  }
+
+  applyCopy()
+  window.addEventListener('tenon:locale', applyCopy)
 
   function render(messages: readonly Message[]): void {
     list.textContent = ''
@@ -186,12 +291,12 @@ function mount(appId: string): void {
     list.append(
       el('div', 'align-self:flex-end;max-width:86%;padding:8px 10px;border-radius:10px;background:#111;color:#fff', text),
     )
-    statusLine.textContent = '思考中…'
+    setStatus({ kind: 'busy' })
     try {
       render(await ask(text))
-      statusLine.textContent = ''
+      setStatus({ kind: 'idle' })
     } catch (error) {
-      statusLine.textContent = `没成功：${error instanceof Error ? error.message : String(error)}`
+      setStatus({ kind: 'failed', detail: error instanceof Error ? error.message : String(error) })
     } finally {
       pending = false
       list.scrollTop = list.scrollHeight
@@ -207,10 +312,10 @@ function mount(appId: string): void {
     void readMessages().then(
       (messages) => {
         render(messages)
-        statusLine.textContent = ''
+        setStatus({ kind: 'idle' })
       },
       (error: unknown) => {
-        statusLine.textContent = `连不上助手：${error instanceof Error ? error.message : String(error)}`
+        setStatus({ kind: 'unreachable', detail: error instanceof Error ? error.message : String(error) })
       },
     )
   })
@@ -230,5 +335,5 @@ try {
   mount(appIdOf())
 } catch (error) {
   // 注入脚本出错不能连累应用页面（它跑在用户的页面里）
-  console.warn('[tenon assistant] 没挂上：', error)
+  console.warn('[tenon assistant] failed to mount:', error)
 }

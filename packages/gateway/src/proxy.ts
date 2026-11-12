@@ -372,7 +372,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
           const html =
             code === null || components === undefined
               ? injected
-              : injectComponentScript(injected, components.scriptUrl)
+              : injectComponentScript(injected, components.scriptUrl, components.locale)
           const body = Buffer.from(html, 'utf8')
           const headers = { ...upstreamRes.headers }
           /*

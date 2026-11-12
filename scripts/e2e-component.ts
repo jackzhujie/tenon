@@ -27,7 +27,16 @@ const electronPath = require(join(repo, 'apps', 'desktop', 'node_modules', 'elec
 
 const TOKEN = 'e2e-component-token'
 const COMPONENT = 'tenon.official.ai-assistant'
+/** 容器（root）：用来数"挂了几个" */
 const BALL = `[data-tenon-component="${COMPONENT}"]`
+/**
+ * 球本身。
+ *
+ * 不能直接点 `BALL`：那个属性在容器上，点容器不会打开面板 —— 而按容器找元素
+ * 再 `.click()` 恰好能"跑通"（随后去找隐藏的 textarea 与按钮，点击对可见性不敏感），
+ * 于是这条断言长期是假阳性。组件现在显式标了 `data-tenon-open`。
+ */
+const OPEN = '[data-tenon-open]'
 
 let failures = 0
 function check(name: string, ok: boolean, detail = ''): void {
@@ -47,6 +56,18 @@ interface Envelope<T> {
 const home = await mkdtemp(join(tmpdir(), 'tenon-component-e2e-'))
 console.log(`TENON_HOME = ${home}\n`)
 
+/*
+ * 语言钉成中文，与另外几个 e2e 一致。
+ *
+ * 这条链路里的断言大多按文案找元素（"发送"按钮）。语言若跟着本机环境漂，
+ * 同一份测试在不同机器上会绿/红两种结果 —— 而红的理由与组件无关。
+ * 语言**能不能变**由最后两条断言单独验（它们主动发一条切换消息）。
+ *
+ * 走 `settings.set` 而不是直接 `setLocale()`：`startServer` 在没有设置时
+ * **显式写回英文**（避免上一个服务实例的语言漏进来），进程里先设会被它覆盖 ——
+ * 我第一版就是这么错的，症状是"找不到『发送』按钮"。
+ */
+
 const server = await startServer({
   port: 0,
   token: TOKEN,
@@ -65,11 +86,15 @@ async function rpc<T>(method: string, input: unknown): Promise<T> {
   return body.data as T
 }
 
-/** Electron 主进程：在真 Chromium 里跑完四个断言，把结果打到 stdout */
+// 见上面那段注释：语言必须在服务起来之后、走真实设置接口设
+await rpc('settings.set', { values: { 'ui.locale': 'zh' } })
+
+/** Electron 主进程：在真 Chromium 里跑完全部断言，把结果打到 stdout */
 function electronMain(): string {
   return `const { app, BrowserWindow } = require('electron')
 const url = process.env.TENON_E2E_URL
 const ball = ${JSON.stringify(BALL)}
+const open = ${JSON.stringify(OPEN)}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function componentErrors(frame) {
@@ -112,8 +137,13 @@ async function run() {
   out.ballCount = await frame.executeJavaScript('document.querySelectorAll(' + JSON.stringify(ball) + ').length')
 
   // ③ 点开面板 → 输入 → 发送
-  await frame.executeJavaScript('document.querySelector(' + JSON.stringify(ball) + ').click()')
-  await waitFor(frame, 'document.querySelectorAll("textarea").length > 0', '面板打开')
+  await frame.executeJavaScript('document.querySelector(' + JSON.stringify(open) + ').click()')
+  // 真的可见（offsetParent 为 null 说明它或祖先还是 display:none）
+  await waitFor(
+    frame,
+    '(() => { const t = document.querySelector("textarea"); return t !== null && t.offsetParent !== null })()',
+    '面板打开',
+  )
   await frame.executeJavaScript(
     '(() => { const t = document.querySelector("textarea"); t.value = "介绍一下你自己"; t.dispatchEvent(new Event("input", { bubbles: true })); return true })()',
   )
@@ -146,11 +176,45 @@ async function run() {
   out.ballAfterHmr = await frame.executeJavaScript('document.querySelectorAll(' + JSON.stringify(ball) + ').length')
 
   // ⑥ 刷新整页之后对话还在（状态在服务端对象上，不在 DOM 里）
+  /*
+   * ★ 必须等新文档真的加载完。reload() 是异步的，而 waitFor(球) 会在旧文档上
+   * 立刻通过（旧文档的球还在、DOM 也还在）—— 于是后面的"刷新后对话还在""切语言"
+   * 全都在**正要卸载的旧文档**里跑：断言是绿的，但什么都没验到，而且
+   * postMessage 在这时会被丢弃（消息投给一个即将消失的 window）。
+   * 判据只能用导航事件，不能用 readyState（旧文档也是 complete）。
+   */
+  const loaded = new Promise((resolve) => win.webContents.once('did-finish-load', resolve))
   await win.webContents.reload()
+  await loaded
   await waitFor(frame, 'document.querySelector(' + JSON.stringify(ball) + ') !== null', '刷新后组件重新注入')
-  await frame.executeJavaScript('document.querySelector(' + JSON.stringify(ball) + ').click()')
+  await frame.executeJavaScript('document.querySelector(' + JSON.stringify(open) + ').click()')
   await waitFor(frame, 'document.querySelectorAll("[data-tenon-message]").length >= 2', '刷新后对话还在', 30000)
   out.afterReload = await frame.executeJavaScript('document.querySelectorAll("[data-tenon-message]").length')
+
+  /*
+   * ⑦ 语言。两件事分开验：
+   * - 刷新后重新注入的那份 HTML 带的是**服务端语言**（zh），首屏就该是中文；
+   * - 收到父页面的切换消息后，球与输入框立刻改口（不重载 iframe）。
+   *
+   * 这里自己给自己发一条 message：真界面上是 Tenon 的预览面板在发（跨源，
+   * 走的是同一条监听），组件这一侧分不出差别。
+   */
+  out.titleOnLoad = await frame.executeJavaScript(
+    'document.querySelector(' + JSON.stringify(open) + ').getAttribute("title")',
+  )
+  await frame.executeJavaScript('window.postMessage({ type: "tenon:locale", locale: "en" }, "*")')
+  await sleep(120)
+  out.localeAfterSwitch = await frame.executeJavaScript('window.__tenonLocale')
+  out.titleAfterSwitch = await frame.executeJavaScript(
+    'document.querySelector(' + JSON.stringify(open) + ').getAttribute("title")',
+  )
+  out.placeholderAfterSwitch = await frame.executeJavaScript(
+    'document.querySelector("textarea")?.getAttribute("placeholder")',
+  )
+  out.placeholderAfterSwitch = await frame.executeJavaScript(
+    'document.querySelector("textarea")?.getAttribute("placeholder")',
+  )
+
   out.logs = logs.slice(-5)
   await win.close()
   return out
@@ -208,6 +272,12 @@ try {
   console.log(
     `  注入脚本标签：${html.includes('/__tenon/component.js') ? '有' : '没有'}；端点 ${scriptRes.status} ${scriptRes.headers.get('content-type')}；头 40 字：${JSON.stringify(scriptBody.slice(0, 40))}`,
   )
+  // 语言走同一段注入脚本，出问题时这条最能说明"是注入错了还是组件没读"
+  console.log(`  注入的语言：${/__tenonLocale="(\w+)"/.exec(html)?.[1] ?? '(没有)'}`)
+  const catcher = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? ''
+  console.log(
+    `  catcher ${catcher.length} 字；有 message 监听：${catcher.includes("addEventListener('message'")}；片段：${JSON.stringify(catcher.slice(0, 140))}`,
+  )
 
   console.log('3) Electron + 真 Chromium：点球 → 聊天 → 热重载 → 刷新')
   const mainFile = join(home, 'electron-main.cjs')
@@ -263,6 +333,10 @@ try {
     messages: { role: string; text: string }[]
     ballAfterHmr: number
     afterReload: number
+    titleOnLoad: string | null
+    localeAfterSwitch: string | null
+    titleAfterSwitch: string | null
+    placeholderAfterSwitch: string | null
     logs: string[]
   }
 
@@ -275,6 +349,17 @@ try {
   )
   check('热重载之后球还在、且没有重复挂', result.ballAfterHmr === 1, `球数 = ${result.ballAfterHmr}`)
   check('刷新整页之后对话还在（DoD ③：状态在服务端）', result.afterReload >= 2, `气泡数 = ${result.afterReload}`)
+  check(
+    '注入时就带上了语言（首屏中文，不用再发一次请求）',
+    result.titleOnLoad === '打开 AI 小助手',
+    `title = ${JSON.stringify(result.titleOnLoad)}`,
+  )
+  check(
+    '切语言后组件改口（postMessage，不重载 iframe）',
+    result.titleAfterSwitch === 'Open the AI assistant' &&
+      result.placeholderAfterSwitch === 'Ask something…',
+    `title = ${JSON.stringify(result.titleAfterSwitch)} / 全局 = ${JSON.stringify(result.localeAfterSwitch)} / placeholder = ${JSON.stringify(result.placeholderAfterSwitch)}`,
+  )
 } catch (error) {
   failures += 1
   console.log(`\n✗ 失败：${error instanceof Error ? error.message : String(error)}`)

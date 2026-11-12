@@ -5,6 +5,7 @@
  */
 export * from './errors.js'
 export * from './locale.js'
+export * from './component-locale.js'
 export * from './messages/index.js'
 export * from './domain.js'
 export * from './transport.js'
