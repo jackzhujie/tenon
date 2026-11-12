@@ -14,6 +14,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { gitops } from '../packages/core/src/index.js'
+import { setLocale } from '../packages/protocol/src/index.js'
 import { startServer } from '../packages/server/src/index.js'
 
 const TOKEN = 'e2e-token'
@@ -84,6 +85,12 @@ const server = await startServer({
   token: TOKEN,
   env: { TENON_HOME: home, TENON_FAUX: '1' },
 })
+/*
+ * 下面几条断言看的是**错误消息里有没有说清理由**，写的是中文原话。
+ * 服务端默认说英文（国际化产品的默认值），所以这里显式钉成中文 ——
+ * 要验英文那一侧，去跑 `packages/server/test/locale.test.ts`。
+ */
+setLocale('zh')
 
 async function rpc<T>(method: string, input: unknown): Promise<T> {
   const response = await fetch(`${server.url}/rpc/${method}`, {

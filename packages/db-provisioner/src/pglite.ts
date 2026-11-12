@@ -21,7 +21,7 @@ import { createServer } from 'node:net'
 import type { Server, Socket } from 'node:net'
 import { join, dirname } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { fromNodeSocket } from 'pg-gateway/node'
 import type { DatabaseProvider, DbSnapshot, DbState, DbStatus, ProviderOptions } from './types.js'
 
@@ -56,7 +56,7 @@ export class PgliteProvider implements DatabaseProvider {
 
   connectionString(): string {
     if (this.port === null) {
-      throw new TenonError('DB_NOT_READY', '数据库还没启动，拿不到连接串', { mode: this.mode })
+      throw new TenonError('DB_NOT_READY', msg('error.db.notStarted'), { mode: this.mode })
     }
     // PGlite 的默认库就是 postgres；用户名密码是占位（pg-gateway 走 trust）
     return `postgres://postgres:postgres@${HOST}:${this.port}/postgres`
@@ -112,7 +112,7 @@ export class PgliteProvider implements DatabaseProvider {
       await this.shutdown()
       throw err instanceof TenonError
         ? err
-        : new TenonError('DB_START_FAILED', `应用数据库起不来：${this.error}`, {
+        : new TenonError('DB_START_FAILED', msg('error.db.startFailed', { detail: this.error ?? '' }), {
             mode: this.mode,
             dataDir: this.options.dataDir,
           })
@@ -127,7 +127,7 @@ export class PgliteProvider implements DatabaseProvider {
    */
   private async listen(): Promise<void> {
     const db = this.db
-    if (db === null) throw new TenonError('DB_NOT_READY', '内部错误：listen 时没有 db 实例')
+    if (db === null) throw new TenonError('DB_NOT_READY', msg('error.db.listenMissing'))
 
     const server: Server = createServer((socket) => {
       this.sockets.add(socket)
@@ -167,7 +167,7 @@ export class PgliteProvider implements DatabaseProvider {
     const address = server.address()
     if (address === null || typeof address === 'string') {
       await new Promise<void>((resolve) => server.close(() => resolve()))
-      throw new TenonError('DB_START_FAILED', '应用数据库拿不到监听端口')
+      throw new TenonError('DB_START_FAILED', msg('error.db.noPort'))
     }
     this.port = address.port
     this.server = server
@@ -209,7 +209,7 @@ export class PgliteProvider implements DatabaseProvider {
    */
   async dump(file?: string): Promise<DbSnapshot> {
     if (this.db === null || this.state !== 'ready') {
-      throw new TenonError('DB_NOT_READY', '数据库没启动，不能打快照', { mode: this.mode })
+      throw new TenonError('DB_NOT_READY', msg('error.db.notReadyForSnapshot'), { mode: this.mode })
     }
     const target = file ?? join(this.snapshotsDir(), `${Date.now()}.tar.gz`)
     try {
@@ -218,11 +218,11 @@ export class PgliteProvider implements DatabaseProvider {
       await mkdir(dirname(target), { recursive: true })
       await writeFile(target, bytes)
       const info = await stat(target)
-      this.log(`[tenon] 应用库快照 ${target}（${(info.size / 1024 / 1024).toFixed(1)}MB）`)
+      this.log(`[tenon] app database snapshot ${target} (${(info.size / 1024 / 1024).toFixed(1)}MB)`)
       return { mode: this.mode, file: target, bytes: info.size, createdAt: Date.now() }
     } catch (err) {
       if (err instanceof TenonError) throw err
-      throw new TenonError('DB_DUMP_FAILED', `快照失败：${messageOf(err)}`, {
+      throw new TenonError('DB_DUMP_FAILED', msg('error.db.dumpFailed', { detail: messageOf(err) }), {
         mode: this.mode,
         dataDir: this.options.dataDir,
       })
@@ -240,7 +240,7 @@ export class PgliteProvider implements DatabaseProvider {
       await this.start()
     } catch (err) {
       if (err instanceof TenonError) throw err
-      throw new TenonError('DB_RESTORE_FAILED', `还原快照失败：${messageOf(err)}`, {
+      throw new TenonError('DB_RESTORE_FAILED', msg('error.db.restoreFailed', { detail: messageOf(err) }), {
         mode: this.mode,
         file: snapshot.file,
       })

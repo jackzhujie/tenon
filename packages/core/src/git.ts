@@ -13,7 +13,7 @@ import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import git from 'isomorphic-git'
 import type { GitCommit, GitFileChange } from '@tenon/protocol'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 const AUTHOR = { name: 'Tenon', email: 'tenon@localhost' } as const
 
@@ -177,7 +177,7 @@ export async function commitAll(
   trailers?: CommitTrailers,
 ): Promise<CommitResult | undefined> {
   if (!(await isRepo(dir))) {
-    throw new TenonError('GIT_NOT_INITIALIZED', `不是 git 仓库：${dir}`)
+    throw new TenonError('GIT_NOT_INITIALIZED', msg('error.git.notRepo', { dir }))
   }
 
   const { upserts, deletes } = await workingTreeChanges(dir)
@@ -264,7 +264,7 @@ async function treeDiff(
       },
     })
   } catch (err) {
-    throw new TenonError('GIT_DIFF_FAILED', `无法比对 ${from}..${to}`, {
+    throw new TenonError('GIT_DIFF_FAILED', msg('error.git.diffFailed', { from, to }), {
       reason: err instanceof Error ? err.message : String(err),
     })
   }
@@ -459,7 +459,7 @@ export async function showCommit(
      */
     ;({ commit } = await git.readCommit({ fs, dir, oid }))
   } catch {
-    throw new TenonError('GIT_DIFF_FAILED', `找不到 commit ${sha}`)
+    throw new TenonError('GIT_DIFF_FAILED', msg('error.git.commitMissing', { sha }))
   }
   const parent = commit.parent[0]
   const entries =
@@ -553,7 +553,7 @@ export interface WorktreeDiff extends DiffResult {
 
 export async function worktreeDiff(dir: string): Promise<WorktreeDiff> {
   if (!(await isRepo(dir))) {
-    throw new TenonError('GIT_NOT_INITIALIZED', `不是 git 仓库：${dir}`)
+    throw new TenonError('GIT_NOT_INITIALIZED', msg('error.git.notRepo', { dir }))
   }
   const base = await headSha(dir)
   const { upserts, deletes } = await workingTreeChanges(dir)
@@ -645,12 +645,12 @@ export async function planRevert(dir: string, sha: string): Promise<RevertPlan> 
   const commits = await git.log({ fs, dir, depth: 200 })
   const target = commits.find((entry) => entry.oid.startsWith(sha) || entry.oid === sha)
   if (target === undefined) {
-    throw new TenonError('GIT_REVERT_FAILED', `找不到 commit ${sha}`)
+    throw new TenonError('GIT_REVERT_FAILED', msg('error.git.commitMissing', { sha }))
   }
   const parent = target.commit.parent[0]
   if (parent === undefined) {
     // 根提交的反向应用等于清空仓库，语义可疑；真需要就走「删应用」而不是回滚
-    throw new TenonError('NOT_IMPLEMENTED', '不支持回滚仓库的第一个提交（等于清空仓库）')
+    throw new TenonError('NOT_IMPLEMENTED', msg('error.git.revertRoot'))
   }
   const index = commits.findIndex((entry) => entry.oid === target.oid)
   return {
@@ -688,13 +688,17 @@ export async function revert(
   }
 
   const shortSha = plan.targetSha.slice(0, 7)
+  /*
+   * 提交信息用英文：它是 git 历史，会跟着仓库离开这台机器（见 STATUS §2「系统生成的文本」）。
+   * 正文那句"不改写历史"是给半年后翻 `git log` 的人看的，所以留在这儿而不是注释里。
+   */
   const result = await commitAll(
     dir,
-    `revert: 回滚 ${shortSha}\n\n本次提交反向应用了 ${shortSha} 的改动（Tenon 回滚不改写历史）。`,
+    `revert: undo ${shortSha}\n\nThis commit applies the reverse of ${shortSha} (Tenon reverts by adding, never by rewriting history).`,
     trailers,
   )
   if (result === undefined) {
-    throw new TenonError('GIT_REVERT_FAILED', `回滚 ${shortSha} 没有产生任何改动`)
+    throw new TenonError('GIT_REVERT_FAILED', msg('error.git.revertNoChange', { sha: shortSha }))
   }
   return result
 }
@@ -859,11 +863,11 @@ export async function mirrorTo(
 ): Promise<MirrorResult> {
   const branch = options.branch ?? 'main'
   if (!(await isRepo(dir))) {
-    throw new TenonError('GIT_NOT_INITIALIZED', `不是 git 仓库：${dir}`)
+    throw new TenonError('GIT_NOT_INITIALIZED', msg('error.git.notRepo', { dir }))
   }
   const head = await headSha(dir)
   if (head === undefined) {
-    throw new TenonError('RELEASE_NO_COMMITS', '这个应用还没有任何提交，没有可以发布的内容')
+    throw new TenonError('RELEASE_NO_COMMITS', msg('error.release.noCommits'))
   }
 
   await ensureBareRepo(targetDir, branch)
@@ -885,7 +889,7 @@ export async function mirrorTo(
     // `format: 'content'` 下类型只可能是这四种；出现别的说明读到的是内部表示
     // （deflated / wrapped），当一个裸字节搬过去会写坏目标库 —— 宁可报错
     if (read.type !== 'commit' && read.type !== 'tree' && read.type !== 'blob' && read.type !== 'tag') {
-      throw new TenonError('RELEASE_FAILED', `不认识的对象类型：${read.type}（${oid}）`)
+      throw new TenonError('RELEASE_FAILED', msg('error.release.unknownObject', { type: read.type, oid }))
     }
     await git.writeObject({
       fs,

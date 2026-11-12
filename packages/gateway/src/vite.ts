@@ -11,7 +11,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { scrubEnv } from '@tenon/core'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { nodeRunEnv, spawnLogged, type Launched } from './child.js'
 
 export type { ExitInfo, Launched } from './child.js'
@@ -32,7 +32,7 @@ export type Launcher = (spec: LaunchSpec) => Promise<Launched>
 function viteBinOf(repoDir: string): string {
   const bin = join(repoDir, 'node_modules', 'vite', 'bin', 'vite.js')
   if (!existsSync(bin)) {
-    throw new TenonError('PREVIEW_DEPS_FAILED', '找不到 vite：依赖没装完或装失败了', { bin })
+    throw new TenonError('PREVIEW_DEPS_FAILED', msg('error.deps.viteMissing'), { bin })
   }
   return bin
 }

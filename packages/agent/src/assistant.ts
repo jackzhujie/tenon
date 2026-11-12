@@ -21,7 +21,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { Conversation } from '@earendil-works/pi-durable'
 import type { TenonHome } from '@tenon/core'
 import { appPaths } from '@tenon/core'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import type { HarnessPool } from './harness-pool.js'
 import type { ResolvedModel } from './models.js'
 import { normalizeEntries, type RawEntry } from './normalize.js'
@@ -121,7 +121,7 @@ export function createAssistant(options: AssistantOptions): AssistantCapability 
   return {
     async complete({ appId, text }) {
       const question = text.trim()
-      if (question === '') throw new TenonError('VALIDATION_FAILED', '问题不能为空')
+      if (question === '') throw new TenonError('VALIDATION_FAILED', msg('error.assistant.questionEmpty'))
 
       const conversation = await conversationFor(appId)
       /*
@@ -140,10 +140,14 @@ export function createAssistant(options: AssistantOptions): AssistantCapability 
       if (settled.status !== 'done') {
         throw new TenonError(
           'AGENT_UNAVAILABLE',
-          `助手这一轮没有正常结束（${settled.status}）${answer === '' ? '' : `：${answer}`}`,
+          msg('error.assistant.notSettled', {
+            status: settled.status,
+            // 连标点一起决定：中文用破折号、英文也用破折号，两种语言都不别扭
+            detail: answer === '' ? '' : ` — ${answer}`,
+          }),
         )
       }
-      if (answer === '') throw new TenonError('AGENT_UNAVAILABLE', '助手跑完了但没有输出')
+      if (answer === '') throw new TenonError('AGENT_UNAVAILABLE', msg('error.assistant.noAnswer'))
       return answer
     },
 

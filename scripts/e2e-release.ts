@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { appPaths, gitops, resolveHome } from '../packages/core/src/index.js'
+import { setLocale } from '../packages/protocol/src/index.js'
 import { startServer } from '../packages/server/src/index.js'
 
 const exec = promisify(execFile)
@@ -98,6 +99,11 @@ const server = await startServer({
   token: TOKEN,
   env: { TENON_HOME: home, TENON_FAUX: '1' },
 })
+/*
+ * 断言里写的是中文（"类型检查 ✗"这种摘要原话）。服务端默认说英文，
+ * 这里钉成中文；英文那一侧由 `packages/server/test/locale.test.ts` 守。
+ */
+setLocale('zh')
 
 async function rpc<T>(method: string, input: unknown): Promise<T> {
   const response = await fetch(`${server.url}/rpc/${method}`, {

@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { appPaths, resolveHome } from '../packages/core/src/index.js'
+import { setLocale } from '../packages/protocol/src/index.js'
 import { startServer } from '../packages/server/src/index.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -66,6 +67,13 @@ const server = await startServer({
   preview: { installDeps: false },
   webDir: join(repo, 'apps', 'web', 'dist'),
 })
+/*
+ * 这个脚本点的是真界面，断言写的是中文按钮与确认文案。语言有两处：
+ * 服务端（错误消息）用 `setLocale`，界面用 `ui.locale` 设置 —— 两个都得钉住，
+ * 否则 Electron 的系统语言是 en-US，界面会是英文而断言在找"不能恢复"。
+ */
+setLocale('zh')
+server.core.settings.set({ 'ui.locale': 'zh' })
 
 interface Envelope<T> {
   ok: boolean

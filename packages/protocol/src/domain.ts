@@ -42,19 +42,11 @@ export const CheckId = z.enum(['typecheck', 'test', 'lint'])
 export type CheckId = z.infer<typeof CheckId>
 
 /**
- * 这些 id 怎么给人看。
+ * 这些 id 怎么给人看 —— 现在在文案表里（`messages/checks.ts` 的 `check.label.*`）。
  *
- * 放在协议里而不是各写一份：agent 的 `formatGateSummary`（写进发布记录
- * `releases.gate_summary`）与界面的逐项清单都要用。两边各写一遍的后果是
- * **记录里是「类型检查 ✓ · Lint ✓」而界面上那一行是 `lint ✓`** —— 同一个东西两个名字，
- * 而且加第三项时只会改到其中一边。
+ * 原先这里是中文常量 `CHECK_LABELS`，问题不是"写死了一种语言"，而是**它把措辞钉在了
+ * 契约层**：界面想改口就得改协议。现在 id 仍然是契约（这个枚举），措辞是可替换的。
  */
-export const CHECK_LABELS: Record<CheckId, string> = {
-  typecheck: '类型检查',
-  test: '测试',
-  lint: 'Lint',
-}
-
 export const CheckStatus = z.enum(['pass', 'fail', 'skip'])
 export type CheckStatus = z.infer<typeof CheckStatus>
 

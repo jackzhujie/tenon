@@ -11,7 +11,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 export interface TemplateManifest {
   readonly id: string
@@ -89,15 +89,15 @@ async function readManifestAt(root: string, id: string): Promise<TemplateManifes
   try {
     raw = await readFile(file, 'utf8')
   } catch {
-    throw new TenonError('TEMPLATE_UNKNOWN', `没有这个模板：${id}`, { templateId: id, file })
+    throw new TenonError('TEMPLATE_UNKNOWN', msg('error.template.unknown', { id }), { templateId: id, file })
   }
   const parsed: unknown = JSON.parse(raw)
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new TenonError('TEMPLATE_UNKNOWN', `模板清单不是对象：${file}`, { templateId: id })
+    throw new TenonError('TEMPLATE_UNKNOWN', msg('error.template.badManifest', { file }), { templateId: id })
   }
   const manifest = parsed as TemplateManifest
   if (manifest.id !== id) {
-    throw new TenonError('TEMPLATE_UNKNOWN', `模板目录名与清单 id 不一致：${id} ≠ ${manifest.id}`, {
+    throw new TenonError('TEMPLATE_UNKNOWN', msg('error.template.idMismatch', { dir: id, id: manifest.id }), {
       templateId: id,
       manifestId: manifest.id,
     })

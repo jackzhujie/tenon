@@ -6,7 +6,7 @@
  * 它就等于写在配置文件里，加密也就白做了。
  */
 import type { ReleaseRemote } from '@tenon/protocol'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
 import type { SecretBox } from '../secrets.js'
 
@@ -42,15 +42,15 @@ export function assertSafeRemoteUrl(raw: string): URL {
   try {
     parsed = new URL(raw)
   } catch {
-    throw new TenonError('VALIDATION_FAILED', `仓库地址不是合法 URL：${raw}`)
+    throw new TenonError('VALIDATION_FAILED', msg('error.remote.badUrl', { url: raw }))
   }
   if (parsed.protocol !== 'https:') {
-    throw new TenonError('VALIDATION_FAILED', '仓库地址必须以 https:// 开头（令牌不能走明文传输）')
+    throw new TenonError('VALIDATION_FAILED', msg('error.remote.notHttps'))
   }
   if (parsed.username !== '' || parsed.password !== '') {
     throw new TenonError(
       'VALIDATION_FAILED',
-      '仓库地址里不要带用户名或密码 —— 令牌请填在下一栏，那里会加密保存',
+      msg('error.secret.urlCredentials'),
     )
   }
   return parsed

@@ -16,7 +16,7 @@
  * 必然出现"预检说能发、点下去却被拦"，而门禁一旦开始说两套话，用户就会绕过它。
  */
 import type { App, GateOutcome, Release, ReleaseGateStatus, RemotePushOutcome } from '@tenon/protocol'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { appPaths, gitops, nextVersion, pushToRemote, type CoreServices, type PushToRemoteOptions } from '@tenon/core'
 import { checkLabel, formatGateSummary, runQualityGate } from '@tenon/agent'
 
@@ -74,22 +74,22 @@ async function releaseBlockers(core: CoreServices, app: App): Promise<{
   // 先判"在跑"：新应用第一轮生成中时 head 也常常是空的，那时候该说的是"等这一轮"，
   // 而不是"还没有提交"——后者会让人以为要自己手动做点什么
   if (app.status === 'running') {
-    return { blocked: { code: 'APP_BUSY', message: '正在生成中，等这一轮跑完再发布' }, headSha }
+    return { blocked: { code: 'APP_BUSY', message: msg('error.release.generating') }, headSha }
   }
   if (headSha === null) {
     return {
-      blocked: { code: 'RELEASE_NO_COMMITS', message: '这个应用还没有任何提交，没有可以发布的内容' },
+      blocked: { code: 'RELEASE_NO_COMMITS', message: msg('error.release.noCommits') },
       headSha: null,
     }
   }
 
   const dirty = await gitops.uncommittedChanges(paths.repoDir)
   if (dirty.length > 0) {
-    const shown = dirty.slice(0, 5).join('、')
+    const shown = dirty.slice(0, 5).join(msg('check.listSeparator')) + (dirty.length > 5 ? '…' : '')
     return {
       blocked: {
         code: 'GIT_DIRTY_WORKTREE',
-        message: `工作区还有 ${dirty.length} 个文件没提交（${shown}${dirty.length > 5 ? ' 等' : ''}），先让这一轮跑完再发布`,
+        message: msg('error.release.dirty', { count: dirty.length, files: shown }),
         details: { paths: dirty.slice(0, 50) },
       },
       headSha,
@@ -205,7 +205,7 @@ export async function publishRelease(options: PublishOptions): Promise<PublishRe
   if (inspection.stale) {
     // 检查的几十秒里 HEAD 又变了 —— 前端点发布时按钮是禁用的，正常不该发生；
     // 真发生了说明有别的写入方，这时候挑哪一份结果去打 tag 都是错的
-    throw new TenonError('APP_BUSY', '检查期间仓库又有新提交，等这一轮跑完再发布')
+    throw new TenonError('APP_BUSY', msg('error.release.busyDuringCheck'))
   }
 
   const { gate, commitSha: head } = inspection
@@ -214,8 +214,11 @@ export async function publishRelease(options: PublishOptions): Promise<PublishRe
     throw new TenonError(
       'RELEASE_CHECKS_FAILED',
       // summary 里不带检查名（界面有独立的列），拼消息时补上
-      `发布前检查没通过：${failed.map((check) => `${checkLabel(check.id)}${check.summary}`).join('；')}。` +
-        '修好再发；确认要发就显式选「仍然发布」。',
+      msg('error.release.checksFailed', {
+        failed: failed
+          .map((check) => msg('error.release.checkNotPassed', { label: checkLabel(check.id), summary: check.summary }))
+          .join(msg('check.listSeparator')),
+      }),
       { checks: gate.checks },
     )
   }
@@ -231,7 +234,8 @@ export async function publishRelease(options: PublishOptions): Promise<PublishRe
   const tag = await gitops.createReleaseTag(paths.repoDir, {
     tag: version,
     sha: head,
-    message: notes === '' ? `Tenon 发布 ${version}` : `Tenon 发布 ${version}\n\n${notes}`,
+    /* tag 说明进 git 历史（`git tag -n` 能看到），按"会离开这台机器"的规则用英文 */
+    message: notes === '' ? `Tenon release ${version}` : `Tenon release ${version}\n\n${notes}`,
     when: now,
   })
 
@@ -245,7 +249,7 @@ export async function publishRelease(options: PublishOptions): Promise<PublishRe
     // 推不出去就别留下"有 tag、没记录"的半成品
     await gitops.deleteTag(paths.repoDir, version)
     const reason = err instanceof Error ? err.message : String(err)
-    throw new TenonError('RELEASE_FAILED', `推送到备份库失败：${reason}`, { version, tag })
+    throw new TenonError('RELEASE_FAILED', msg('error.release.backupPushFailed', { detail: reason }), { version, tag })
   }
 
   // `pass` 包含"全部 skip"：那是"这个应用没有可检查的东西"，不是"偷偷发的"。

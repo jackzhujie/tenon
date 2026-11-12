@@ -342,7 +342,8 @@ describe('发布（release.publish）', () => {
 
     const error = await rpcError(server, 'release.publish', { appId })
     expect(error.code).toBe('RELEASE_CHECKS_FAILED')
-    expect(error.message).toContain('Lint没过')
+    // 三项检查的"退出码非零"现在共用一句话（原先 test 写"失败"、lint 写"没过"，同一件事两种措辞）
+    expect(error.message).toContain('Lint失败')
 
     const checks = error.details?.checks ?? []
     expect(checks.map((check) => check.id)).toEqual(['typecheck', 'test', 'lint'])

@@ -13,6 +13,7 @@
 import fs from 'node:fs'
 import git from 'isomorphic-git'
 import http from 'isomorphic-git/http/node'
+import { msg } from '@tenon/protocol'
 
 export type PushFailureCode =
   | 'AUTH'
@@ -56,38 +57,30 @@ export function classifyPushError(error: unknown): PushFailure {
   if (['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET', 'EHOSTUNREACH'].includes(code)) {
     return {
       code: 'NETWORK',
-      message: `连不上远端仓库（${code}）`,
-      hint: '检查地址是否写对、本机网络或代理是否正常。这一步还没轮到权限问题。',
+      message: msg('error.push.network', { code }),
+      hint: msg('error.push.networkHint'),
     }
   }
 
   if (status === 401) {
     return {
       code: 'AUTH',
-      message: '远端不认这个令牌（401）',
-      hint:
-        'GitHub：Settings → Developer settings → Personal access tokens → 新建 Fine-grained token，' +
-        '权限勾 Contents: Read and write。令牌只显示一次，复制时别带空格或换行。',
+      message: msg('error.push.auth'),
+      hint: msg('error.push.authHint'),
     }
   }
   if (status === 403) {
     return {
       code: 'FORBIDDEN',
-      message: '令牌有效，但没有这个仓库的写权限（403）',
-      hint:
-        'Fine-grained 令牌要**单独勾选**这一个仓库，且 Repository permissions → ' +
-        '**Contents 必须是 Read and write**。只给 Read 时读得到、推不了，报的就是这个 403 —— ' +
-        '很容易误判成"仓库勾错了"，因为仓库列表里确实有它。' +
-        '组织仓库还需要该组织的同意（Settings → Personal access tokens → Pending requests）。',
+      message: msg('error.push.forbidden'),
+      hint: msg('error.push.forbiddenHint'),
     }
   }
   if (status === 404) {
     return {
       code: 'NOT_FOUND',
-      message: '仓库找不到（404）',
-      hint:
-        '两种可能，别混：① 地址拼错或仓库还没建；② 仓库是私有的、而这个令牌看不到它 —— ' +
-        'GitHub 对"无权访问"也回 404，不告诉你"存在但你没权限"。',
+      message: msg('error.push.notFound'),
+      hint: msg('error.push.notFoundHint'),
     }
   }
 
@@ -95,17 +88,15 @@ export function classifyPushError(error: unknown): PushFailure {
   if (status === 422 || /non-fast-forward|rejected|failed to update ref/i.test(message + textOf(data?.response))) {
     return {
       code: 'NON_FAST_FORWARD',
-      message: '远端有本地没有的提交，推送被拒（不会是快进）',
-      hint:
-        '远端这个分支被别处改过（网页上直接编辑、或另一台机器推过）。先把远端的提交合过来再发；' +
-        'Tenon 默认不强推 —— 强推会覆盖别人的提交，且不可撤销。',
+      message: msg('error.push.nonFastForward'),
+      hint: msg('error.push.nonFastForwardHint'),
     }
   }
 
   return {
     code: 'UNKNOWN',
-    message: `推送失败：${message.slice(0, 300)}`,
-    hint: '把这条消息连同地址一起看一遍；如果地址里带了账号密码，先改成只填令牌。',
+    message: msg('error.push.unknown', { detail: message.slice(0, 300) }),
+    hint: msg('error.push.unknownHint'),
   }
 }
 
@@ -159,8 +150,8 @@ export async function pushToRemote(options: PushToRemoteOptions): Promise<PushRe
       ok: false,
       failure: {
         code: 'AUTH',
-        message: '这个应用还没有配令牌',
-        hint: '远端写操作必须带令牌。在发布对话框里填一次，会加密保存。',
+        message: msg('error.push.noToken'),
+        hint: msg('error.push.noTokenHint'),
       },
       refs: 0,
     }

@@ -4,6 +4,8 @@
  * 依赖方向（DESIGN §3.2）：`protocol` ← 全部。本包不得 import 任何其他 `@tenon/*`。
  */
 export * from './errors.js'
+export * from './locale.js'
+export * from './messages/index.js'
 export * from './domain.js'
 export * from './transport.js'
 export * from './rpc.js'

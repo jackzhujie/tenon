@@ -8,6 +8,12 @@ export const SETTING_KEYS = {
   telemetryEnabled: 'telemetry.enabled',
   lastOpenedAppId: 'ui.lastOpenedAppId',
   theme: 'ui.theme',
+  /**
+   * 界面语言。存在这里而不是只存浏览器：**服务端也要说同一种话** ——
+   * 错误消息、门禁摘要都是它生成的（见 `packages/protocol/src/locale.ts`）。
+   * 值的合法性由 `isLocale` 判，认不出来一律英文。
+   */
+  uiLocale: 'ui.locale',
 } as const
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS]

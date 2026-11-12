@@ -26,7 +26,7 @@ import {
   type PluginRoot,
 } from '@tenon/component-host'
 import { appPaths, type ComponentStore, type TenonHome } from '@tenon/core'
-import { TenonError, type ComponentProblem } from '@tenon/protocol'
+import { msg, TenonError, type ComponentProblem } from '@tenon/protocol'
 import { createAssistant, type AgentRuntime, type AssistantCapability } from '@tenon/agent'
 
 /**
@@ -220,7 +220,7 @@ export class ComponentRuntime {
             complete: async () => {
               throw new TenonError(
                 'AGENT_NO_MODEL',
-                '还没有可用的模型。在设置里添加提供商并填入 API Key；开发调试可设 TENON_FAUX=1。',
+                msg('error.model.noneConfigured'),
               )
             },
             close: () => {},

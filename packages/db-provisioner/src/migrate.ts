@@ -22,7 +22,7 @@
  * 表/列/外键的内省在 `introspect.ts` —— 快照（`rows-snapshot.ts`）用的是同一份，
  * 避免"迁移认得生成列、快照不认得"这种只修一半的偏差。
  */
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { Client } from 'pg'
 import {
   countRows,
@@ -96,9 +96,11 @@ async function connect(
   } catch (error) {
     throw new TenonError(
       'DB_MIGRATE_FAILED',
-      `连不上 ${provider.mode} 档（${redact(provider.connectionString())}）：${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      msg('error.db.connectFailed', {
+        mode: provider.mode,
+        url: redact(provider.connectionString()),
+        detail: error instanceof Error ? error.message : String(error),
+      }),
     )
   }
   signal?.addEventListener('abort', () => {
@@ -124,7 +126,7 @@ async function copyTable(
 ): Promise<{ written: number; read: number }> {
   const writable = columns.filter((column) => !column.generated)
   if (writable.length === 0) {
-    throw new TenonError('DB_MIGRATE_FAILED', `${refId(ref)} 没有可写的列（全是生成列？）`)
+    throw new TenonError('DB_MIGRATE_FAILED', msg('error.db.noWritableColumns', { table: refId(ref) }))
   }
 
   const columnList = writable.map((column) => quoteIdent(column.name)).join(', ')
@@ -221,7 +223,7 @@ export async function migrateDatabase(options: MigrateOptions): Promise<MigrateR
     const allTables = await listTables(source, schemas)
     const tables = allTables.filter((table) => !SKIP_TABLE.test(table.name))
     if (tables.length === 0) {
-      throw new TenonError('DB_MIGRATE_FAILED', `源库里没有任何用户表（schemas: ${schemas.join(', ')}）`)
+      throw new TenonError('DB_MIGRATE_FAILED', msg('error.db.noUserTables', { schemas: schemas.join(', ') }))
     }
 
     // 目标库必须已经跑过 migrations：结构来自代码，不来自这次拷贝
@@ -232,8 +234,7 @@ export async function migrateDatabase(options: MigrateOptions): Promise<MigrateR
     if (missing.length > 0) {
       throw new TenonError(
         'DB_MIGRATE_FAILED',
-        `目标库里缺少这些表：${missing.join(', ')}。` +
-          '跨档迁移只搬数据不搬结构 —— 先让应用在目标档启动一次（迁移会自动跑），再迁移数据。',
+        msg('error.db.missingTables', { tables: missing.join(', ') }),
       )
     }
 
@@ -274,8 +275,13 @@ export async function migrateDatabase(options: MigrateOptions): Promise<MigrateR
       if (actual !== expected) {
         throw new TenonError(
           'DB_MIGRATE_FAILED',
-          `${refId(table)} 行数对不上：迁前 ${before.get(table.id) ?? 0} + 实写 ${written} = ${expected}，` +
-            `实际 ${actual}。多半是有别的进程在同时写这个库（迁移期间请停掉预览）。`,
+          msg('error.db.rowCountMismatch', {
+            table: refId(table),
+            before: before.get(table.id) ?? 0,
+            written,
+            expected,
+            actual,
+          }),
         )
       }
     }

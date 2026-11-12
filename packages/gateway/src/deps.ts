@@ -11,7 +11,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { invokePnpm, resolvePnpm, withNodeShim } from '@tenon/core'
 import { nodeRunEnv } from './child.js'
 
@@ -72,10 +72,10 @@ export async function ensureDeps(options: EnsureDepsOptions): Promise<DepsResult
   const pnpm = resolvePnpm(env)
 
   if (existsSync(join(options.repoDir, READY_MARKER))) {
-    return { installed: false, command: `${pnpm.command} install (跳过)`, durationMs: 0 }
+    return { installed: false, command: `${pnpm.command} install (skipped)`, durationMs: 0 }
   }
   if (!existsSync(join(options.repoDir, 'package.json'))) {
-    throw new TenonError('PREVIEW_DEPS_FAILED', '这个工作区没有 package.json，没法装依赖', {
+    throw new TenonError('PREVIEW_DEPS_FAILED', msg('error.deps.noPackage'), {
       repoDir: options.repoDir,
     })
   }
@@ -141,21 +141,24 @@ export async function ensureDeps(options: EnsureDepsOptions): Promise<DepsResult
    * 抛出去会变成一条"依赖安装失败"的报错，而用户做的是删除 —— 那不是失败。
    */
   if (cancelled || options.signal?.aborted === true) {
-    return { installed: false, command: `${pnpm.command} install (已取消)`, durationMs }
+    return { installed: false, command: `${pnpm.command} install (cancelled)`, durationMs }
   }
   if (code === null) {
     // 进程压根没起来（找不到 pnpm / 没有执行权限）。这种情况必须把原因写在 message 里：
     // 只说"退出码 null"等于什么都没说。
     throw new TenonError(
       'PREVIEW_DEPS_FAILED',
-      `起不来依赖安装程序（${pnpm.command}）：${lines.at(-1) ?? '未知原因'}`,
+      msg('error.deps.spawnFailed', {
+        command: pnpm.command,
+        detail: lines.at(-1) ?? msg('error.preview.unknownReason'),
+      }),
       { repoDir: options.repoDir, pnpm: pnpm.command, output: tail(lines) },
     )
   }
   if (code !== 0) {
     throw new TenonError(
       'PREVIEW_DEPS_FAILED',
-      `依赖安装失败（${pnpm.command} install 退出码 ${code ?? 'null'}）`,
+      msg('error.deps.installFailed', { command: pnpm.command, code: code ?? 'null' }),
       { repoDir: options.repoDir, output: tail(lines) },
     )
   }

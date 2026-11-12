@@ -28,8 +28,8 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { CHECK_LABELS } from '@tenon/protocol'
-import type { CheckOutcome, CheckStatus, GateOutcome } from '@tenon/protocol'
+import { msg } from '@tenon/protocol'
+import type { CheckId, CheckOutcome, CheckStatus, GateOutcome, ServerMessageKey } from '@tenon/protocol'
 import { formatTscReport, invokePnpm, parseTscOutput, resolvePnpm, scrubEnv, withNodeShim } from '@tenon/core'
 
 const MAX_TSC_BYTES = 128 * 1024
@@ -219,7 +219,7 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
       status: 'skip',
       reason: 'no-config',
       sections: [],
-      summary: '跳过：没有 tsconfig.json',
+      summary: msg('check.skip.noTsconfig'),
       elapsedMs: 0,
       errorCount: 0,
     }
@@ -231,7 +231,7 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
       status: 'fail',
       reason: 'no-typescript',
       sections: [],
-      summary: '没跑成：没有装 typescript（依赖还没装好）',
+      summary: msg('check.fail.noTypescript'),
       elapsedMs: 0,
       errorCount: 0,
     }
@@ -270,19 +270,25 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
     if (!report.ok) {
       failed.push(
         parsed.diagnostics.length > 0
-          ? `${config} ${parsed.diagnostics.length} 个错误`
-          : `${config} 没跑成（${run.timedOut ? '超时' : `退出码 ${run.code ?? '起不来'}`}）`,
+          ? msg('check.fail.typecheckErrors', { config, count: parsed.diagnostics.length })
+          : msg('check.fail.typecheckNotRun', {
+              config,
+              reason: run.timedOut
+                ? msg('check.reason.timeout')
+                : msg('check.reason.exitCode', { code: run.code ?? msg('check.reason.noStart') }),
+            }),
       )
     }
     sections.push(report.text)
   }
 
-  const where = configs.length === 1 ? (configs[0] as string) : `${configs.length} 个 tsconfig`
+  const where =
+    configs.length === 1 ? (configs[0] as string) : msg('check.where.configs', { count: configs.length })
   if (failed.length === 0) {
     return {
       status: 'pass',
       sections,
-      summary: `通过（${where}，${seconds(elapsedMs)}）`,
+      summary: msg('check.pass.typecheck', { where, elapsed: seconds(elapsedMs) }),
       elapsedMs,
       errorCount: 0,
     }
@@ -290,7 +296,7 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
   return {
     status: 'fail',
     sections,
-    summary: `没过：${failed.join('、')}`,
+    summary: msg('check.fail.typecheck', { failed: failed.join(msg('check.listSeparator')) }),
     elapsedMs,
     errorCount,
   }
@@ -438,7 +444,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'skip',
-      summary: '跳过：没有 package.json',
+      summary: msg('check.skip.noPackage'),
       detail: null,
       elapsedMs: 0,
     }
@@ -448,7 +454,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'skip',
-      summary: '跳过：package.json 里没有 scripts.test',
+      summary: msg('check.skip.noScript', { name: 'test' }),
       detail: null,
       elapsedMs: 0,
     }
@@ -459,8 +465,8 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'fail',
-      summary: '没跑成：依赖还没装（没有 node_modules）',
-      detail: '让用户先把预览打开一次（会装依赖），然后再发布。',
+      summary: msg('check.fail.depsMissing'),
+      detail: msg('check.hint.openPreviewFirst'),
       elapsedMs: Date.now() - started,
     }
   }
@@ -478,7 +484,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'fail',
-      summary: `超时（超过 ${Math.round(timeoutMs / 1000)}s，已终止）`,
+      summary: msg('check.fail.timeout', { seconds: Math.round(timeoutMs / 1000) }),
       detail: tail === '' ? null : tail,
       elapsedMs,
     }
@@ -487,7 +493,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'fail',
-      summary: '没跑成：test 脚本起不来',
+      summary: msg('check.fail.notStarted', { name: 'test' }),
       detail: tail === '' ? null : tail,
       elapsedMs,
     }
@@ -496,7 +502,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'fail',
-      summary: `失败（pnpm run test 退出码 ${code}）`,
+      summary: msg('check.fail.exitCode', { name: 'test', code }),
       detail: tail === '' ? null : tail,
       elapsedMs,
     }
@@ -504,7 +510,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
   return {
     id: 'test',
     status: 'pass',
-    summary: `通过（pnpm run test，${seconds(elapsedMs)}）`,
+    summary: msg('check.pass.script', { name: 'test', elapsed: seconds(elapsedMs) }),
     detail: null,
     elapsedMs,
   }
@@ -548,14 +554,14 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
   const started = Date.now()
   const pkg = await readPackageJson(repoDir)
   if (pkg === undefined) {
-    return { id: 'lint', status: 'skip', summary: '跳过：没有 package.json', detail: null, elapsedMs: 0 }
+    return { id: 'lint', status: 'skip', summary: msg('check.skip.noPackage'), detail: null, elapsedMs: 0 }
   }
   const script = pkg.scripts?.['lint']
   if (typeof script !== 'string' || script.trim() === '') {
     return {
       id: 'lint',
       status: 'skip',
-      summary: '跳过：package.json 里没有 scripts.lint',
+      summary: msg('check.skip.noScript', { name: 'lint' }),
       detail: null,
       elapsedMs: 0,
     }
@@ -566,8 +572,8 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
     return {
       id: 'lint',
       status: 'fail',
-      summary: '没跑成：依赖还没装（没有 node_modules）',
-      detail: '让用户先把预览打开一次（会装依赖），然后再发布。',
+      summary: msg('check.fail.depsMissing'),
+      detail: msg('check.hint.openPreviewFirst'),
       elapsedMs: Date.now() - started,
     }
   }
@@ -580,19 +586,19 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
     return {
       id: 'lint',
       status: 'fail',
-      summary: `超时（超过 ${Math.round(timeoutMs / 1000)}s，已终止）`,
+      summary: msg('check.fail.timeout', { seconds: Math.round(timeoutMs / 1000) }),
       detail: excerpt,
       elapsedMs,
     }
   }
   if (code === null) {
-    return { id: 'lint', status: 'fail', summary: '没跑成：lint 脚本起不来', detail: excerpt, elapsedMs }
+    return { id: 'lint', status: 'fail', summary: msg('check.fail.notStarted', { name: 'lint' }), detail: excerpt, elapsedMs }
   }
   if (code !== 0 && looksLikeMissingCommand(repoDir, script, output)) {
     return {
       id: 'lint',
       status: 'fail',
-      summary: '没跑成：lint 脚本里的命令没装（依赖不完整）',
+      summary: msg('check.fail.commandMissing', { name: 'lint' }),
       detail: excerpt,
       elapsedMs,
     }
@@ -601,7 +607,7 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
     return {
       id: 'lint',
       status: 'fail',
-      summary: `没过（pnpm run lint 退出码 ${code}）`,
+      summary: msg('check.fail.exitCode', { name: 'lint', code }),
       detail: excerpt,
       elapsedMs,
     }
@@ -609,7 +615,7 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
   return {
     id: 'lint',
     status: 'pass',
-    summary: `通过（pnpm run lint，${seconds(elapsedMs)}）`,
+    summary: msg('check.pass.script', { name: 'lint', elapsed: seconds(elapsedMs) }),
     detail: null,
     elapsedMs,
   }
@@ -646,8 +652,19 @@ export async function runQualityGate(repoDir: string, options: GateOptions = {})
 }
 
 const GLYPH: Record<CheckStatus, string> = { pass: '✓', fail: '✗', skip: '⏭' }
-/* 与界面共用一份（`protocol` 的 `CHECK_LABELS`）：否则发布记录里是中文、界面上是 `lint` */
-const LABEL: Record<string, string> = { ...CHECK_LABELS }
+
+/**
+ * 检查项 id → 文案键。
+ *
+ * 名字只在这里写一次：发布记录（`gate_summary`）与界面上的那一列都用它。
+ * 两边各写一遍的后果很具体 —— 记录里是「类型检查 ✓」而界面上是 `lint ✓`，
+ * 同一个东西两个名字，加第三项时还只会改到其中一边。
+ */
+const LABEL_KEY: Record<CheckId, ServerMessageKey> = {
+  typecheck: 'check.label.typecheck',
+  test: 'check.label.test',
+  lint: 'check.label.lint',
+}
 
 /**
  * 检查的名字。
@@ -657,10 +674,16 @@ const LABEL: Record<string, string> = { ...CHECK_LABELS }
  * 两边各写一遍就会变成"类型检查类型检查失败"。
  */
 export function checkLabel(id: string): string {
-  return LABEL[id] ?? id
+  const key = LABEL_KEY[id as CheckId]
+  return key === undefined ? id : msg(key)
 }
 
-/** 一行摘要，写进发布记录（`releases.gate_summary`）与界面上那一小行 */
+/**
+ * 一行摘要，写进发布记录（`releases.gate_summary`）与界面上那一小行。
+ *
+ * 注意它是**写下那一刻的语言**：历史不该因为后来切了界面语言而变形，
+ * 所以这里用当前语言生成一次、之后原样读出来（`msgIn` 是给"重渲染旧记录"留的口子）。
+ */
 export function formatGateSummary(gate: GateOutcome): string {
-  return gate.checks.map((check) => `${LABEL[check.id] ?? check.id} ${GLYPH[check.status]}`).join(' · ')
+  return gate.checks.map((check) => `${checkLabel(check.id)} ${GLYPH[check.status]}`).join(' · ')
 }

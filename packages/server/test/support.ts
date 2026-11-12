@@ -9,6 +9,7 @@ import type { PageDriverProvider } from '@tenon/agent'
 import type { PluginRoot } from '@tenon/component-host'
 import type { PreviewManagerOptions } from '@tenon/gateway'
 import type { SseEvent } from '@tenon/protocol'
+import { setLocale, type Locale } from '@tenon/protocol'
 import { startServer, type RunningServer } from '../src/index.js'
 
 export const TEST_TOKEN = 'test-token'
@@ -22,9 +23,11 @@ export interface BootOptions {
   pageDriver?: PageDriverProvider
   /** 组件来源（不传就是测试机上真实的 `plugins/bundled`，通常为空） */
   pluginRoots?: readonly PluginRoot[]
+  /** 这个服务实例说什么话。不传 = 中文（见 boot 末尾） */
+  locale?: Locale
 }
 
-export function boot(dir: string, options: BootOptions = {}): Promise<RunningServer> {
+export async function boot(dir: string, options: BootOptions = {}): Promise<RunningServer> {
   /*
    * 依赖安装**默认关掉**：它会联网、还会在仓库里生成 `pnpm-lock.yaml` ——
    * 后者会让"一轮一 commit""工作区是干净的"这类断言随安装时机飘。
@@ -34,7 +37,7 @@ export function boot(dir: string, options: BootOptions = {}): Promise<RunningSer
     installDeps: options.preview?.depsInstaller !== undefined,
     ...(options.preview ?? {}),
   }
-  return startServer({
+  const server = await startServer({
     port: 0,
     token: TEST_TOKEN,
     env: { TENON_HOME: dir, TENON_FAUX: '1', ...(options.env ?? {}) },
@@ -43,6 +46,13 @@ export function boot(dir: string, options: BootOptions = {}): Promise<RunningSer
     ...(options.pageDriver === undefined ? {} : { pageDriver: options.pageDriver }),
     ...(options.pluginRoots === undefined ? {} : { pluginRoots: options.pluginRoots }),
   })
+  /*
+   * 测试里默认说中文：断言写的是**产品原本的措辞**（"没跑成"和"没过"是两件处置方式
+   * 相反的事），换成英文去断言等于把每条文案再翻译一遍，翻错了测试还绿。
+   * 要验"默认英文 / 切语言"的用例显式传 `locale: 'en'`。
+   */
+  setLocale(options.locale ?? 'zh')
+  return server
 }
 
 export async function rpc<T>(

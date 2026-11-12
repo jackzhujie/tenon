@@ -19,7 +19,7 @@
  */
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { renderTemplate, type TemplateVars } from './render.js'
 import { loadTemplate } from './registry.js'
 
@@ -68,13 +68,13 @@ async function readJson(path: string): Promise<Json> {
   try {
     parsed = JSON.parse(raw)
   } catch (error) {
-    throw new TenonError('FEATURE_BAD_JSON', `${path} 不是合法 JSON，没法往里合并字段`, {
+    throw new TenonError('FEATURE_BAD_JSON', msg('error.feature.badJson', { file: path }), {
       file: path,
       reason: error instanceof Error ? error.message : String(error),
     })
   }
   if (!isRecord(parsed)) {
-    throw new TenonError('FEATURE_BAD_JSON', `${path} 的顶层不是对象`, { file: path })
+    throw new TenonError('FEATURE_BAD_JSON', msg('error.feature.notObject', { file: path }), { file: path })
   }
   return parsed
 }
@@ -175,7 +175,7 @@ export async function applyApiFeature(input: ApplyApiFeatureInput): Promise<Appl
   const env = input.env ?? process.env
   const pkgPath = join(input.repoDir, 'package.json')
   if (!(await exists(pkgPath))) {
-    throw new TenonError('FEATURE_NO_PACKAGE', '这个工作区没有 package.json，加不了后端', {
+    throw new TenonError('FEATURE_NO_PACKAGE', msg('error.feature.noBackend'), {
       repoDir: input.repoDir,
     })
   }
@@ -438,7 +438,7 @@ export async function applyAuthFeature(input: ApplyAuthFeatureInput): Promise<Ap
   const env = input.env ?? process.env
   const pkgPath = join(input.repoDir, 'package.json')
   if (!(await exists(pkgPath))) {
-    throw new TenonError('FEATURE_NO_PACKAGE', '这个工作区没有 package.json，加不了登录', {
+    throw new TenonError('FEATURE_NO_PACKAGE', msg('error.feature.noAuth'), {
       repoDir: input.repoDir,
     })
   }

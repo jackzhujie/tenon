@@ -9,7 +9,7 @@
  * 这里只读不写：任何一个函数都不该改变数据库状态。
  */
 import type { Client } from 'pg'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 /** 永远不碰的 schema（系统自己的） */
 export const SYSTEM_SCHEMAS = new Set(['pg_catalog', 'information_schema', 'pg_toast'])
@@ -146,11 +146,7 @@ export function orderTables(
 
   const stuck = tables.filter((table) => !ordered.includes(table.id)).map((t) => t.id)
   if (stuck.length > 0) {
-    throw new TenonError(
-      'DB_MIGRATE_FAILED',
-      `表之间有循环外键，无法确定插入顺序：${stuck.join(', ')}。` +
-        '请先把其中一条外键改成可空，迁完数据再改回来。',
-    )
+    throw new TenonError('DB_MIGRATE_FAILED', msg('error.db.cyclicFk', { tables: stuck.join(', ') }))
   }
 
   return ordered.map((id) => byId.get(id) as TableRef)

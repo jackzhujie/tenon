@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { appPaths, gitops } from '../packages/core/src/index.js'
+import { setLocale } from '../packages/protocol/src/index.js'
 import { startServer } from '../packages/server/src/index.js'
 
 const run = promisify(execFile)
@@ -71,6 +72,8 @@ const server = await startServer({
   token: TOKEN,
   env: { TENON_HOME: home, TENON_FAUX: '1' },
 })
+// 错令牌那条断言看的是"指路文案"（中文原话）；服务端默认说英文，这里钉成中文
+setLocale('zh')
 
 async function rpc<T>(method: string, input: unknown): Promise<T> {
   const response = await fetch(`${server.url}/rpc/${method}`, {

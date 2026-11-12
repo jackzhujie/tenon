@@ -14,7 +14,7 @@ import { createModels, createProvider } from '@earendil-works/pi-ai/models'
 import * as completions from '@earendil-works/pi-ai/api/openai-completions'
 import type { FauxResponseStep } from '@earendil-works/pi-ai/providers/faux'
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai/providers/faux'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import type { CoreServices } from '@tenon/core'
 import { SETTING_KEYS } from '@tenon/core'
 import { roleOfPrompt, type RoleId } from './roles.js'
@@ -189,11 +189,11 @@ function buildOpenAICompatible(
 ): ResolvedModel {
   const profile = core.providers.find(profileId)
   if (profile === undefined) {
-    throw new TenonError('AGENT_NO_MODEL', `选中的提供商已不存在：${profileId}`, { profileId })
+    throw new TenonError('AGENT_NO_MODEL', msg('error.model.providerGone', { id: profileId }), { profileId })
   }
   const apiKey = core.providers.revealApiKey(profileId)
   if (apiKey === undefined) {
-    throw new TenonError('AGENT_NO_MODEL', `提供商「${profile.label}」没有配置 API Key`, { profileId })
+    throw new TenonError('AGENT_NO_MODEL', msg('error.model.noApiKey', { label: profile.label }), { profileId })
   }
   const baseUrl = profile.baseUrl ?? 'https://api.openai.com/v1'
   const params = readParams(profile.paramsJson)
@@ -233,7 +233,7 @@ function buildOpenAICompatible(
         name: `${profile.label} API key`,
         resolve: async () => ({
           auth: { apiKey },
-          source: 'Tenon 设置',
+          source: 'Tenon settings',
         }),
       },
     },
@@ -293,7 +293,7 @@ export function resolveModel(core: CoreServices, options: ResolveModelOptions = 
   if (plan === undefined) {
     throw new TenonError(
       'AGENT_NO_MODEL',
-      '还没有可用的模型。请在设置里添加提供商并填入 API Key；开发调试可设 TENON_FAUX=1 用假模型。',
+      msg('error.model.noneConfigured'),
     )
   }
   if (plan.mode === 'faux') return buildFaux()

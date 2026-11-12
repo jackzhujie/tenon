@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { setLocale } from '@tenon/protocol/locale'
 import { App } from './app/App.js'
 import { cacheLocale, detectLocale, I18nProvider, isLocale, readCachedLocale, type Locale } from './lib/i18n.js'
 import { rpc } from './lib/rpc.js'
@@ -32,6 +33,11 @@ async function resolveLocale(): Promise<Locale> {
 async function boot(): Promise<void> {
   const initial = await resolveLocale()
   cacheLocale(initial)
+  /*
+   * 先把语言写进协议层，**再 render**：`lib/rpc.ts` 的网络错误是模块级代码，
+   * 它读的是同一个值。等 Provider 的 effect 再写，第一屏里发生的错误会用默认英文。
+   */
+  setLocale(initial)
 
   createRoot(container!).render(
     <StrictMode>

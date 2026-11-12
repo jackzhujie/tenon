@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile as readFileRaw, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import type { FileNode } from '@tenon/protocol'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 const IGNORED = new Set(['.git', 'node_modules', 'dist', '.tenon', 'pgdata', 'exports'])
 const MAX_READ_BYTES = 2_000_000
@@ -12,7 +12,7 @@ function safeJoin(root: string, relative: string): string {
   const absolute = resolve(root, relative)
   const rootWithSep = root.endsWith(sep) ? root : `${root}${sep}`
   if (absolute !== root && !absolute.startsWith(rootWithSep)) {
-    throw new TenonError('VALIDATION_FAILED', `路径越界：${relative}`, { path: relative })
+    throw new TenonError('VALIDATION_FAILED', msg('error.file.outside', { path: relative }), { path: relative })
   }
   return absolute
 }
@@ -50,12 +50,14 @@ export async function readWorkspaceFile(root: string, relative: string): Promise
   const absolute = safeJoin(root, relative)
   const info = await stat(absolute).catch(() => undefined)
   if (info === undefined || !info.isFile()) {
-    throw new TenonError('VALIDATION_FAILED', `文件不存在：${relative}`, { path: relative })
+    throw new TenonError('VALIDATION_FAILED', msg('error.file.notFound', { path: relative }), { path: relative })
   }
   if (info.size > MAX_READ_BYTES) {
-    throw new TenonError('VALIDATION_FAILED', `文件过大（${info.size} 字节），M1 不支持在线打开`, {
-      path: relative,
-    })
+    throw new TenonError(
+      'VALIDATION_FAILED',
+      msg('error.file.tooLarge', { size: info.size }),
+      { path: relative },
+    )
   }
   const buffer = await readFileRaw(absolute)
   return {

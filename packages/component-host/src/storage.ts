@@ -14,7 +14,7 @@
  * 后端是一个很窄的接口（`StorageBackend`），所以这里可以纯单测，也方便换实现
  * （现在是产品库的 sqlite；将来多租户可能换成远端）。
  */
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 /** 组件能声明的存储权限（与 `manifest.ts` 的白名单一致） */
 export const STORAGE_READ_PERMISSION = 'db:read'
@@ -63,7 +63,7 @@ export interface CreateStorageOptions {
 function denied(componentId: string, action: string): TenonError {
   return new TenonError(
     'COMPONENT_PERMISSION_DENIED',
-    `${componentId} 没有「${action}」的权限`,
+    msg('error.component.permissionDenied', { id: componentId, action }),
     {
       hint:
         action === STORAGE_READ_PERMISSION

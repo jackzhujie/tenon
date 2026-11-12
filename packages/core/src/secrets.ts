@@ -9,7 +9,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 const ALGORITHM = 'aes-256-gcm'
 const IV_BYTES = 12
@@ -30,7 +30,7 @@ export class SecretBox {
     }
     const key = Buffer.from(readFileSync(keyFile, 'utf8').trim(), 'base64')
     if (key.byteLength !== 32) {
-      throw new TenonError('INTERNAL', `密钥文件损坏：${keyFile}`)
+      throw new TenonError('INTERNAL', msg('error.secret.corrupt', { file: keyFile }))
     }
     return new SecretBox(key)
   }
@@ -46,7 +46,7 @@ export class SecretBox {
   unseal(blob: Buffer | Uint8Array): string {
     const buffer = Buffer.isBuffer(blob) ? blob : Buffer.from(blob)
     if (buffer.byteLength <= IV_BYTES + TAG_BYTES) {
-      throw new TenonError('INTERNAL', '密文长度不合法')
+      throw new TenonError('INTERNAL', msg('error.secret.badLength'))
     }
     const iv = buffer.subarray(0, IV_BYTES)
     const tag = buffer.subarray(IV_BYTES, IV_BYTES + TAG_BYTES)
@@ -57,7 +57,7 @@ export class SecretBox {
       return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8')
     } catch {
       // 换机器 / 删密钥文件后旧密文必然解不开，不要把 GCM 校验失败说成「密码错误」
-      throw new TenonError('INTERNAL', '无法解密：密钥与密文不匹配（可能换过机器）')
+      throw new TenonError('INTERNAL', msg('error.secret.mismatch'))
     }
   }
 }

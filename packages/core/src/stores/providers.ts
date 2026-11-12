@@ -5,7 +5,7 @@
  * 明文只经 `SecretBox` 加密后进 `api_key_enc`。
  */
 import type { ModelTier, ProviderKind, ProviderProfile } from '@tenon/protocol'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
 import { newId } from '../ids.js'
 import type { SecretBox } from '../secrets.js'
@@ -73,7 +73,7 @@ export class ProviderStore {
     const id = input.id ?? newId('prov')
     const existing = this.find(id)
     if (input.id !== undefined && existing === undefined) {
-      throw new TenonError('APP_NOT_FOUND', `提供商不存在：${input.id}`)
+      throw new TenonError('APP_NOT_FOUND', msg('error.provider.notFound', { id: input.id }))
     }
     const sealed = input.apiKey === null ? undefined : this.box.seal(input.apiKey)
 
@@ -123,12 +123,12 @@ export class ProviderStore {
     })
 
     const profile = this.find(id)
-    if (profile === undefined) throw new TenonError('INTERNAL', '写入提供商后读不回来')
+    if (profile === undefined) throw new TenonError('INTERNAL', msg('error.provider.unreadable'))
     return profile
   }
 
   delete(id: string): void {
     const result = this.db.run('DELETE FROM provider_profiles WHERE id = ?', id)
-    if (result.changes === 0) throw new TenonError('APP_NOT_FOUND', `提供商不存在：${id}`)
+    if (result.changes === 0) throw new TenonError('APP_NOT_FOUND', msg('error.provider.notFound', { id }))
   }
 }

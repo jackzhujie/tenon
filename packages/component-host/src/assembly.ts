@@ -14,7 +14,7 @@
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 export const ASSEMBLY_FILE = 'app.components.json'
 
@@ -120,7 +120,7 @@ export async function readAssembly(repoDir: string): Promise<AssemblyRead> {
 export async function writeAssembly(repoDir: string, assembly: ComponentAssembly): Promise<string> {
   const parsed = ComponentAssembly.safeParse(assembly)
   if (!parsed.success) {
-    throw new TenonError('VALIDATION_FAILED', '装配声明不合法，拒绝写入', {
+    throw new TenonError('VALIDATION_FAILED', msg('error.assembly.invalid'), {
       issues: issuesOf(parsed.error),
     })
   }

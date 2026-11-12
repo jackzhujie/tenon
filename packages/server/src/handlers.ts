@@ -57,7 +57,7 @@ import type {
   RpcOutput,
   UsageSnapshot,
 } from '@tenon/protocol'
-import { TenonError } from '@tenon/protocol'
+import { msg, isLocale, setLocale, TenonError } from '@tenon/protocol'
 import { pickSnapshot, type PickedSnapshot } from './revert-data.js'
 import { inspectRelease, publishRelease, pushReleaseToRemote } from './release.js'
 import type { SseBus } from './sse.js'
@@ -98,7 +98,7 @@ function requireChat(agent: AgentRuntime): NonNullable<AgentRuntime['chat']> {
   if (agent.chat === undefined) {
     throw new TenonError(
       'AGENT_NO_MODEL',
-      '还没有可用的模型。请在设置里添加提供商并填入 API Key；开发调试可设 TENON_FAUX=1。',
+      msg('error.model.noneConfigured'),
     )
   }
   return agent.chat
@@ -710,8 +710,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         if (restore === null) {
           throw new TenonError(
             'DB_SNAPSHOT_MISSING',
-            '这一版之前没有可用的数据库快照（只有改过表结构的提交才会存快照），所以数据没有动。' +
-              '取消勾选「连数据一起回滚」可以只回滚代码。',
+            msg('error.db.snapshotMissing'),
             { sha: plan.targetSha },
           )
         }
@@ -725,7 +724,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       const commits = await gitops.log(repoDir, 1)
       const commit = commits[0]
       if (commit === undefined) {
-        throw new TenonError('GIT_REVERT_FAILED', '回滚提交已写入但读不回来')
+        throw new TenonError('GIT_REVERT_FAILED', msg('error.release.commitUnreadable'))
       }
       bus.publish({ type: 'git.commit', appId: app.id, sha: result.sha, message: result.message })
       return {
@@ -957,10 +956,20 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'settings.get': async () => ({ values: core.settings.all() }),
 
-    'settings.set': async (input) => ({
-      values: core.settings.set(input.values),
-      applied: await applyAndReport(agent),
-    }),
+    'settings.set': async (input) => {
+      const values = core.settings.set(input.values)
+      /*
+       * 语言一改，**服务端接下来的每一句话**都跟着改：错误消息、门禁摘要都是它生成的。
+       * 放在这里而不是每次抛错时去读设置：读一次库换一句话太贵，而且抛出点
+       * （core / gateway / agent）根本不该认识 `settings`。
+       *
+       * 只认 `en` / `zh`：写进来一个坏值就当没写（保持在用的那个），
+       * 而不是让整个进程从此说一串 `undefined`。
+       */
+      const next = input.values[SETTING_KEYS.uiLocale]
+      if (isLocale(next)) setLocale(next)
+      return { values, applied: await applyAndReport(agent) }
+    },
 
     'provider.list': async () => ({ profiles: core.providers.list() }),
 
@@ -1080,7 +1089,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
       if (config === null) {
         throw new TenonError(
           'HUB_NOT_CONFIGURED',
-          '官方 Hub 还没配置。设 TENON_HUB_URL 与 TENON_HUB_PUBLIC_KEY 之后才能从 Hub 安装组件。',
+          msg('error.hub.notConfigured'),
         )
       }
 
@@ -1197,7 +1206,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
           if (state === 'ready' || state === 'starting') {
             throw new TenonError(
               'APP_BUSY',
-              `「${appId}」的预览正在运行。先停掉预览再清理依赖 —— 否则它会在下一次请求时突然报找不到模块。`,
+              msg('error.storage.previewRunning', { id: appId }),
             )
           }
         }

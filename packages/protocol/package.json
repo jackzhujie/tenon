@@ -6,7 +6,8 @@
   "description": "Tenon RPC 契约：错误模型、领域类型、方法表、SSE 事件（zod 单一事实来源）",
   "exports": {
     ".": "./src/index.ts",
-    "./browser": "./src/browser.ts"
+    "./browser": "./src/browser.ts",
+    "./locale": "./src/locale.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {

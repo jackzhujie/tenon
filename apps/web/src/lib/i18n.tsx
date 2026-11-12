@@ -26,7 +26,13 @@
  * 这样 `t('chat.versions', { count })` 的类型是自然的，单数时自动落到 `.one`。
  * 中文没有单复数，`.one` 写同一句。
  */
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  renderMessage,
+  setLocale as setProcessLocale,
+  type Locale,
+  type MessageParams,
+} from '@tenon/protocol/locale'
 import { appsEn, appsZh } from './messages/apps.js'
 import { chatEn, chatZh } from './messages/chat.js'
 import { diffEn, diffZh } from './messages/diff.js'
@@ -38,8 +44,12 @@ import { settingsEn, settingsZh } from './messages/settings.js'
 import { usageEn, usageZh } from './messages/usage.js'
 import { shellEn, shellZh } from './messages/shell.js'
 
-export const LOCALES = ['en', 'zh'] as const
-export type Locale = (typeof LOCALES)[number]
+/*
+ * `Locale` / `LOCALES` / `isLocale` / `MessageParams` 都来自协议层：
+ * 服务端也要按同一种语言说话，"支持哪两种语言"这件事只能有一处定义。
+ */
+export { LOCALES, isLocale } from '@tenon/protocol/locale'
+export type { Locale, MessageParams } from '@tenon/protocol/locale'
 
 /** 英文表是基准：所有 key 与它的形状绑定 */
 const en = {
@@ -71,39 +81,18 @@ const zh: Record<MessageKey, string> = {
   ...usageZh,
 }
 
-export type MessageParams = Record<string, string | number>
-
 const TABLES: Record<Locale, Record<MessageKey, string>> = { en, zh }
-
-/** 英文单复数：只有 1 用 `one`，其余 `other`（中文没有这一层） */
-function pluralSuffix(locale: Locale, count: number): 'one' | 'other' {
-  if (locale !== 'en') return 'other'
-  return count === 1 ? 'one' : 'other'
-}
-
-function interpolate(template: string, params: MessageParams | undefined): string {
-  if (params === undefined) return template
-  return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
-    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : whole,
-  )
-}
 
 export type TFunction = (key: MessageKey, params?: MessageParams) => string
 
 /**
  * 取一条文案。
  *
- * 带 `count` 时先找 `<key>.one` / `<key>.other`，没有就退回 `<key>` ——
- * 这样"只有一个版本"的句子不用为复数拆两遍。
+ * 插值与单复数的**实现**在协议层（`renderMessage`）：服务端也用它，两套规则各写一份
+ * 会漂移成"网页把 `1 files` 写成 `1 file`、服务端不会"。这里只负责挑表。
  */
 export function translate(locale: Locale, key: MessageKey, params?: MessageParams): string {
-  const table = TABLES[locale]
-  const count = params?.['count']
-  if (typeof count === 'number') {
-    const variant = `${key}.${pluralSuffix(locale, count)}` as MessageKey
-    if (variant in table) return interpolate(table[variant], params)
-  }
-  return interpolate(table[key], params)
+  return renderMessage(TABLES[locale], locale, key, params)
 }
 
 /** 系统语言 → 我们支持的两种；认不出来一律英文（国际化产品的默认值不该是中文） */
@@ -133,29 +122,18 @@ export function cacheLocale(locale: Locale): void {
   }
 }
 
-export function isLocale(value: unknown): value is Locale {
-  return value === 'en' || value === 'zh'
-}
-
 interface I18nValue {
   locale: Locale
   t: TFunction
   setLocale(locale: Locale): void
 }
 
-/**
- * 当前语言。**给非组件代码用**（`lib/rpc.ts` 的网络错误、`hooks/useWorkspace.ts` 的
- * 提前返回）：那些地方没有 hook 可调，又不能把整句话留成中文。
- *
- * 这是刻意接受的"第二处真相"：它只在一处被写（Provider 的 setLocale），
- * 且只读不参与渲染 —— 语言切换后重新渲染的仍然是 Context。
+/*
+ * "此刻的语言"在协议层（`@tenon/protocol/locale`）—— 服务端也说同一种话，
+ * 两个进程各存一份必然对不上。这里只把它转出去，给非组件代码（`lib/rpc.ts`
+ * 的网络错误、hook 里的提前返回）用。
  */
-let activeLocale: Locale = 'en'
-
-/** 非组件代码取当前语言（配合 `translate`） */
-export function getLocale(): Locale {
-  return activeLocale
-}
+export { getLocale } from '@tenon/protocol/locale'
 
 const I18nContext = createContext<I18nValue | null>(null)
 
@@ -171,19 +149,16 @@ export function I18nProvider({
 }) {
   const [locale, setLocaleState] = useState<Locale>(initial)
   /*
-   * 首屏就把全局值对齐，别等到第一次切换 —— 否则第一次渲染后到点切换之间，
-   * `getLocale()` 读到的还是 'en'（非组件代码里的错误消息会用错语言）。
-   *
-   * 这两处赋值被 lint 的 `react-hooks/globals` 盯着，但它是**有意的**：
-   * 非组件代码（rpc 的网络错误、hook 里的提前返回）没有 hook 可调，
-   * 又必须拿到当前语言。只写这一处、只读不参与渲染，切换后重新渲染的仍是 Context。
+   * 首屏的值由 `main.tsx` 在 render 之前写进协议层（它已经把设置读出来了），
+   * 这里只管**切换**。用 effect 不是为了等一帧，是为了不在 render 里写模块级状态 ——
+   * 那个写法 lint 会拦（`react-hooks/globals`），而且真会在并发渲染下写错。
    */
-  // eslint-disable-next-line react-hooks/globals -- 见上：给非组件代码读的镜像值
-  activeLocale = locale
+  useEffect(() => {
+    setProcessLocale(locale)
+  }, [locale])
 
   const setLocale = useCallback(
     (next: Locale) => {
-      activeLocale = next
       setLocaleState(next)
       cacheLocale(next)
       onLocaleChange?.(next)

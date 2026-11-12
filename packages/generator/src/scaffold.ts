@@ -7,7 +7,7 @@
  */
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { renderTemplate } from './render.js'
 import { loadTemplate } from './registry.js'
 
@@ -55,7 +55,7 @@ export async function scaffoldApp(input: ScaffoldInput): Promise<ScaffoldResult>
   if (input.force !== true && (await exists(join(input.repoDir, 'package.json')))) {
     throw new TenonError(
       'TEMPLATE_DIR_NOT_EMPTY',
-      `这个工作区已经有 package.json 了（模板 ${templateId}）：${input.repoDir}`,
+      msg('error.template.dirNotEmpty', { id: templateId, dir: input.repoDir }),
       { repoDir: input.repoDir, templateId },
     )
   }
@@ -67,7 +67,7 @@ export async function scaffoldApp(input: ScaffoldInput): Promise<ScaffoldResult>
   ])
   const missing = (manifest.variables ?? []).filter((name) => !vars.has(name))
   if (missing.length > 0) {
-    throw new TenonError('TEMPLATE_VAR_MISSING', `模板 ${templateId} 声明的变量没有值：${missing.join(', ')}`, {
+    throw new TenonError('TEMPLATE_VAR_MISSING', msg('error.template.varsMissing', { id: templateId, names: missing.join(', ') }), {
       templateId,
       variables: missing,
     })

@@ -13,6 +13,7 @@ import {
   TenonError,
   isRpcMethod,
   isTenonError,
+  msg,
   rpcFail,
   rpcMethods,
   rpcOk,
@@ -111,7 +112,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
       void reply.code(400).send(
         rpcFail({
           code: 'VALIDATION_FAILED',
-          message: '参数不合法',
+          message: msg('error.request.invalid'),
           details: { issues: error.issues },
         }),
       )
@@ -164,7 +165,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
     const sinceRaw = request.query.since
     const since = sinceRaw === undefined || sinceRaw === '' ? undefined : Number(sinceRaw)
     if (since !== undefined && Number.isNaN(since)) {
-      throw new TenonError('VALIDATION_FAILED', 'since 必须是数字')
+      throw new TenonError('VALIDATION_FAILED', msg('error.request.sinceNotNumber'))
     }
 
     reply.hijack()

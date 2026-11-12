@@ -12,7 +12,7 @@
 import { mkdir, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { appPaths, type TenonHome } from '@tenon/core'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { migrateDatabase, type MigrateReport } from './migrate.js'
 import { createPgliteProvider } from './pglite.js'
 import { createPostgresProvider } from './postgres.js'
@@ -107,11 +107,9 @@ export class DatabaseManager {
   ): Promise<MigrateReport> {
     const source = await this.acquire(appId)
     if (target.mode === source.mode) {
-      throw new TenonError(
-        'DB_UNSUPPORTED',
-        `源和目标都是 ${source.mode} 档，没有可迁的东西。跨档迁移才有意义。`,
-        { mode: source.mode },
-      )
+      throw new TenonError('DB_UNSUPPORTED', msg('error.db.sameMode', { mode: source.mode }), {
+        mode: source.mode,
+      })
     }
 
     const paths = appPaths(this.options.home, appId)
@@ -223,7 +221,7 @@ export class DatabaseManager {
     if (snapshot.mode !== this.dbMode) {
       throw new TenonError(
         'DB_RESTORE_FAILED',
-        `快照是 ${snapshot.mode} 档的，当前是 ${this.dbMode} 档，不能直接还原。`,
+        msg('error.db.snapshotModeMismatch', { snapshot: snapshot.mode, current: this.dbMode }),
         { snapshotMode: snapshot.mode, mode: this.dbMode },
       )
     }
@@ -254,7 +252,7 @@ export class DatabaseManager {
     if (this.connectionString === null || this.connectionString === '') {
       throw new TenonError(
         'DB_START_FAILED',
-        '当前是 postgres 档，但没有连接串。设 TENON_DATABASE_URL（或改用默认的 pglite 档）。',
+        msg('error.db.postgresNoUrl'),
         { mode: this.dbMode },
       )
     }

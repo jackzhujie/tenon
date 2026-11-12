@@ -8,6 +8,7 @@
  * 两处各写一份的后果很具体：`$0.00` 与 `<$0.01` 并存时，用户会以为有一处是 bug。
  */
 import type { Budget, BudgetDimension, UsageTotals } from './domain.js'
+import { msg } from './messages/index.js'
 
 /**
  * `1234` → `1.2k`。面板宽度有限，这个数只用来判断量级，不需要精确到个位。
@@ -47,7 +48,7 @@ export function budgetMessage(totals: UsageTotals, budget: Budget, dimension: Bu
   const used = dimension === 'cost' ? formatCost(totals.costUsd) : `${formatTokens(totals.totalTokens)} tokens`
   const limit =
     dimension === 'cost' ? formatCost(budget.maxCostUsd ?? 0) : `${formatTokens(budget.maxTokens ?? 0)} tokens`
-  return `这个应用的额度用完了（已用 ${used}，上限 ${limit}）。调高上限，或者换一个应用继续。`
+  return msg('error.budget.appExhausted', { used, limit })
 }
 
 /**
@@ -71,15 +72,9 @@ export function globalBudgetMessage(
     dimension === 'cost' ? formatCost(budget.maxCostUsd ?? 0) : `${formatTokens(budget.maxTokens ?? 0)} tokens`
 
   if (window === 'month') {
-    return (
-      `本月总额度用完了（本月已用 ${usedText}，上限 ${limit}）。` +
-      '下月 1 日自动重置；要现在继续，就把「每月总额度」调高。'
-    )
+    return msg('error.budget.globalMonthExhausted', { used: usedText, limit })
   }
-  return (
-    `总额度用完了（累计已用 ${usedText}，上限 ${limit}）。` +
-    '这道闸不会按月份重置 —— 要继续就得把它调高（或者取消这一项）。'
-  )
+  return msg('error.budget.globalTotalExhausted', { used: usedText, limit })
 }
 
 function trimZero(value: number): string {

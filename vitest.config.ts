@@ -7,5 +7,7 @@ export default defineConfig({
     fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // 断言写的是产品原本的中文措辞（见 test/setup.ts 里的理由）
+    setupFiles: ['./test/setup.ts'],
   },
 })

@@ -19,7 +19,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { Client } from 'pg'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { redact } from './introspect.js'
 import {
   decodeRowsSnapshot,
@@ -58,7 +58,7 @@ export class PostgresProvider implements DatabaseProvider {
 
   connectionString(): string {
     if (this.state !== 'ready') {
-      throw new TenonError('DB_NOT_READY', '数据库还没探活成功，先别急着拿连接串', {
+      throw new TenonError('DB_NOT_READY', msg('error.db.notLive'), {
         mode: this.mode,
       })
     }
@@ -112,7 +112,7 @@ export class PostgresProvider implements DatabaseProvider {
 
   async dump(file?: string): Promise<DbSnapshot> {
     if (this.state !== 'ready') {
-      throw new TenonError('DB_NOT_READY', '数据库没探活成功，不能打快照', { mode: this.mode })
+      throw new TenonError('DB_NOT_READY', msg('error.db.notReadyForSnapshot'), { mode: this.mode })
     }
     const target = file ?? join(this.snapshotsDir(), `${Date.now()}.rows.json.gz`)
     const client = await this.connect()
@@ -131,7 +131,7 @@ export class PostgresProvider implements DatabaseProvider {
       return { mode: this.mode, file: target, bytes: info.size, createdAt: Date.now() }
     } catch (err) {
       if (err instanceof TenonError) throw err
-      throw new TenonError('DB_DUMP_FAILED', `快照失败：${messageOf(err)}`, {
+      throw new TenonError('DB_DUMP_FAILED', msg('error.db.dumpFailed', { detail: messageOf(err) }), {
         mode: this.mode,
         file: target,
       })
@@ -142,7 +142,7 @@ export class PostgresProvider implements DatabaseProvider {
 
   async restore(snapshot: DbSnapshot): Promise<void> {
     if (this.state !== 'ready') {
-      throw new TenonError('DB_NOT_READY', '数据库没探活成功，不能还原', { mode: this.mode })
+      throw new TenonError('DB_NOT_READY', msg('error.db.notLive'), { mode: this.mode })
     }
     const bytes = await readFile(snapshot.file)
     const file = await decodeRowsSnapshot(bytes)
@@ -152,16 +152,16 @@ export class PostgresProvider implements DatabaseProvider {
       // 跳过的东西必须出现在日志里：「还原成功」但少了一张表，用户得能看见
       if (report.skippedTables.length > 0) {
         this.log(
-          `[tenon] 快照里有 ${report.skippedTables.length} 张表在当前库不存在，已跳过：${report.skippedTables.join(', ')}`,
+          `[tenon] ${report.skippedTables.length} tables in the snapshot do not exist in this database — skipped: ${report.skippedTables.join(', ')}`,
         )
       }
       for (const dropped of report.droppedColumns) {
         this.log(`[tenon] ${dropped.table} 的列 ${dropped.columns.join(', ')} 已不在当前库里，跳过`)
       }
-      this.log(`[tenon] 应用库已还原到 ${snapshot.file}（${report.totalRows} 行）`)
+      this.log(`[tenon] app database restored from ${snapshot.file} (${report.totalRows} rows)`)
     } catch (err) {
       if (err instanceof TenonError) throw err
-      throw new TenonError('DB_RESTORE_FAILED', `还原快照失败：${messageOf(err)}`, {
+      throw new TenonError('DB_RESTORE_FAILED', msg('error.db.restoreFailed', { detail: messageOf(err) }), {
         mode: this.mode,
         file: snapshot.file,
       })

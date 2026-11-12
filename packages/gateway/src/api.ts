@@ -30,7 +30,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { scrubEnv } from '@tenon/core'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import { groupLaunched, nodeRunEnv, spawnLogged, type Launched } from './child.js'
 
 /**
@@ -226,10 +226,10 @@ export const launchApi: ApiLauncher = async (spec) => {
   const tsconfig = tsconfigOf(spec.repoDir, tenon.apiTsconfig)
   const tsc = join(spec.repoDir, 'node_modules', 'typescript', 'bin', 'tsc')
   if (!existsSync(tsc)) {
-    throw new TenonError('PREVIEW_DEPS_FAILED', '找不到 typescript：依赖没装完或装失败了', { tsc })
+    throw new TenonError('PREVIEW_DEPS_FAILED', msg('error.preview.tscMissing'), { tsc })
   }
   if (tsconfig === null) {
-    throw new TenonError('PREVIEW_DEPS_FAILED', '后端要编译，但找不到 tsconfig.server.json', {
+    throw new TenonError('PREVIEW_DEPS_FAILED', msg('error.preview.tsconfigMissing'), {
       repoDir: spec.repoDir,
     })
   }
@@ -256,7 +256,11 @@ export const launchApi: ApiLauncher = async (spec) => {
     await compiler.stop()
     throw new TenonError(
       'PREVIEW_START_FAILED',
-      `后端在 ${FIRST_BUILD_TIMEOUT_MS / 1000} 秒内没有编译出 ${spec.entry.output}（tsc 最后输出：${lastLines(compiler)}）`,
+      msg('error.preview.apiNotCompiled', {
+        seconds: FIRST_BUILD_TIMEOUT_MS / 1000,
+        entry: spec.entry.output,
+        tail: lastLines(compiler),
+      }),
       { stage: 'server', output: compiler.output() },
     )
   }

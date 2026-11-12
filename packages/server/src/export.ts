@@ -37,7 +37,7 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promi
 import { join } from 'node:path'
 import { invokePnpm, resolvePnpm, withNodeShim } from '@tenon/core'
 import { ensureDeps, nodeRunEnv } from '@tenon/gateway'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 /** 构建可能真的要几分钟（tsc + vite + 冷缓存），但"跑了一小时"就是在绕圈 */
 const BUILD_TIMEOUT_MS = 10 * 60 * 1000
@@ -96,12 +96,12 @@ async function readPackageJson(repoDir: string): Promise<PackageJson> {
   try {
     raw = await readFile(file, 'utf8')
   } catch {
-    throw new TenonError('EXPORT_FAILED', '这个工作区没有 package.json，导不出东西', { repoDir })
+    throw new TenonError('EXPORT_FAILED', msg('error.export.noPackage'), { repoDir })
   }
   try {
     return JSON.parse(raw) as PackageJson
   } catch (error) {
-    throw new TenonError('EXPORT_FAILED', 'package.json 不是合法 JSON，先修好再导出', {
+    throw new TenonError('EXPORT_FAILED', msg('error.export.badJson'), {
       repoDir,
       reason: error instanceof Error ? error.message : String(error),
     })
@@ -275,7 +275,7 @@ export async function withExportLock<T>(repoDir: string, task: () => Promise<T>)
   if (running.has(repoDir)) {
     throw new TenonError(
       'EXPORT_FAILED',
-      '这个应用正在导出（上一次还没结束）。等它跑完再点 —— 两次同时构建会互相清 dist/，报出来像是"构建失败"。',
+      msg('error.export.busyExporting'),
       { phase: 'busy' },
     )
   }
@@ -299,7 +299,7 @@ async function runExport(options: StaticExportOptions): Promise<StaticExportResu
   const hasApi = apiEntry !== null
 
   if (typeof scripts['build'] !== 'string') {
-    throw new TenonError('EXPORT_FAILED', '这个应用的 package.json 没有 build 脚本，不知道怎么构建', {
+    throw new TenonError('EXPORT_FAILED', msg('error.export.noBuildScript'), {
       repoDir: options.repoDir,
     })
   }
@@ -316,7 +316,7 @@ async function runExport(options: StaticExportOptions): Promise<StaticExportResu
       ...(options.onLog === undefined ? {} : { onLog: options.onLog }),
     })
   } catch (error) {
-    throw new TenonError('EXPORT_FAILED', '装依赖失败（构建需要 vite 与 tsc）', {
+    throw new TenonError('EXPORT_FAILED', msg('error.export.installFailed'), {
       phase: 'deps',
       reason: error instanceof Error ? error.message : String(error),
     })
@@ -333,7 +333,7 @@ async function runExport(options: StaticExportOptions): Promise<StaticExportResu
   if (front.code !== 0) {
     throw new TenonError(
       'EXPORT_FAILED',
-      `构建失败（pnpm run build 退出码 ${front.code ?? 'null'}）：${tailOf(front.output)}`,
+      msg('error.export.buildFailed', { code: front.code ?? 'null', tail: tailOf(front.output) }),
       { phase: 'build', output: front.output },
     )
   }
@@ -343,7 +343,7 @@ async function runExport(options: StaticExportOptions): Promise<StaticExportResu
       // 有后端却没有构建脚本 —— 说清是哪一半缺，别让它变成一个"导出成功但跑不起来"的包
       throw new TenonError(
         'EXPORT_FAILED',
-        '这个应用声明了后端（package.json 的 tenon.api），但没有 build:api 脚本',
+        msg('error.export.noBuildApi'),
         { api: apiEntry },
       )
     }
@@ -357,7 +357,7 @@ async function runExport(options: StaticExportOptions): Promise<StaticExportResu
     if (back.code !== 0) {
       throw new TenonError(
         'EXPORT_FAILED',
-        `后端编译失败（pnpm run build:api 退出码 ${back.code ?? 'null'}）：${tailOf(back.output)}`,
+        msg('error.export.apiBuildFailed', { code: back.code ?? 'null', tail: tailOf(back.output) }),
         { phase: 'build:api', output: back.output },
       )
     }
@@ -366,7 +366,7 @@ async function runExport(options: StaticExportOptions): Promise<StaticExportResu
   const distDir = join(options.repoDir, 'dist')
   if (!existsSync(distDir)) {
     // 构建说成功但产物不在 —— 后端脚本改写、vite 配了别的 outDir，都是这种表现
-    throw new TenonError('EXPORT_FAILED', '构建完成了，但没有 dist/ 目录（前端产物去哪了？）', {
+    throw new TenonError('EXPORT_FAILED', msg('error.export.noDist'), {
       repoDir: options.repoDir,
     })
   }
@@ -431,7 +431,7 @@ async function runExport(options: StaticExportOptions): Promise<StaticExportResu
       ...(options.onLog === undefined ? {} : { onLog: options.onLog }),
     })
     if (installed.code !== 0) {
-      throw new TenonError('EXPORT_FAILED', `装生产依赖失败（退出码 ${installed.code ?? 'null'}）`, {
+      throw new TenonError('EXPORT_FAILED', msg('error.export.prodInstallFailed', { code: installed.code ?? 'null' }), {
         phase: 'install',
         output: installed.output,
       })

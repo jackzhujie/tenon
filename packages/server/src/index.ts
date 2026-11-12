@@ -6,11 +6,12 @@
  */
 import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
-import { openCore, type CoreServices } from '@tenon/core'
+import { openCore, SETTING_KEYS, type CoreServices } from '@tenon/core'
 import { pluginRoots, type PluginRoot } from '@tenon/component-host'
 import { createAgentRuntime, type AgentRuntime, type PageDriverProvider } from '@tenon/agent'
 import { PreviewManager, type PreviewManagerOptions } from '@tenon/gateway'
 import { scaffoldApp } from '@tenon/generator'
+import { isLocale, setLocale } from '@tenon/protocol'
 import { buildServer, type TenonServer } from './app.js'
 import { hubPluginsDir, resolveHubConfig } from '@tenon/component-host'
 import { ComponentRuntime } from './components.js'
@@ -97,6 +98,26 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       })
     },
   })
+  /*
+   * 服务端说的语言从设置里读一次，**在建任何会抛错的东西之前**。
+   *
+   * 为什么在服务端整体读、而不是每个抛出点自己读：语言是进程级偏好（一个进程一个用户），
+   * 而抛出点在 core / gateway / agent 里，它们不该认识 `settings` 表。`@tenon/protocol`
+   * 的 `setLocale` 就是那条"只写一次、处处可读"的通道；`settings.set` 里再更新一次。
+   *
+   * **读不到就显式写回英文**，而不是"什么都不做"：进程里可能已经有一个更早的服务实例
+   * （测试就是），留着上一次的语言会让"这个服务说什么话"取决于跑过哪些用例。
+   * 读失败也不挡启动：一个读不到的偏好不该让整个服务起不来。
+   */
+  {
+    let saved: unknown
+    try {
+      saved = core.settings.get(SETTING_KEYS.uiLocale)
+    } catch {
+      saved = undefined
+    }
+    setLocale(isLocale(saved) ? saved : 'en')
+  }
   const bus = new SseBus()
   /*
    * preview 先于 agent 建：`onSchemaCommit` 要指向 `preview.snapshotDatabase`，

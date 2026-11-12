@@ -23,7 +23,7 @@
  */
 import { gzip as gzipCallback, gunzip as gunzipCallback } from 'node:zlib'
 import { promisify } from 'node:util'
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 import type { Client } from 'pg'
 import {
   COPY_BATCH,
@@ -158,25 +158,19 @@ export async function decodeRowsSnapshot(bytes: Buffer): Promise<RowsSnapshotFil
   try {
     raw = (await gunzip(bytes)).toString('utf8')
   } catch (error) {
-    throw new TenonError('DB_UNSUPPORTED', `这不是一份 Tenon 的库快照（gzip 解不开）：${messageOf(error)}`)
+    throw new TenonError('DB_UNSUPPORTED', msg('error.db.notSnapshot', { detail: messageOf(error) }))
   }
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch (error) {
-    throw new TenonError('DB_UNSUPPORTED', `快照内容不是合法 JSON：${messageOf(error)}`)
+    throw new TenonError('DB_UNSUPPORTED', msg('error.db.notJson', { detail: messageOf(error) }))
   }
   if (!isRowsSnapshotFile(parsed)) {
-    throw new TenonError(
-      'DB_UNSUPPORTED',
-      '快照格式不认识（可能是旧版 `pg_dump --format=custom` 打的，那个要用 pg_restore）。',
-    )
+    throw new TenonError('DB_UNSUPPORTED', msg('error.db.unknownSnapshot'))
   }
   if (parsed.version > VERSION) {
-    throw new TenonError(
-      'DB_UNSUPPORTED',
-      `快照是更新的格式（v${parsed.version}，本机只认到 v${VERSION}），升级 Tenon 后再还原。`,
-    )
+    throw new TenonError('DB_UNSUPPORTED', msg('error.db.newerSnapshot', { found: parsed.version, known: VERSION }))
   }
   return parsed
 }
@@ -255,7 +249,7 @@ export async function restoreRowsSnapshot(
   if (targets.length === 0) {
     throw new TenonError(
       'DB_RESTORE_FAILED',
-      '快照里的表在目标库里一个都不存在。这份快照多半是另一个应用的库。',
+      msg('error.db.noTablesInTarget'),
       { skippedTables },
     )
   }
@@ -321,7 +315,7 @@ export async function restoreRowsSnapshot(
     return report
   } catch (error) {
     await client.query('rollback').catch(() => undefined)
-    throw new TenonError('DB_RESTORE_FAILED', `还原失败（已回滚，库没被改动）：${messageOf(error)}`)
+    throw new TenonError('DB_RESTORE_FAILED', msg('error.db.restoreRolledBack', { detail: messageOf(error) }))
   }
 }
 

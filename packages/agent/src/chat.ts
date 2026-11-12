@@ -11,7 +11,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
 import type { AgentEvent, AgentEventStream, Cursor } from '@earendil-works/pi-durable'
 import { watchEvents } from '@earendil-works/pi-durable'
 import type { ChatSubmitInput, SseEventInput } from '@tenon/protocol'
-import { budgetMessage, composeWithSelection, globalBudgetMessage, TenonError } from '@tenon/protocol'
+import { budgetMessage, composeWithSelection, globalBudgetMessage, msg, TenonError } from '@tenon/protocol'
 import type { AppStore, TenonHome } from '@tenon/core'
 import { appPaths, gitops, hasSchemaChange } from '@tenon/core'
 import type { HarnessPool, RootConversation } from './harness-pool.js'
@@ -252,7 +252,7 @@ export class ChatService {
           appId,
           toolCallId: event.toolCallId,
           stream: 'result',
-          text: event.entry === undefined ? '' : '完成',
+          text: event.entry === undefined ? '' : 'done',
         })
         return
       }
@@ -261,7 +261,7 @@ export class ChatService {
           type: 'error',
           appId,
           code: 'AGENT_UNAVAILABLE',
-          message: `模型调用失败，正在第 ${event.attempt} 次重试`,
+          message: msg('error.agent.retrying', { attempt: event.attempt }),
         })
         return
       }
@@ -327,10 +327,10 @@ export class ChatService {
   async submit(appId: string, input: Omit<ChatSubmitInput, 'appId'>): Promise<{ submissionId: string }> {
     const app = this.options.apps.require(appId)
     if (input.content.trim() === '') {
-      throw new TenonError('CHAT_EMPTY_INPUT', '消息内容不能为空')
+      throw new TenonError('CHAT_EMPTY_INPUT', msg('error.chat.emptyInput'))
     }
     if (this.inflight.has(appId) && input.whenBusy === 'reject') {
-      throw new TenonError('CHAT_BUSY', '这个应用正在生成中，稍等一下再发', { appId })
+      throw new TenonError('CHAT_BUSY', msg('error.chat.busy'), { appId })
     }
 
     // 额度判在**取 harness 之后**（账本在 harness 里），但在**改状态之前** ——
@@ -466,9 +466,9 @@ export class ChatService {
               type: 'error',
               appId: app.id,
               code: 'DB_DUMP_FAILED',
-              message: `库快照失败，这一版将无法连数据一起回滚：${
-                err instanceof Error ? err.message : String(err)
-              }`,
+              message: msg('error.agent.snapshotFailed', {
+                detail: err instanceof Error ? err.message : String(err),
+              }),
             })
           })
       }

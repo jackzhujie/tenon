@@ -10,7 +10,7 @@
  * - **渲染后必须没有残留占位符**：残留意味着模板加了新变量但调用方没给值，
  *   这种错误如果放进应用里，用户看到的是 `{{appName}}` 出现在界面上
  */
-import { TenonError } from '@tenon/protocol'
+import { msg, TenonError } from '@tenon/protocol'
 
 const PLACEHOLDER = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g
 
@@ -21,7 +21,7 @@ export function renderTemplate(source: string, vars: TemplateVars, at = '<templa
   const out = source.replace(PLACEHOLDER, (_match, name: string) => {
     const value = vars[name]
     if (value === undefined) {
-      throw new TenonError('TEMPLATE_VAR_MISSING', `模板 ${at} 需要变量 ${name}，但调用方没有提供`, {
+      throw new TenonError('TEMPLATE_VAR_MISSING', msg('error.template.varMissing', { at, name }), {
         file: at,
         variable: name,
       })
@@ -34,7 +34,7 @@ export function renderTemplate(source: string, vars: TemplateVars, at = '<templa
   if (leftover !== null) {
     throw new TenonError(
       'TEMPLATE_VAR_LEFT',
-      `模板 ${at} 渲染后仍有未替换的占位符：${leftover.join(', ')}`,
+      msg('error.template.varsLeft', { at, names: leftover.join(', ') }),
       { file: at },
     )
   }

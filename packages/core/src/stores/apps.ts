@@ -8,7 +8,7 @@ import { rm } from 'node:fs/promises'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import type { App, AppStatus } from '@tenon/protocol'
-import { TenonError, isTenonError } from '@tenon/protocol'
+import { msg, TenonError, isTenonError } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
 import { commitAll, headSha, initRepo, isRepo } from '../git.js'
 import { newId, slugify } from '../ids.js'
@@ -139,7 +139,7 @@ export class AppStore {
 
   require(id: string): App {
     const app = this.find(id)
-    if (app === undefined) throw new TenonError('APP_NOT_FOUND', `应用不存在：${id}`, { appId: id })
+    if (app === undefined) throw new TenonError('APP_NOT_FOUND', msg('error.app.notFound', { id }), { appId: id })
     return app
   }
 
@@ -199,7 +199,7 @@ export class AppStore {
       // 模板自己的错误（未知模板 / 变量缺失）要原样上抛：
       // 统一包成 APP_HOME_MISSING 会让「模板名写错了」看起来像「磁盘坏了」
       if (isTenonError(err)) throw err
-      throw new TenonError('APP_HOME_MISSING', '创建应用目录失败', {
+      throw new TenonError('APP_HOME_MISSING', msg('error.app.homeMissing'), {
         appId: id,
         reason: err instanceof Error ? err.message : String(err),
       })
@@ -223,7 +223,7 @@ export class AppStore {
     const trimmed = name.trim()
     // 协议层已经校过一遍（zod）；core 再判一次是给"绕过 RPC 直接调 core"的调用方兜底
     if (trimmed === '' || trimmed.length > 64) {
-      throw new TenonError('VALIDATION_FAILED', '应用名不能为空，且不超过 64 个字', { appId: id })
+      throw new TenonError('VALIDATION_FAILED', msg('error.app.nameInvalid'), { appId: id })
     }
     this.db.run('UPDATE apps SET name = ?, updated_at = ? WHERE id = ?', trimmed, Date.now(), id)
     return this.require(id)
@@ -239,7 +239,7 @@ export class AppStore {
     const paths = appPaths(this.home, id)
     // 安全护栏：只允许删 appsDir 下面的目录（防 id 被污染成 ../..）
     if (!isInside(this.home.appsDir, paths.dir)) {
-      throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.dir}`)
+      throw new TenonError('INTERNAL', msg('error.app.refuseDelete', { path: paths.dir }))
     }
     await removeTree(paths.dir)
     /*
@@ -252,7 +252,7 @@ export class AppStore {
      * 这与"删除不可恢复"是同一件事，UI 的确认文案里已经写清楚了。
      */
     if (!isInside(this.home.backupsDir, paths.backupRepo)) {
-      throw new TenonError('INTERNAL', `拒绝删除越界路径：${paths.backupRepo}`)
+      throw new TenonError('INTERNAL', msg('error.app.refuseDelete', { path: paths.backupRepo }))
     }
     await removeTree(paths.backupRepo)
   }

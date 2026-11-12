@@ -30,7 +30,7 @@ import type {
   Readiness,
   SseEventInput,
 } from '@tenon/protocol'
-import { isTenonError, TenonError } from '@tenon/protocol'
+import { isTenonError, msg, TenonError } from '@tenon/protocol'
 import { launchApi, resolveApiEntry, type ApiLauncher } from './api.js'
 import type { Launched } from './child.js'
 import { ensureDeps, type DepsResult, type EnsureDepsOptions } from './deps.js'
@@ -115,7 +115,7 @@ function tailOf(launched: Launched | null, count = 6): string | null {
 /** 轮询到上游返回非 5xx 为止。5xx = 网关连不上 dev server，继续等 */
 async function waitForUpstream(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs
-  let last = '还没开始探测'
+  let last = msg('error.preview.notProbedYet')
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1500) })
@@ -129,7 +129,7 @@ async function waitForUpstream(url: string, timeoutMs: number): Promise<void> {
   }
   throw new TenonError(
     'PREVIEW_START_FAILED',
-    `dev server 在 ${Math.round(timeoutMs / 1000)} 秒内没有就绪（最后一次：${last}）`,
+    msg('error.preview.devNotReady', { seconds: Math.round(timeoutMs / 1000), last }),
     { url, lastError: last, stage: 'preview' },
   )
 }
@@ -143,7 +143,7 @@ async function waitForUpstream(url: string, timeoutMs: number): Promise<void> {
  */
 async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs
-  let last = '还没开始探测'
+  let last = msg('error.preview.notProbedYet')
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(2000) })
@@ -157,7 +157,7 @@ async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
   }
   throw new TenonError(
     'PREVIEW_START_FAILED',
-    `后端在 ${Math.round(timeoutMs / 1000)} 秒内没有就绪（最后一次：${last}）`,
+    msg('error.preview.apiNotReady', { seconds: Math.round(timeoutMs / 1000), last }),
     { url, lastError: last, stage: 'server' },
   )
 }
@@ -297,7 +297,7 @@ export class PreviewManager {
 
   /** 立刻返回 `starting`；真正的就绪通过 `preview.status` / `waitReady()` 观察 */
   async start(appId: string, options: { restart?: boolean } = {}): Promise<PreviewStatus> {
-    if (this.closed) throw new TenonError('PREVIEW_NOT_RUNNING', '服务正在关闭，不能再起预览')
+    if (this.closed) throw new TenonError('PREVIEW_NOT_RUNNING', msg('error.preview.closing'))
 
     const existing = this.runs.get(appId)
     if (existing !== undefined && (existing.state === 'starting' || existing.state === 'ready')) {
@@ -307,7 +307,7 @@ export class PreviewManager {
 
     const paths = appPaths(this.options.home, appId)
     if (!existsSync(paths.repoDir)) {
-      throw new TenonError('APP_HOME_MISSING', '应用目录不存在，没法起预览', { repoDir: paths.repoDir })
+      throw new TenonError('APP_HOME_MISSING', msg('error.preview.noAppDir'), { repoDir: paths.repoDir })
     }
 
     const run = new PreviewRun(appId)
@@ -368,7 +368,7 @@ export class PreviewManager {
    */
   async restoreDatabase(appId: string, snapshot: DbSnapshot): Promise<void> {
     if (this.databases.restoreSnapshot === undefined) {
-      throw new TenonError('DB_UNSUPPORTED', '当前数据库实现不支持还原快照')
+      throw new TenonError('DB_UNSUPPORTED', msg('error.db.restoreUnsupported'))
     }
     await this.databases.restoreSnapshot(appId, snapshot)
   }
@@ -470,7 +470,7 @@ export class PreviewManager {
           run.readiness.db = 'failed'
           throw isTenonError(err)
             ? err
-            : new TenonError('DB_START_FAILED', `应用数据库起不来：${messageOf(err)}`, {
+            : new TenonError('DB_START_FAILED', msg('error.db.startFailed', { detail: messageOf(err) }), {
                 stage: 'db',
               })
         }
@@ -494,7 +494,7 @@ export class PreviewManager {
       // null 和 undefined 在类型上是两件事：Route.port 不接受 null，LaunchSpec 只接受 undefined
       const apiPort: number | undefined = apiEntry === null ? undefined : ports[1]
       if (vitePort === undefined || gatewayPort === undefined) {
-        throw new TenonError('PREVIEW_PORT_EXHAUSTED', `拿不到 ${wanted} 个空闲端口`)
+        throw new TenonError('PREVIEW_PORT_EXHAUSTED', msg('error.preview.portsExhausted', { count: wanted }))
       }
       run.upstreamPort = vitePort
       run.gatewayPort = gatewayPort
@@ -576,7 +576,7 @@ export class PreviewManager {
       // 7. 后端（全栈应用才有）
       if (apiEntry !== null && apiPort !== undefined) {
         const database = run.database
-        if (database === null) throw new TenonError('DB_NOT_READY', '内部错误：有后端却没有数据库')
+        if (database === null) throw new TenonError('DB_NOT_READY', msg('error.db.backendWithoutDb'))
         const api = await this.launchApi({
           repoDir: paths.repoDir,
           apiPort,
@@ -644,7 +644,9 @@ export class PreviewManager {
       const output = run.vite?.output() ?? ''
       throw new TenonError(
         'PREVIEW_START_FAILED',
-        line === null ? messageOf(err) : `${messageOf(err)}（dev server 最后输出：${line}）`,
+        line === null
+          ? messageOf(err)
+          : msg('error.preview.devExited', { reason: messageOf(err), tail: line }),
         { output, stage: 'preview' },
       )
     }
@@ -661,7 +663,9 @@ export class PreviewManager {
       const output = run.api?.output() ?? ''
       throw new TenonError(
         'PREVIEW_START_FAILED',
-        line === null ? messageOf(err) : `${messageOf(err)}（后端最后输出：${line}）`,
+        line === null
+          ? messageOf(err)
+          : msg('error.preview.apiExited', { reason: messageOf(err), tail: line }),
         { output, stage: 'server' },
       )
     }
