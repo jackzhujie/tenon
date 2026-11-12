@@ -31,7 +31,7 @@ export const ComponentMountSpec = z.object({
   order: z.number().int().default(100),
   prefix: z
     .string()
-    .regex(/^\/[A-Za-z0-9/_-]*$/, 'prefix 要以 / 开头，例如 /_c/assistant')
+    .regex(/^\/[A-Za-z0-9/_-]*$/, msg('component.assembly.prefixFormat'))
     .optional(),
 })
 export type ComponentMountSpec = z.infer<typeof ComponentMountSpec>
@@ -91,7 +91,7 @@ export async function readAssembly(repoDir: string): Promise<AssemblyRead> {
     return {
       kind: 'invalid',
       file,
-      issues: [`读不到装配声明：${error instanceof Error ? error.message : String(error)}`],
+      issues: [msg('component.assembly.unreadable', { detail: error instanceof Error ? error.message : String(error) })],
     }
   }
   let raw: unknown
@@ -102,7 +102,7 @@ export async function readAssembly(repoDir: string): Promise<AssemblyRead> {
       kind: 'invalid',
       file,
       issues: [
-        `${ASSEMBLY_FILE} 不是合法 JSON：${error instanceof Error ? error.message : String(error)}`,
+        msg('component.assembly.badJson', { file: ASSEMBLY_FILE, detail: error instanceof Error ? error.message : String(error) }),
       ],
     }
   }

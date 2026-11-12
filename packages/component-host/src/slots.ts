@@ -10,58 +10,77 @@
  * 都是没有意义的组合，却都能写出来。这里把「哪个插槽在哪一边」变成唯一事实来源。
  */
 
+import { msg, type ComponentMessageKey } from '@tenon/protocol'
+
 export type SlotHost = 'web' | 'server'
 
 export interface SlotSpec {
   readonly id: string
   readonly host: SlotHost
-  /** 界面/文档里给人看的名字 */
-  readonly label: string
-  readonly description: string
+  /**
+   * 界面/文档里给人看的名字。存**键**不存句子：这两行会出现在商店的挂载点下拉里，
+   * 要跟着界面语言走，而模块级常量在 import 时就固化了语言。
+   */
+  readonly labelKey: ComponentMessageKey
+  readonly descriptionKey: ComponentMessageKey
 }
 
 export const COMPONENT_SLOTS = [
   {
     id: 'app.shell.overlay',
     host: 'web',
-    label: '全屏浮层',
-    description: '悬浮球、全局 AI 助手这类覆盖在应用之上、不占布局的组件',
+    labelKey: 'component.slot.overlay.label',
+    descriptionKey: 'component.slot.overlay.description',
   },
   {
     id: 'app.shell.sidebar.bottom',
     host: 'web',
-    label: '侧边栏底部',
-    description: '帮助、反馈、版本信息',
+    labelKey: 'component.slot.sidebar.label',
+    descriptionKey: 'component.slot.sidebar.description',
   },
   {
     id: 'app.page.header',
     host: 'web',
-    label: '页面标题右侧',
-    description: '导出、打印、分享',
+    labelKey: 'component.slot.header.label',
+    descriptionKey: 'component.slot.header.description',
   },
   {
     id: 'app.page.toolbar',
     host: 'web',
-    label: '列表工具栏',
-    description: '批量操作、字段设置',
+    labelKey: 'component.slot.toolbar.label',
+    descriptionKey: 'component.slot.toolbar.description',
   },
   {
     id: 'app.detail.panel',
     host: 'web',
-    label: '详情页侧栏',
-    description: '关联数据、评论、审批记录',
+    labelKey: 'component.slot.detail.label',
+    descriptionKey: 'component.slot.detail.description',
   },
   {
     id: 'app.api',
     host: 'server',
-    label: '后端路由前缀',
-    description: '组件的服务端能力，挂在应用后端的某个前缀下',
+    labelKey: 'component.slot.api.label',
+    descriptionKey: 'component.slot.api.description',
   },
 ] as const satisfies readonly SlotSpec[]
 
 export type ComponentSlotId = (typeof COMPONENT_SLOTS)[number]['id']
 
 const BY_ID = new Map<string, SlotSpec>(COMPONENT_SLOTS.map((s) => [s.id, s]))
+
+/**
+ * 挂载点的名字与说明（商店里那个下拉）。
+ *
+ * 存键、调用时才取句子：模块级常量在 import 那一刻就把语言定死了，
+ * 而用户可以在运行中切语言 —— 那之后所有"缓存下来的句子"都是错的。
+ */
+export function slotLabel(spec: SlotSpec): string {
+  return msg(spec.labelKey)
+}
+
+export function slotDescription(spec: SlotSpec): string {
+  return msg(spec.descriptionKey)
+}
 
 export function findSlot(id: string): SlotSpec | undefined {
   return BY_ID.get(id)
@@ -76,7 +95,7 @@ export function slotHost(id: string): SlotHost | null {
   return BY_ID.get(id)?.host ?? null
 }
 
-/** 界面上的插槽下拉框直接吃这份 */
+/** 界面上的插槽下拉框直接吃这份（每次调用都按当前语言取一次） */
 export function slotChoices(): ReadonlyArray<{ id: string; label: string; description: string }> {
-  return COMPONENT_SLOTS.map((s) => ({ id: s.id, label: s.label, description: s.description }))
+  return COMPONENT_SLOTS.map((s) => ({ id: s.id, label: slotLabel(s), description: slotDescription(s) }))
 }

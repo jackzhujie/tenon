@@ -21,6 +21,7 @@ import { createHash, createPublicKey, randomUUID, sign, verify } from 'node:cryp
 import { readFileSync } from 'node:fs'
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { msg } from '@tenon/protocol'
 import { parseManifest, type ComponentManifest } from './manifest.js'
 import { discoverRoot } from './resolve.js'
 import { compareVersionText, satisfiesRange } from './version.js'
@@ -94,10 +95,10 @@ function parseHubPair(
   const rawUrl = url?.trim() ?? ''
   const rawKey = key?.trim() ?? ''
   if (rawUrl === '' && rawKey === '') return { ok: true, value: null }
-  if (rawUrl === '') return { ok: false, message: '有公钥但没有 URL' }
-  if (rawKey === '') return { ok: false, message: '有 URL 但没有公钥' }
+  if (rawUrl === '') return { ok: false, message: msg('component.hub.keyWithoutUrl') }
+  if (rawKey === '') return { ok: false, message: msg('component.hub.urlWithoutKey') }
   if (!/^https?:\/\//i.test(rawUrl)) {
-    return { ok: false, message: `Hub 地址必须是 http(s):// 开头（现在是 ${rawUrl.slice(0, 40)}）` }
+    return { ok: false, message: msg('component.hub.badUrl', { url: rawUrl.slice(0, 40) }) }
   }
   /*
    * 顺序不能反：先把字面量 `\n` 还成真换行，**再** trim。
@@ -106,7 +107,7 @@ function parseHubPair(
    */
   const publicKey = (rawKey.includes('\\n') ? rawKey.replaceAll('\\n', '\n') : rawKey).trim()
   if (!publicKey.includes('BEGIN') || !publicKey.includes('PUBLIC KEY')) {
-    return { ok: false, message: '公钥不是 PEM 形状（应该以 -----BEGIN PUBLIC KEY----- 开头）' }
+    return { ok: false, message: msg('component.hub.badKey') }
   }
   return { ok: true, value: { hubUrl: rawUrl.replace(/\/+$/, ''), publicKey } }
 }
@@ -186,7 +187,7 @@ export function resolveHubConfig(input: ResolveHubConfigInput = {}): HubConfigRe
     return {
       config: null,
       origin: null,
-      note: `读不到 Hub 配置文件 ${file}：${error instanceof Error ? error.message : String(error)}`,
+      note: msg('component.hub.configUnreadable', { file, detail: error instanceof Error ? error.message : String(error) }),
     }
   }
 
@@ -194,11 +195,15 @@ export function resolveHubConfig(input: ResolveHubConfigInput = {}): HubConfigRe
   try {
     parsed = JSON.parse(raw)
   } catch (error) {
-    return { config: null, origin: null, note: `${file} 不是合法 JSON：${error instanceof Error ? error.message : String(error)}` }
+    return {
+      config: null,
+      origin: null,
+      note: msg('component.hub.configBadJson', { file, detail: error instanceof Error ? error.message : String(error) }),
+    }
   }
   const shape = parsed as Partial<Record<keyof HubConfigFile, unknown>> | null
   if (shape === null || typeof shape !== 'object') {
-    return { config: null, origin: null, note: `${file} 的内容不是一个对象` }
+    return { config: null, origin: null, note: msg('component.hub.configNotObject', { file }) }
   }
   /*
    * 两个键都不在 = 文件写错了（字段名拼错）。
@@ -206,7 +211,7 @@ export function resolveHubConfig(input: ResolveHubConfigInput = {}): HubConfigRe
    * 那是正常状态，不该报"配置错误"。这个区分能省掉一次"商店为什么是空的"排查。
    */
   if (!('hubUrl' in shape) && !('publicKey' in shape)) {
-    return { config: null, origin: null, note: `${file} 里没有 hubUrl / publicKey` }
+    return { config: null, origin: null, note: msg('component.hub.configMissingFields', { file }) }
   }
   const url = typeof shape.hubUrl === 'string' ? shape.hubUrl : undefined
   const key = typeof shape.publicKey === 'string' ? shape.publicKey : undefined
@@ -272,22 +277,25 @@ export function hubKeyFingerprint(publicKeyPem: string): string {
 
 /** 校验结构的顺序很重要：先看形状，再看签名，最后才看清单内容 */
 export function verifyBundle(raw: unknown, publicKeyPem: string): HubResult<VerifyResult> {
-  if (raw === null || typeof raw !== 'object') return fail('bad-bundle', '组件包不是一个对象')
+  if (raw === null || typeof raw !== 'object') return fail('bad-bundle', msg('component.bundle.notObject'))
   const candidate = raw as Partial<HubBundle>
 
   if (candidate.format !== BUNDLE_FORMAT) {
-    return fail('bad-bundle', `组件包格式是 ${String(candidate.format)}，这个版本只认 ${BUNDLE_FORMAT}`)
+    return fail(
+      'bad-bundle',
+      msg('component.bundle.badFormat', { format: String(candidate.format), expected: BUNDLE_FORMAT }),
+    )
   }
   if (typeof candidate.sig !== 'string' || candidate.sig === '') {
     // 没有签名就是没有签名 —— 不"宽容通过"，那等于把整个机制变成装饰
-    return fail('bad-signature', '组件包没有签名')
+    return fail('bad-signature', msg('component.bundle.unsigned'))
   }
   const files = candidate.files
   if (files === null || typeof files !== 'object' || Array.isArray(files)) {
-    return fail('bad-bundle', '组件包里 files 不是一个对象')
+    return fail('bad-bundle', msg('component.bundle.filesNotObject'))
   }
   for (const [path, content] of Object.entries(files)) {
-    if (typeof content !== 'string') return fail('bad-bundle', `files["${path}"] 不是文本`)
+    if (typeof content !== 'string') return fail('bad-bundle', msg('component.bundle.fileNotText', { path }))
   }
 
   /*
@@ -304,13 +312,21 @@ export function verifyBundle(raw: unknown, publicKeyPem: string): HubResult<Veri
     const key = createPublicKey(publicKeyPem)
     valid = verify(null, bundleSigningBytes(signed), key, Buffer.from(candidate.sig, 'base64'))
   } catch (error) {
-    return fail('bad-signature', '验签失败：公钥读不出来', error instanceof Error ? error.message : String(error))
+    return fail(
+      'bad-signature',
+      msg('component.bundle.keyUnreadable'),
+      error instanceof Error ? error.message : String(error),
+    )
   }
-  if (!valid) return fail('bad-signature', '验签失败：这个包不是用官方私钥签的（或者被改过）')
+  if (!valid) return fail('bad-signature', msg('component.bundle.badSignature'))
 
   const parsed = parseManifest(candidate.manifest)
   if (parsed.manifest === null) {
-    return fail('bad-manifest', '组件包里的清单不合法', parsed.issues.join('；'))
+    return fail(
+      'bad-manifest',
+      msg('component.bundle.badManifest'),
+      parsed.issues.join(msg('component.listSeparator')),
+    )
   }
   const manifest = parsed.manifest
 
@@ -363,28 +379,42 @@ export async function installBundle(options: InstallBundleOptions): Promise<HubR
   const bundle = verified.value.bundle
   const { id, version } = bundle.manifest
   if (options.expect?.id !== undefined && options.expect.id !== id) {
-    return fail('bad-manifest', `索引里写的是 ${options.expect.id}，包里是 ${id}`)
+    return fail(
+      'bad-manifest',
+      msg('component.bundle.expectMismatch', { expected: options.expect.id, actual: id }),
+    )
   }
   if (options.expect?.version !== undefined && options.expect.version !== version) {
-    return fail('bad-manifest', `索引里写的是 ${options.expect.version}，包里是 ${version}`)
+    return fail(
+      'bad-manifest',
+      msg('component.bundle.expectMismatch', { expected: options.expect.version, actual: version }),
+    )
   }
 
   /*
    * 路径检查在写之前一次性做完：写到一半才发现某个路径非法，就得回滚已写的文件。
    */
   const entries = Object.entries(bundle.files)
-  if (entries.length === 0) return fail('bad-bundle', '组件包里一个文件都没有')
+  if (entries.length === 0) return fail('bad-bundle', msg('component.bundle.empty'))
   for (const [path] of entries) {
     if (!isSafeRelativePath(path)) {
-      return fail('unsafe-path', `组件包里有不安全的路径：${path}`, '只能是包内的相对路径，不能有 ..')
+      return fail(
+        'unsafe-path',
+        msg('component.bundle.unsafePath', { path }),
+        msg('component.bundle.unsafePathHint'),
+      )
     }
     if (path === 'manifest.json') {
-      return fail('bad-bundle', '组件包里不许自带 manifest.json', '清单以包里的 manifest 字段为准')
+      return fail(
+        'bad-bundle',
+        msg('component.bundle.manifestInBundle'),
+        msg('component.bundle.manifestInBundleHint'),
+      )
     }
   }
   for (const [host, facet] of Object.entries(bundle.manifest.facets)) {
     if (facet !== undefined && bundle.files[facet] === undefined) {
-      return fail('bad-manifest', `清单声明了 ${host} facet「${facet}」，包里却没有这个文件`)
+      return fail('bad-manifest', msg('component.bundle.facetMissing', { host, facet }))
     }
   }
 
@@ -449,8 +479,8 @@ export async function installFromHub(options: InstallFromHubOptions): Promise<Hu
   if (!target.startsWith(`${options.config.hubUrl}/`)) {
     return fail(
       'url-outside-hub',
-      '只能从配置的 Hub 下载组件',
-      `这个地址不在 ${options.config.hubUrl} 之下：${target}`,
+      msg('component.hub.notHubHost'),
+      msg('component.hub.outsideHub', { hubUrl: options.config.hubUrl, target }),
     )
   }
 
@@ -461,11 +491,15 @@ export async function installFromHub(options: InstallFromHubOptions): Promise<Hu
   try {
     const response = await doFetch(target, { signal: controller.signal })
     if (!response.ok) {
-      return fail('fetch-failed', `下载组件包失败：HTTP ${response.status}`, target)
+      return fail('fetch-failed', msg('component.hub.downloadFailed', { status: response.status }), target)
     }
     raw = (await response.json()) as unknown
   } catch (error) {
-    return fail('fetch-failed', '下载组件包失败（网络或超时）', error instanceof Error ? error.message : String(error))
+    return fail(
+      'fetch-failed',
+      msg('component.hub.downloadNetwork'),
+      error instanceof Error ? error.message : String(error),
+    )
   } finally {
     clearTimeout(timer)
   }
@@ -569,20 +603,27 @@ export function verifyHubIndex(
   raw: unknown,
   publicKeyPem: string,
 ): HubResult<{ index: HubIndex; keyFingerprint: string }> {
-  if (typeof raw !== 'object' || raw === null) return fail('bad-bundle', '索引不是一个 JSON 对象')
+  if (typeof raw !== 'object' || raw === null) return fail('bad-bundle', msg('component.hub.indexNotObject'))
   const data = raw as Record<string, unknown>
   if (data['format'] !== HUB_INDEX_FORMAT) {
     return fail(
       'bad-bundle',
-      `索引格式是 ${String(data['format'])}，这个客户端只认 ${String(HUB_INDEX_FORMAT)}`,
-      '升级 Tenon 之后再看，或者让 Hub 提供旧格式',
+      msg('component.hub.indexBadFormat', {
+        format: String(data['format']),
+        expected: String(HUB_INDEX_FORMAT),
+      }),
+      msg('component.hub.indexBadFormatHint'),
     )
   }
   if (typeof data['sig'] !== 'string' || data['sig'] === '') {
-    return fail('bad-signature', '索引没有签名', '不验签的索引可以被降级到任意旧版本')
+    return fail(
+      'bad-signature',
+      msg('component.hub.indexUnsigned'),
+      msg('component.hub.indexUnsignedHint'),
+    )
   }
   if (!Array.isArray(data['components']) || !data['components'].every(isIndexComponent)) {
-    return fail('bad-bundle', '索引里的 components 形状不对')
+    return fail('bad-bundle', msg('component.hub.indexBadComponents'))
   }
 
   const index = data as unknown as HubIndex
@@ -599,9 +640,13 @@ export function verifyHubIndex(
       Buffer.from(index.sig, 'base64'),
     )
   } catch (error) {
-    return fail('bad-signature', '索引验签失败（签名不是合法的 base64 或密钥不对）', error instanceof Error ? error.message : String(error))
+    return fail(
+      'bad-signature',
+      msg('component.hub.indexBadSignature'),
+      error instanceof Error ? error.message : String(error),
+    )
   }
-  if (!ok) return fail('bad-signature', '索引验签失败：内容与签名不一致')
+  if (!ok) return fail('bad-signature', msg('component.hub.indexTampered'))
   return { ok: true, value: { index, keyFingerprint: hubKeyFingerprint(publicKeyPem) } }
 }
 
@@ -631,7 +676,11 @@ export async function installFromHubIndex(
 
   const component = findIndexComponent(fetched.value.index, options.id)
   if (component === undefined) {
-    return fail('bad-bundle', `Hub 上没有 ${options.id} 这个组件`, '检查 id 拼写；或者它还没发布')
+    return fail(
+      'bad-bundle',
+      msg('component.hub.unknownComponent', { id: options.id }),
+      msg('component.hub.unknownComponentHint'),
+    )
   }
   /*
    * 付费组件**连下载都不做**（M6 第 5 步补的门）。
@@ -648,8 +697,8 @@ export async function installFromHubIndex(
   if (component.pricing === 'paid') {
     return fail(
       'paid-not-available',
-      `${component.id} 是付费组件，现在还不能下载`,
-      '付费与购买流程还没做（DESIGN §21.5）。这里拦的是"下载"，装进应用时还会再拦一次',
+      msg('component.hub.paid', { id: component.id }),
+      msg('component.hub.paidHint'),
     )
   }
   const wanted =
@@ -657,11 +706,14 @@ export async function installFromHubIndex(
       ? latestVersion(component)
       : component.versions.find((entry) => entry.version === options.version)
   if (wanted === undefined) {
-    const known = component.versions.map((entry) => entry.version).join('、')
+    const known = component.versions.map((entry) => entry.version).join(msg('component.listSeparator'))
     return fail(
       'bad-bundle',
-      `Hub 上没有 ${options.id}@${options.version ?? '(最新)'}`,
-      `现有版本：${known === '' ? '（无）' : known}`,
+      msg('component.hub.unknownVersion', {
+        id: options.id,
+        version: options.version ?? msg('component.hub.latest'),
+      }),
+      msg('component.hub.knownVersions', { versions: known === '' ? msg('component.none') : known }),
     )
   }
 
@@ -698,11 +750,15 @@ export async function fetchHubIndex(
   try {
     const response = await doFetch(url, { signal: controller.signal, headers: { accept: 'application/json' } })
     if (!response.ok) {
-      return fail('fetch-failed', `读不到 Hub 索引：HTTP ${response.status}`, url)
+      return fail('fetch-failed', msg('component.hub.indexFetch', { status: response.status }), url)
     }
     raw = (await response.json()) as unknown
   } catch (error) {
-    return fail('fetch-failed', '读不到 Hub 索引（网络或超时）', error instanceof Error ? error.message : String(error))
+    return fail(
+      'fetch-failed',
+      msg('component.hub.indexNetwork'),
+      error instanceof Error ? error.message : String(error),
+    )
   } finally {
     clearTimeout(timer)
   }

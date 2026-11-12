@@ -20,12 +20,30 @@ import {
   type ComponentAssembly,
   type ComponentEntry,
 } from './assembly.js'
+import { msg } from '@tenon/protocol'
 import type { ComponentManifest } from './manifest.js'
-import { COMPONENT_ID_RE } from './manifest.js'
+import { COMPONENT_ID_RE, manifestName, manifestText } from './manifest.js'
 import { discoverAll, pickPlugin, type UsablePlugin } from './resolve.js'
 import type { PluginRoot } from './roots.js'
 import { findSlot, slotHost } from './slots.js'
 import { isRangeValid, meetsMinTenonVersion, satisfiesRange, compareVersionText } from './version.js'
+
+/**
+ * 只有清单真的带了这种语言的覆盖时，才把 localized* 放进结果里。
+ *
+ * 为什么不总是写：整个字段恒定存在但永远等于基准值时，前端会分不清
+ * "这个组件没有中文名"和"中文名恰好和英文一样"，而这决定了它要不要显示原名。
+ */
+function localizedFields(manifest: ComponentManifest): {
+  localizedName?: string
+  localizedDescription?: string
+} {
+  const text = manifestText(manifest)
+  return {
+    ...(text.name === manifest.name ? {} : { localizedName: text.name }),
+    ...(text.description === manifest.description ? {} : { localizedDescription: text.description }),
+  }
+}
 
 /**
  * problem 的 code 取值 —— **稳定契约**，界面按它决定给什么按钮，改文案可以，改 code 不行。
@@ -211,7 +229,7 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     push(
       'assembly-invalid',
       null,
-      `${ASSEMBLY_FILE} 读不出来，这次不会加载任何组件`,
+      msg('component.plan.assemblyUnreadable', { file: ASSEMBLY_FILE }),
       read.issues.join('；'),
     )
     return { assembly: null, components: [], loadOrder: [], targets: [], problems }
@@ -224,11 +242,16 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
   for (const entry of assembly.components) {
     const id = entry.id
     if (!COMPONENT_ID_RE.test(id)) {
-      push('bad-id', id, `组件 id「${id}」不是合法的反向域名`, 'id 要写成 tenon.official.ai-assistant 这样')
+      push('bad-id', id, msg('component.plan.badId', { id }), msg('component.plan.badIdHint'))
       continue
     }
     if (seen.has(id)) {
-      push('duplicate-entry', id, `${id} 在装配声明里出现了不止一次`, '删掉多余的那条（只有第一条生效）')
+      push(
+        'duplicate-entry',
+        id,
+        msg('component.plan.duplicateEntry', { id }),
+        msg('component.plan.duplicateEntryHint'),
+      )
       continue
     }
     seen.add(id)
@@ -237,8 +260,8 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
       push(
         'bad-range',
         id,
-        `${id} 的版本区间「${entry.version}」不认识`,
-        '可用 ^1.2.0 / ~1.2.0 / >=1.0.0 / 1.2.3 / *',
+        msg('component.plan.badRange', { id, range: entry.version }),
+        msg('component.plan.badRangeHint'),
       )
       continue
     }
@@ -248,16 +271,21 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     if (plugin === null) {
       const broken = pick.broken[0]
       if (broken !== undefined) {
-        push('invalid-manifest', id, `${id} 的清单读不出来`, broken.issues.join('；'))
+        push(
+          'invalid-manifest',
+          id,
+          msg('component.plan.invalidManifest', { id }),
+          broken.issues.join(msg('component.listSeparator')),
+        )
       } else if (pick.found.length === 0) {
-        push('missing', id, `磁盘上找不到组件 ${id}`, '它可能没随这个版本发布，或者 Hub 上还没下载')
+        push('missing', id, msg('component.plan.missing', { id }), msg('component.plan.missingHint'))
       } else {
         const found = pick.found.map((p) => `${p.manifest.version}（${p.root.kind}）`).join('、')
         push(
           'version-unsatisfied',
           id,
-          `${id} 没有满足「${entry.version}」的版本，找到的是 ${found}`,
-          '把 version 改成能匹配的区间，或更新这个组件',
+          msg('component.plan.noMatchingVersion', { id, range: entry.version, found }),
+          msg('component.plan.noMatchingVersionHint'),
         )
       }
       continue
@@ -268,8 +296,8 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
       push(
         'id-mismatch',
         id,
-        `清单里的 id 是「${manifest.id}」，与装配的「${id}」不一致`,
-        `把 ${plugin.dir} 的 manifest.id 改成 ${id}，或修正装配声明`,
+        msg('component.plan.idMismatch', { actual: manifest.id, id }),
+        msg('component.plan.idMismatchHint', { dir: plugin.dir, id }),
       )
       continue
     }
@@ -277,21 +305,30 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
       push(
         'source-mismatch',
         id,
-        `${id} 的清单声明 source=${manifest.source}，但它来自 ${plugin.root.kind} 目录`,
-        '来源必须与所在目录一致，否则签名校验会被绕过',
+        msg('component.plan.sourceMismatch', { id, source: manifest.source, kind: plugin.root.kind }),
+        msg('component.plan.sourceMismatchHint'),
       )
       continue
     }
     if (manifest.source === 'hub' && manifest.signature === null) {
-      push('unsigned', id, `${id} 来自 Hub 但没有签名`, '签名校验在 M6 落地；在此之前只用内置版')
+      push(
+        'unsigned',
+        id,
+        msg('component.plan.unsigned', { id }),
+        msg('component.plan.unsignedHint'),
+      )
       continue
     }
     if (!meetsMinTenonVersion(input.tenonVersion, manifest.minTenonVersion)) {
       push(
         'tenon-too-old',
         id,
-        `${manifest.name} 要求 Tenon ≥ ${manifest.minTenonVersion}，当前 ${input.tenonVersion}`,
-        '升级 Tenon，或换一个兼容的组件版本',
+        msg('component.plan.minVersion', {
+          name: manifestName(manifest),
+          required: manifest.minTenonVersion,
+          current: input.tenonVersion,
+        }),
+        msg('component.plan.minVersionHint'),
       )
       continue
     }
@@ -301,7 +338,12 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     for (const spec of entry.mount) {
       const slot = findSlot(spec.slot)
       if (slot === undefined) {
-        push('unknown-slot', id, `${manifest.name} 挂在不存在的槽位「${spec.slot}」上`, '见 DESIGN §21.3 的六个插槽')
+        push(
+          'unknown-slot',
+          id,
+          msg('component.plan.unknownSlot', { name: manifestName(manifest), slot: spec.slot }),
+          msg('component.plan.unknownSlotHint'),
+        )
         broken = true
         continue
       }
@@ -309,8 +351,10 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
         push(
           'slot-not-declared',
           id,
-          `${manifest.name} 没有声明支持槽位「${spec.slot}」`,
-          `它支持：${manifest.slots.join('、') || '（无）'}`,
+          msg('component.plan.slotNotDeclared', { name: manifestName(manifest), slot: spec.slot }),
+          msg('component.plan.slotNotDeclaredHint', {
+            slots: manifest.slots.join(msg('component.listSeparator')) || msg('component.none'),
+          }),
         )
         broken = true
         continue
@@ -320,14 +364,23 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
         push(
           'facet-missing',
           id,
-          `${manifest.name} 没有 ${host ?? '对应'} facet，装不到「${spec.slot}」`,
-          '重装这个组件',
+          msg('component.plan.noFacet', {
+            name: manifestName(manifest),
+            host: host ?? msg('component.plan.correspondingFacet'),
+            slot: spec.slot,
+          }),
+          msg('component.plan.noFacetHint'),
         )
         broken = true
         continue
       }
       if (spec.prefix !== undefined && slot.host !== 'server') {
-        push('prefix-on-slot', id, `「${spec.slot}」是前端槽位，不该写 prefix`, 'prefix 只用于 app.api')
+        push(
+          'prefix-on-slot',
+          id,
+          msg('component.plan.prefixOnSlot', { slot: spec.slot }),
+          msg('component.plan.prefixOnSlotHint'),
+        )
         broken = true
         continue
       }
@@ -337,7 +390,12 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     for (const [host, path] of Object.entries(manifest.facets)) {
       if (path === undefined) continue
       if (!(await fileExists(join(plugin.dir, path)))) {
-        push('facet-file-missing', id, `清单说 ${host} facet 在「${path}」，但文件不存在`, '重装这个组件')
+        push(
+          'facet-file-missing',
+          id,
+          msg('component.plan.facetFileMissing', { host, path }),
+          msg('component.plan.facetFileMissingHint'),
+        )
         broken = true
       }
     }
@@ -350,8 +408,10 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
       dependsOn: Object.keys(manifest.dependencies),
       component: {
         id,
+        // 基准值（英文）给工具结果与 AGENTS.md；界面读 localized*
         name: manifest.name,
         description: manifest.description,
+        ...localizedFields(manifest),
         version: manifest.version,
         source: manifest.source,
         license: entry.license,
@@ -381,8 +441,12 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
         push(
           'dependency-missing',
           item.entry.id,
-          `${item.manifest.name} 需要 ${depId}（${range}），但它没在装配声明里`,
-          `先装配 ${depId}`,
+          msg('component.plan.missingDependency', {
+            name: manifestName(item.manifest),
+            dep: depId,
+            range,
+          }),
+          msg('component.plan.missingDependencyHint', { dep: depId }),
         )
         item.blocked = true
         continue
@@ -397,8 +461,13 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
         push(
           'dependency-missing',
           item.entry.id,
-          `${item.manifest.name} 需要 ${depId} ${range}，实际装的是 ${dep.manifest.version}`,
-          '调整依赖区间，或换个版本',
+          msg('component.plan.dependencyVersion', {
+            name: manifestName(item.manifest),
+            dep: depId,
+            range,
+            actual: dep.manifest.version,
+          }),
+          msg('component.plan.dependencyVersionHint'),
         )
         item.blocked = true
       }
@@ -415,8 +484,8 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     push(
       'dependency-cycle',
       cycle[0] ?? null,
-      `组件依赖成环：${cycle.join(' → ')}`,
-      '拆掉其中一条依赖',
+      msg('component.plan.cycle', { cycle: cycle.join(' → ') }),
+      msg('component.plan.cycleHint'),
     )
   }
 
@@ -435,7 +504,15 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     for (const id of ids) {
       const item = byIdMap.get(id)
       if (item !== undefined) item.blocked = true
-      push('prefix-conflict', id, `后端前缀「${prefix}」被 ${ids.join('、')} 同时占用`, '改成一个专属前缀')
+      push(
+        'prefix-conflict',
+        id,
+        msg('component.plan.prefixConflict', {
+          prefix,
+          ids: ids.join(msg('component.listSeparator')),
+        }),
+        msg('component.plan.prefixConflictHint'),
+      )
     }
   }
 
@@ -454,8 +531,11 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
       push(
         'dependency-blocked',
         item.entry.id,
-        `${item.manifest.name} 依赖的 ${down.entry.id} 装不上`,
-        '先修好上面那条',
+        msg('component.plan.dependencyFailed', {
+          name: manifestName(item.manifest),
+          dep: down.entry.id,
+        }),
+        msg('component.plan.dependencyFailedHint'),
       )
     }
   }
@@ -473,7 +553,7 @@ export async function buildPlan(input: PlanInput): Promise<PlanResult> {
     loadOrder,
     targets: loadOrder.map((id) => {
       const item = byIdMap.get(id)
-      if (item === undefined) throw new Error(`加载顺序里出现了未知组件 ${id}`)
+      if (item === undefined) throw new Error(msg('component.plan.unknownInOrder', { id }))
       return {
         id,
         version: item.component.version,
@@ -514,6 +594,7 @@ export async function listAvailable(input: {
         id,
         name: top.manifest.name,
         description: top.manifest.description,
+        ...localizedFields(top.manifest),
         version: top.manifest.version,
         source: top.manifest.source,
         pricing: top.manifest.pricing,

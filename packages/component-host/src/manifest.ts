@@ -12,7 +12,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { ComponentPricing, ComponentSource } from '@tenon/protocol'
+import { ComponentPricing, ComponentSource, getLocale, msg } from '@tenon/protocol'
 import { findSlot } from './slots.js'
 
 /** 反向域名式的 id：`tenon.official.ai-assistant` */
@@ -41,14 +41,31 @@ export const ComponentFacets = z.object({
 })
 export type ComponentFacets = z.infer<typeof ComponentFacets>
 
+/** 某种语言的名称与描述。没有的字段落回基准值（英文）*/
+export const ComponentTranslation = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+})
+export type ComponentTranslation = z.infer<typeof ComponentTranslation>
+
 export const ComponentManifest = z.object({
-  id: z.string().regex(COMPONENT_ID_RE, 'id 要写成反向域名，例如 tenon.official.ai-assistant'),
+  id: z.string().regex(COMPONENT_ID_RE, msg('component.manifest.badId')),
+  /*
+   * `name` / `description` 是**基准值（英文）**，`localized` 按语言覆盖。
+   *
+   * 为什么基准是英文而不是中文：清单会进 Hub 索引（签名数据）、会原样出现在
+   * `list_components` 的工具结果里、会被写进别的应用仓库 —— 这些场合的默认读者
+   * 是"不认识这个产品的人"。中文名放在 `localized.zh` 里，需要时按语言取。
+   *
+   * 可选而不是必填：第三方组件只写英文也能上架，不该因为没翻译被拦。
+   */
   name: z.string().min(1),
-  version: z.string().regex(SEMVER_RE, 'version 要写成 1.2.3'),
+  localized: z.record(z.string(), ComponentTranslation).default({}),
+  version: z.string().regex(SEMVER_RE, msg('component.manifest.badVersion')),
   description: z.string().min(1),
   /** 与所在根目录一致：bundled 根里只能有 `bundled`，hub 根里只能有 `hub`（plan 里查）*/
   source: ComponentSource,
-  minTenonVersion: z.string().regex(SEMVER_RE, 'minTenonVersion 要写成 1.2.3'),
+  minTenonVersion: z.string().regex(SEMVER_RE, msg('component.manifest.badMinVersion')),
   /** Phase 1 恒为 null；hub 来源必须有（plan 里拦）*/
   signature: z.string().nullable().default(null),
   permissions: z.array(z.string().min(1)).default([]),
@@ -65,6 +82,28 @@ export type ComponentManifest = z.infer<typeof ComponentManifest>
 
 export function manifestFile(dir: string): string {
   return join(dir, 'manifest.json')
+}
+
+/**
+ * 清单里给人看的名字与描述，按**当前进程语言**取。
+ *
+ * 取的时候才判断语言，而不是加载清单时固化：用户可以在运行中切语言，
+ * 而插件是在启动时扫描的 —— 那时定下来的句子会一直是启动时的语言。
+ *
+ * `localized` 里没有这一种语言时落回基准值（英文），不抛也不留空：
+ * 一个只有英文名的第三方组件也该好好显示，只是显示英文。
+ */
+export function manifestText(manifest: ComponentManifest): { name: string; description: string } {
+  const override = manifest.localized[getLocale()]
+  return {
+    name: override?.name ?? manifest.name,
+    description: override?.description ?? manifest.description,
+  }
+}
+
+/** 只要名字（`plan` 的错误消息里到处都是） */
+export function manifestName(manifest: ComponentManifest): string {
+  return manifestText(manifest).name
 }
 
 /** 清单里的相对路径不能跑出插件目录 —— 否则一个清单就能让宿主读到任意文件 */
@@ -99,34 +138,37 @@ export function parseManifest(raw: unknown): ParsedManifest {
 
   for (const [host, path] of Object.entries(manifest.facets)) {
     if (path !== undefined && !isInsideRelative(path)) {
-      issues.push(`facets.${host}：「${path}」必须是插件目录内的相对路径`)
+      issues.push(msg('component.manifest.facetOutside', { host, path }))
     }
   }
 
   for (const permission of manifest.permissions) {
     if (!isKnownPermission(permission)) {
       issues.push(
-        `permissions：「${permission}」不是已知权限（可用：${PERMISSIONS.join(' / ')} / net:fetch:<域名>）`,
+        msg('component.manifest.unknownPermission', {
+          permission,
+          list: PERMISSIONS.join(' / '),
+        }),
       )
     }
   }
 
   if (manifest.permissions.length !== new Set(manifest.permissions).size) {
-    issues.push('permissions：有重复项')
+    issues.push(msg('component.manifest.duplicatePermissions'))
   }
 
   for (const slot of manifest.slots) {
     if (findSlot(slot) === undefined) {
-      issues.push(`slots：「${slot}」不是已知插槽`)
+      issues.push(msg('component.manifest.unknownSlot', { slot }))
     }
   }
 
   if (manifest.slots.length !== new Set(manifest.slots).size) {
-    issues.push('slots：有重复项')
+    issues.push(msg('component.manifest.duplicateSlots'))
   }
 
   if (manifest.source === 'local' && manifest.signature !== null) {
-    issues.push('local 来源的组件不该有 signature')
+    issues.push(msg('component.manifest.localSigned'))
   }
 
   return { manifest: issues.length === 0 ? manifest : null, issues }
@@ -148,7 +190,7 @@ export async function readManifest(dir: string): Promise<ManifestRead> {
     return {
       kind: 'invalid',
       file,
-      issues: [`读不到清单：${error instanceof Error ? error.message : String(error)}`],
+      issues: [msg('component.manifest.unreadable', { detail: error instanceof Error ? error.message : String(error) })],
     }
   }
   let raw: unknown
@@ -158,7 +200,9 @@ export async function readManifest(dir: string): Promise<ManifestRead> {
     return {
       kind: 'invalid',
       file,
-      issues: [`manifest.json 不是合法 JSON：${error instanceof Error ? error.message : String(error)}`],
+      issues: [
+        msg('component.manifest.badJson', { detail: error instanceof Error ? error.message : String(error) }),
+      ],
     }
   }
   const { manifest, issues } = parseManifest(raw)

@@ -15,6 +15,8 @@
  * 预发布版按 npm 语义处理：只有**同一 major.minor.patch 且带预发布**的比较项才放行它。
  */
 
+import { msg } from '@tenon/protocol'
+
 export interface ParsedVersion {
   readonly major: number
   readonly minor: number
@@ -27,7 +29,7 @@ const COMPARATOR_RE = /^(\^|~|>=|<=|>|<|=)?v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(
 
 export class InvalidVersionError extends Error {
   constructor(readonly version: string) {
-    super(`不是合法版本号「${version}」（要 MAJOR.MINOR.PATCH，例如 1.2.3）`)
+    super(msg('component.version.badVersion', { version }))
     this.name = 'InvalidVersionError'
   }
 }
@@ -37,7 +39,7 @@ export class UnsupportedRangeError extends Error {
     readonly range: string,
     readonly reason: string,
   ) {
-    super(`不认识的版本区间「${range}」：${reason}`)
+    super(msg('component.version.badRange', { range, reason }))
     this.name = 'UnsupportedRangeError'
   }
 }
@@ -122,20 +124,20 @@ interface Branch {
 
 export function parseRange(range: string): Branch[] {
   const text = range.trim()
-  if (text === '') throw new UnsupportedRangeError(range, '空区间（要写 `*` 或具体版本）')
+  if (text === '') throw new UnsupportedRangeError(range, msg('component.version.emptyRange'))
   const branches: Branch[] = []
   for (const raw of text.split('||')) {
     const segment = raw.trim()
-    if (segment === '') throw new UnsupportedRangeError(range, '`||` 两侧有空片段')
+    if (segment === '') throw new UnsupportedRangeError(range, msg('component.version.emptySegment'))
     if (segment === '*') {
       branches.push({ any: true, comparators: [] })
       continue
     }
     const comparators: Comparator[] = []
     for (const token of segment.split(/\s+/)) {
-      if (token === '*') throw new UnsupportedRangeError(range, '`*` 只能单独成段，不能和比较项混用')
+      if (token === '*') throw new UnsupportedRangeError(range, msg('component.version.starAlone'))
       const match = COMPARATOR_RE.exec(token)
-      if (match === null) throw new UnsupportedRangeError(range, `不认识的片段「${token}」`)
+      if (match === null) throw new UnsupportedRangeError(range, msg('component.version.badToken', { token }))
       const op = (match[1] ?? '=') as Op
       comparators.push({ op, version: parseVersion(match[2] ?? '') })
     }

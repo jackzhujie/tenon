@@ -239,8 +239,9 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
     if (item.installed) continue
     store.push({
       id: item.id,
-      name: item.name,
-      description: item.description,
+      // 界面优先用当前语言的覆盖；没有就落回基准值（英文）
+      name: item.localizedName ?? item.name,
+      description: item.localizedDescription ?? item.description,
       version: item.version,
       source: item.source,
       paid: item.pricing.type === 'paid',
@@ -328,7 +329,7 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="truncate text-[12px] text-ink">{component.name}</span>
+                          <span className="truncate text-[12px] text-ink">{component.localizedName ?? component.name}</span>
                           <span className="shrink-0 rounded border border-line px-1 text-[9.5px] text-faint">
                             {t(SOURCE_KEY[component.source])}
                           </span>

@@ -633,6 +633,14 @@ export const InstalledComponent = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
+  /**
+   * 当前界面语言下的名字与描述（可选）。
+   *
+   * `name` / `description` 是**基准值（英文）**：工具结果、AGENTS.md、Hub 索引都用基准值 ——
+   * 那些读者不是本机的中文用户。界面优先用这两个字段，没有就落回基准值。
+   */
+  localizedName: z.string().optional(),
+  localizedDescription: z.string().optional(),
   /** 实际选中的版本（不是装配声明里的区间） */
   version: z.string(),
   source: ComponentSource,
@@ -667,6 +675,14 @@ export const AvailableComponent = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
+  /**
+   * 当前界面语言下的名字与描述（可选）。
+   *
+   * `name` / `description` 是**基准值（英文）**：工具结果、AGENTS.md、Hub 索引都用基准值 ——
+   * 那些读者不是本机的中文用户。界面优先用这两个字段，没有就落回基准值。
+   */
+  localizedName: z.string().optional(),
+  localizedDescription: z.string().optional(),
   version: z.string(),
   source: ComponentSource,
   pricing: ComponentPricing,

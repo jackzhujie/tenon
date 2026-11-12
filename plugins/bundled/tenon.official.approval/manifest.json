@@ -1,8 +1,14 @@
 {
   "id": "tenon.official.approval",
-  "name": "审批流",
+  "name": "Approval flow",
   "version": "1.0.0",
-  "description": "给应用加一条最简单的审批链：提交 → 通过 / 驳回，状态在服务端对象里",
+  "description": "Adds the simplest approval chain to an app: submit → approve / reject, with the state kept in a server-side object",
+  "localized": {
+    "zh": {
+      "name": "审批流",
+      "description": "给应用加一条最简单的审批链：提交 → 通过 / 驳回，状态在服务端对象里"
+    }
+  },
   "source": "bundled",
   "minTenonVersion": "0.0.0",
   "signature": null,
@@ -10,7 +16,7 @@
     "db:read",
     "db:write"
   ],
-  "agentHints": "这个应用已经装了「审批流」（tenon.official.approval）：右下角徽标里有待审清单，提交/通过/驳回都在那里。**不要自己写审批状态机**；要把某条业务记录接进审批，调用它的 submit 方法即可。数据存在组件自己的键值空间里（按应用与组件隔离），重启不会丢；要清空用它的 reset 方法。",
+  "agentHints": "This app already has the \"Approval flow\" component installed (tenon.official.approval): the badge in the bottom-right corner lists what is pending, and submit / approve / reject all happen there. **Do not write your own approval state machine**; to route a business record through it, call its submit method. Its data lives in the component’s own key-value space (isolated per app and per component) and survives restarts; call reset to clear it.",
   "pricing": {
     "type": "free"
   },

@@ -11,10 +11,11 @@
  */
 import { getLocale, renderMessage, type Locale, type MessageParams, type MessageTable } from '../locale.js'
 import { checksEn, checksZh, type CheckMessageKey } from './checks.js'
+import { componentsEn, componentsZh, type ComponentMessageKey } from './components.js'
 import { errorsEn, errorsZh, type ErrorMessageKey } from './errors.js'
 
-const en = { ...errorsEn, ...checksEn } as const
-const zh: Record<keyof typeof en, string> = { ...errorsZh, ...checksZh }
+const en = { ...errorsEn, ...checksEn, ...componentsEn } as const
+const zh: Record<keyof typeof en, string> = { ...errorsZh, ...checksZh, ...componentsZh }
 
 export type ServerMessageKey = keyof typeof en
 
@@ -35,4 +36,4 @@ export function msgIn(locale: Locale, key: ServerMessageKey, params?: MessagePar
   return renderMessage(TABLES[locale], locale, key, params)
 }
 
-export type { CheckMessageKey, ErrorMessageKey }
+export type { CheckMessageKey, ComponentMessageKey, ErrorMessageKey }

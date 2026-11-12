@@ -120,7 +120,7 @@ describe('卸载即清理（DoD ②）', () => {
     expect(afterInstall.components[0]).toMatchObject({ id: ID, loaded: true })
 
     const docAfterInstall = await readFile(join(repository, AGENTS_DOC), 'utf8')
-    expect(docAfterInstall).toContain('AI 小助手')
+    expect(docAfterInstall).toContain('AI assistant')
     expect((await referencesIn(repository, ID)).length).toBeGreaterThan(0) // 声明与文档里当然有
 
     // ② 卸

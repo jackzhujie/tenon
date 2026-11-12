@@ -67,8 +67,8 @@ function denied(componentId: string, action: string): TenonError {
     {
       hint:
         action === STORAGE_READ_PERMISSION
-          ? '在清单的 permissions 里加上 db:read'
-          : '在清单的 permissions 里加上 db:write',
+          ? msg('component.storage.needRead')
+          : msg('component.storage.needWrite'),
     },
   )
 }

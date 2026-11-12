@@ -1,14 +1,28 @@
 {
   "id": "tenon.official.csv-export",
-  "name": "导出 CSV",
+  "name": "Export CSV",
   "version": "1.0.0",
-  "description": "把页面上的表格导成 Excel 能直接打开的 CSV：抓表、生成、下载，都在本地完成",
+  "description": "Turns a table on the page into a CSV that Excel opens directly: it grabs the table, generates the file and downloads it, all locally",
+  "localized": {
+    "zh": {
+      "name": "导出 CSV",
+      "description": "把页面上的表格导成 Excel 能直接打开的 CSV：抓表、生成、下载，都在本地"
+    }
+  },
   "source": "bundled",
   "minTenonVersion": "0.0.0",
   "signature": null,
   "permissions": [],
-  "agentHints": "这个应用已经装了「导出 CSV」（tenon.official.csv-export）。它自己抓页面上的 <table> 并调服务端生成 CSV，**不要自己写导出逻辑**。如果想让它导出别的数据（不是页面上的表格），把数据渲染进一个 <table data-tenon-export=\"文件名\"> 即可。",
-  "pricing": { "type": "free" },
-  "facets": { "server": "server.js", "web": "web.js" },
-  "slots": ["app.page.header", "app.api"]
+  "agentHints": "This app already has the \"Export CSV\" component installed (tenon.official.csv-export). It grabs <table> elements from the page itself and asks the server side to build the CSV — **do not write your own export logic**. To export something that is not on the page, render that data into a <table data-tenon-export=\"filename\"> and it will pick it up.",
+  "pricing": {
+    "type": "free"
+  },
+  "facets": {
+    "server": "server.js",
+    "web": "web.js"
+  },
+  "slots": [
+    "app.page.header",
+    "app.api"
+  ]
 }

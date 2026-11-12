@@ -24,8 +24,6 @@ import { createAuthTools } from '../src/tools/auth.js'
 /** 允许出现的中文片段：引用检查项结论时给中文界面的那一版 */
 const ALLOWED = ['没跑成']
 
-const HAN = /[\u4e00-\u9fff]/
-
 function cjkOf(text: string): string[] {
   const stripped = ALLOWED.reduce((whole, allowed) => whole.split(allowed).join(''), text)
   return (stripped.match(/[\u4e00-\u9fff]+/g) ?? []).slice(0, 3)

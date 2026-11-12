@@ -8,6 +8,7 @@
  * 顺序是刻意这样排的：**先试算，通过了才落盘**。
  * 反过来（先写再验、错了回滚）在并发下会留下半装状态，而且回滚本身也会失败。
  */
+import { msg } from '@tenon/protocol'
 import type { ComponentProblem, InstalledComponent } from '@tenon/protocol'
 import { syncAgentsDoc, type AgentsDocSync } from './agents-doc.js'
 import {
@@ -92,8 +93,8 @@ export async function installComponent(request: InstallRequest): Promise<Install
         problem(
           'invalid-manifest',
           request.id,
-          `${request.id} 的清单读不出来`,
-          pick.broken[0]?.issues.join('；') ?? null,
+          msg('component.install.manifestUnreadable', { id: request.id }),
+          pick.broken[0]?.issues.join(msg('component.listSeparator')) ?? null,
         ),
       )
     }
@@ -102,18 +103,24 @@ export async function installComponent(request: InstallRequest): Promise<Install
         problem(
           'missing',
           request.id,
-          `找不到组件 ${request.id}`,
-          '它可能没随这个版本发布；用 component.list 看有哪些可装',
+          msg('component.install.notFound', { id: request.id }),
+          msg('component.install.notFoundHint'),
         ),
       )
     }
-    const found = pick.found.map((item) => `${item.manifest.version}（${item.root.kind}）`).join('、')
+    const found = pick.found
+      .map((item) => `${item.manifest.version} (${item.root.kind})`)
+      .join(msg('component.listSeparator'))
     return fail(
       problem(
         'version-unsatisfied',
         request.id,
-        `${request.id} 没有满足「${request.version ?? '*'}」的版本，找到的是 ${found}`,
-        '换一个版本区间，或更新组件',
+        msg('component.install.noMatchingVersion', {
+          id: request.id,
+          range: request.version ?? '*',
+          found,
+        }),
+        msg('component.install.noMatchingVersionHint'),
       ),
     )
   }
@@ -137,8 +144,11 @@ export async function installComponent(request: InstallRequest): Promise<Install
       problem(
         'paid-not-available',
         request.id,
-        `${request.id} 是付费组件（${plugin.manifest.pricing.sku}），现在还不能装`,
-        '付费与购买流程还没做。等它上线之后这里会有「购买」按钮',
+        msg('component.install.paid', {
+          id: request.id,
+          sku: plugin.manifest.pricing.sku,
+        }),
+        msg('component.install.paidHint'),
       ),
     )
   }
@@ -149,8 +159,8 @@ export async function installComponent(request: InstallRequest): Promise<Install
       problem(
         'assembly-invalid',
         null,
-        `${assemblyFile(request.repoDir)} 读不出来，先修它再装组件`,
-        read.issues.join('；'),
+        msg('component.install.assemblyBroken', { file: assemblyFile(request.repoDir) }),
+        read.issues.join(msg('component.listSeparator')),
       ),
     )
   }
@@ -179,7 +189,13 @@ export async function installComponent(request: InstallRequest): Promise<Install
     return fail(
       ...(own.length > 0
         ? own
-        : [problem('missing', request.id, `${request.id} 试算没通过，但没给出原因（这是个 bug）`)]),
+        : [
+            problem(
+              'missing',
+              request.id,
+              msg('component.install.solveNoReason', { id: request.id }),
+            ),
+          ]),
     )
   }
 
@@ -189,12 +205,16 @@ export async function installComponent(request: InstallRequest): Promise<Install
 
   const notes: string[] = []
   if (entry.mount.length === 0) {
-    notes.push('这个组件没有挂载点（只有服务端能力），界面上不会出现任何东西')
+    notes.push(msg('component.install.noteNoMount'))
   }
   if (plugin.manifest.permissions.length > 0) {
-    notes.push(`它声明的权限：${plugin.manifest.permissions.join('、')}`)
+    notes.push(
+      msg('component.install.notePermissions', {
+        list: plugin.manifest.permissions.join(msg('component.listSeparator')),
+      }),
+    )
   }
-  if (alreadyInstalled) notes.push('之前就装过，这次按新的参数整条替换')
+  if (alreadyInstalled) notes.push(msg('component.install.noteReplaced'))
 
   return {
     ok: true,
@@ -224,7 +244,12 @@ export interface SetEnabledResult {
 export async function setComponentEnabled(request: SetEnabledRequest): Promise<SetEnabledResult> {
   const read = await readAssembly(request.repoDir)
   if (read.kind === 'invalid') {
-    throw new Error(`${assemblyFile(request.repoDir)} 读不出来：${read.issues.join('；')}`)
+    throw new Error(
+      msg('component.install.assemblyThrow', {
+        file: assemblyFile(request.repoDir),
+        issues: read.issues.join(msg('component.listSeparator')),
+      }),
+    )
   }
   const entry = read.assembly.components.find((item) => item.id === request.id)
   if (entry === undefined) {
@@ -268,7 +293,12 @@ export interface UninstallResult {
 export async function uninstallComponent(request: UninstallRequest): Promise<UninstallResult> {
   const read = await readAssembly(request.repoDir)
   if (read.kind === 'invalid') {
-    throw new Error(`${assemblyFile(request.repoDir)} 读不出来：${read.issues.join('；')}`)
+    throw new Error(
+      msg('component.install.assemblyThrow', {
+        file: assemblyFile(request.repoDir),
+        issues: read.issues.join(msg('component.listSeparator')),
+      }),
+    )
   }
   const next = removeComponent(read.assembly, request.id)
   const removed = next.components.length !== read.assembly.components.length
