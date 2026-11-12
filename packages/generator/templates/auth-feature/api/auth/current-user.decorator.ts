@@ -20,7 +20,7 @@ export const CurrentUser = createParamDecorator(
   (_data: unknown, context: ExecutionContext): SessionUser => {
     const request = context.switchToHttp().getRequest<AuthedRequest>()
     if (request.user === undefined) {
-      throw new UnauthorizedException('这个接口需要登录（守卫没跑？检查 AuthModule 是否还在 imports 里）')
+      throw new UnauthorizedException('this endpoint requires sign-in (is the guard running? check that AuthModule is still in imports)')
     }
     return request.user
   },

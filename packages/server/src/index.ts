@@ -159,7 +159,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   const hubConfig = hub.config
   const hubDir = hubPluginsDir(env, core.home.root)
   // 配了但不对（只给了一半、文件坏了）要说出来：静默当"未配置"会让排障停在"商店是空的"
-  if (hub.note !== null) process.stderr.write(`[tenon] Hub 配置有问题，按未配置处理：${hub.note}\n`)
+  if (hub.note !== null) process.stderr.write(`[tenon] Hub configuration looks wrong; treating it as unconfigured: ${hub.note}\n`)
   const agent = createAgentRuntime({
     core,
     env,

@@ -312,8 +312,8 @@ export async function pushReleaseToRemote(options: PushReleaseOptions): Promise<
     return {
       ok: false,
       code: 'NO_REMOTE',
-      message: '这个应用还没有配置远端仓库',
-      hint: '在发布对话框的「远端仓库」里填一次地址和令牌。',
+      message: msg('error.remote.notConfigured'),
+      hint: msg('error.remote.notConfiguredHint'),
       refs: 0,
     }
   }
@@ -324,8 +324,8 @@ export async function pushReleaseToRemote(options: PushReleaseOptions): Promise<
     return {
       ok: false,
       code: 'UNKNOWN',
-      message: `仓库里没有 ${version} 这个标签，可能这一版已经被清理掉了`,
-      hint: '重新发布一版即可；已经推到远端的旧版本不受影响。',
+      message: msg('error.remote.tagMissing', { version }),
+      hint: msg('error.remote.tagMissingHint'),
       refs: 0,
     }
   }
@@ -355,8 +355,8 @@ export async function pushReleaseToRemote(options: PushReleaseOptions): Promise<
     return {
       ok: false,
       code: 'UNKNOWN',
-      message: `推送时出了意外：${reason.slice(0, 300)}`,
-      hint: '先看远端地址是否还能打开；再看本机网络。',
+      message: msg('error.remote.unexpected', { detail: reason.slice(0, 300) }),
+      hint: msg('error.remote.unexpectedHint'),
       refs: 0,
     }
   }

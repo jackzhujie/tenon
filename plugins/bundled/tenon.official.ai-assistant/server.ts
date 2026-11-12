@@ -44,7 +44,7 @@ export function activate(input: ActivateInput): void {
     ({ appId: inputAppId }, principal, self) => {
       if (inputAppId !== appId || principal.appId !== appId) {
         // 一个组件的对象不该被别的应用拿到：input 与 principal 都必须指向这个应用
-        throw invalid('principal', `这个组件属于应用 ${appId}，不是 ${inputAppId}`)
+        throw invalid('principal', `this component belongs to app ${appId}, not ${inputAppId}`)
       }
 
       // 名字不能叫 status（chord 的 Ref 自带 status）—— 见 contract.ts 的说明
@@ -60,9 +60,9 @@ export function activate(input: ActivateInput): void {
 
         ask: async ({ text }, ctx) => {
           const question = text.trim()
-          if (question === '') throw invalid('input', '问题不能为空')
+          if (question === '') throw invalid('input', 'the question cannot be empty')
           // 不排队：并发提问会让两条回答交错写进同一个 transcript，读起来像模型精神分裂
-          if (phase.value === 'thinking') throw invalid('busy', '上一个问题还在回答中')
+          if (phase.value === 'thinking') throw invalid('busy', 'the previous question is still being answered')
 
           messages.change(ctx, (list) => [...list, { role: 'user', text: question }])
           phase.replace(ctx, 'thinking')
@@ -77,8 +77,8 @@ export function activate(input: ActivateInput): void {
              * 只会变成一个红叉加一句 INTERNAL。
              */
             const reason = error instanceof Error ? error.message : String(error)
-            log?.(`[assistant] 回答失败：${reason}`)
-            messages.change(ctx, (list) => [...list, { role: 'system', text: `没能回答：${reason}` }])
+            log?.(`[assistant] failed to answer: ${reason}`)
+            messages.change(ctx, (list) => [...list, { role: 'system', text: `Could not answer: ${reason}` }])
           } finally {
             phase.replace(ctx, 'idle')
           }

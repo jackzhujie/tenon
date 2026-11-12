@@ -37,7 +37,7 @@ import { AuthService, secondsUntil } from './auth.service'
 import { parseBody } from './validate'
 
 function requireAdmin(user: SessionUser): void {
-  if (user.role !== 'admin') throw new ForbiddenException('只有管理员能做这件事')
+  if (user.role !== 'admin') throw new ForbiddenException('only admins can do this')
 }
 
 @Controller('auth')
@@ -89,7 +89,7 @@ export class AuthController {
        * 同一个 401 再加上 `verify` 里的等价耗时（见 AuthService.verify），
        * "谁在这个系统里有账号"就不再是能问出来的信息。
        */
-      throw new ForbiddenException('邮箱或密码不对')
+      throw new ForbiddenException('wrong email or password')
     }
     const session = await this.auth.issueSession(user.id)
     setSessionCookie(req, res, AUTH_COOKIE_NAME, session.token, secondsUntil(session.expiresAt))

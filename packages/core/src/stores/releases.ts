@@ -1,4 +1,4 @@
-import type { Release, ReleaseGateStatus, ReleaseKind } from '@tenon/protocol'
+import { msg, type Release, type ReleaseGateStatus, type ReleaseKind } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
 import { newId } from '../ids.js'
 
@@ -79,7 +79,7 @@ export class ReleaseStore {
       createdAt,
     )
     const row = this.db.get<ReleaseRow>('SELECT * FROM releases WHERE id = ?', id)
-    if (row === undefined) throw new Error('写入发布记录后读不回来')
+    if (row === undefined) throw new Error(msg('error.releases.readBack'))
     return toRelease({ ...row })
   }
 }

@@ -25,27 +25,27 @@ export type AuthStatus = z.infer<typeof AuthStatus>
 
 /** `POST /api/auth/setup` —— 第一个管理员 */
 export const SetupInput = z.object({
-  email: z.string().email('邮箱格式不对'),
-  password: z.string().min(8, '密码至少 8 位'),
+  email: z.string().email('not a valid email address'),
+  password: z.string().min(8, 'the password must be at least 8 characters'),
 })
 
 /** `POST /api/auth/login` —— 密码只要求非空：规则变化不该把老账号挡在门外 */
 export const LoginInput = z.object({
-  email: z.string().email('邮箱格式不对'),
-  password: z.string().min(1, '请输入密码'),
+  email: z.string().email('not a valid email address'),
+  password: z.string().min(1, 'the password is required'),
 })
 
 /** `POST /api/auth/users` —— 管理员加人 */
 export const NewUserInput = z.object({
-  email: z.string().email('邮箱格式不对'),
-  password: z.string().min(8, '密码至少 8 位'),
+  email: z.string().email('not a valid email address'),
+  password: z.string().min(8, 'the password must be at least 8 characters'),
   role: Role.default('member'),
 })
 
 /** `POST /api/auth/password` —— 改自己的口令 */
 export const PasswordInput = z.object({
-  current: z.string().min(1, '请输入当前密码'),
-  next: z.string().min(8, '新密码至少 8 位'),
+  current: z.string().min(1, 'the current password is required'),
+  next: z.string().min(8, 'the new password must be at least 8 characters'),
 })
 
 /** `GET /api/auth/users` */

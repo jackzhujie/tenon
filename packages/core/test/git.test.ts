@@ -208,7 +208,7 @@ describe('Git 一等公民（isomorphic-git）', () => {
     expect(shown.files[0]?.binary).toBe(true)
     expect(shown.files[0]?.lines).toEqual([])
     // 关键：不能报成 0 insertions / 一堆 deletions 让人以为文件被清空
-    expect(shown.files[0]?.patch).toContain('二进制文件')
+    expect(shown.files[0]?.patch).toContain('binary file')
   })
 
   it('回滚第一个提交会明确拒绝（语义可疑，不做）', async () => {
@@ -279,7 +279,7 @@ describe('Git 一等公民（isomorphic-git）', () => {
       const result = await worktreeDiff(dir)
       expect(result.files).toHaveLength(40)
       expect(result.omitted).toBe(5)
-      expect(result.patch).toContain('还有 5 个文件未展开')
+      expect(result.patch).toContain('5 more file(s) not expanded')
       expect(result.patch).toContain('f44.txt')
     })
   })

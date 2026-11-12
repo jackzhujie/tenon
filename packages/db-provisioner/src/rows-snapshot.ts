@@ -308,7 +308,7 @@ export async function restoreRowsSnapshot(
       await syncSequences(client, target.ref, target.columns)
       report.tables.push({ table: refId(target.ref), rows: written })
       report.totalRows += written
-      log?.(`[tenon] 还原 ${refId(target.ref)}：${written} 行`)
+      log?.(`[tenon] restored ${refId(target.ref)}: ${written} rows`)
     }
 
     await client.query('commit')

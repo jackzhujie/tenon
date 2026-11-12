@@ -326,7 +326,7 @@ function lineDiff(
       deletions: 0,
       lines: [],
       truncated: true,
-      patch: `${header}@@ 文件过大，省略逐行 diff（${a.length} → ${b.length} 行）@@\n`,
+      patch: `${header}@@ file too large — line diff omitted (${a.length} → ${b.length} lines) @@\n`,
     }
   }
 
@@ -512,7 +512,7 @@ async function buildDiff(
         deletions: 0,
         lines: [],
         binary: true,
-        patch: `${header}@@ 二进制文件，不做逐行 diff @@\n`,
+        patch: `${header}@@ binary file — no line diff @@\n`,
       })
       changes.push({ path: entry.path, status })
       continue
@@ -596,7 +596,7 @@ export async function worktreeDiff(dir: string): Promise<WorktreeDiff> {
         deletions: 0,
         lines: [],
         binary: true,
-        patch: `${header}@@ 二进制或超大文件，不做逐行 diff @@\n`,
+        patch: `${header}@@ binary or oversized file — no line diff @@\n`,
       })
       changes.push({ path: entry.path, status: entry.status })
       continue
@@ -615,7 +615,7 @@ export async function worktreeDiff(dir: string): Promise<WorktreeDiff> {
   const omitted = entries.length - shown.length
   const tail =
     omitted > 0
-      ? `@@ 还有 ${omitted} 个文件未展开（单次上限 ${MAX_WORKTREE_FILES}）：${entries
+      ? `@@ ${omitted} more file(s) not expanded (limit ${MAX_WORKTREE_FILES} per call): ${entries
           .slice(MAX_WORKTREE_FILES)
           .map((entry) => entry.path)
           .join(', ')} @@\n`

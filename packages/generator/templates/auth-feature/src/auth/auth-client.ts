@@ -93,5 +93,5 @@ export const auth = {
 /** 页面标题当应用名用：AuthGate 在登录前拿不到 App 里的任何 props */
 export function appTitle(): string {
   const title = document.title.trim()
-  return title === '' ? '这个应用' : title
+  return title === '' ? 'This app' : title
 }

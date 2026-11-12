@@ -70,17 +70,17 @@ export function installTenonLog(): void {
     const where =
       event.filename === '' || event.filename === undefined
         ? ''
-        : `（${event.filename.split('/').pop() ?? event.filename}:${event.lineno ?? 0}）`
+        : ` (${event.filename.split('/').pop() ?? event.filename}:${event.lineno ?? 0})`
     const message =
       error instanceof Error
         ? error.message
         : event.message !== '' && event.message !== undefined
           ? event.message
-          : '资源加载失败'
+          : 'failed to load a resource'
 
     reportLog({
       level: 'error',
-      message: `未捕获异常：${message}${where}`,
+      message: `Uncaught exception: ${message}${where}`,
       detail: error instanceof Error && typeof error.stack === 'string' ? error.stack : null,
     })
   })
@@ -89,7 +89,7 @@ export function installTenonLog(): void {
     const reason: unknown = event.reason
     reportLog({
       level: 'error',
-      message: `未处理的 Promise 拒绝：${reason instanceof Error ? reason.message : String(reason)}`,
+      message: `Unhandled promise rejection: ${reason instanceof Error ? reason.message : String(reason)}`,
       detail: reason instanceof Error && typeof reason.stack === 'string' ? reason.stack : null,
     })
   })

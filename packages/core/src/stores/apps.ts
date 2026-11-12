@@ -83,7 +83,7 @@ function toApp(row: AppRow): App {
   }
 }
 
-const APP_GITIGNORE = `# Tenon 管理的工作区：状态、数据库、导出物都在 repo 之外（DESIGN §6.1）
+const APP_GITIGNORE = `# Workspace managed by Tenon: state, databases and exports live outside repo/ (DESIGN §6.1)
 .tenon/
 pgdata/
 exports/
@@ -178,7 +178,7 @@ export class AppStore {
       await writeFile(join(paths.repoDir, '.gitignore'), APP_GITIGNORE, 'utf8')
       await writeFile(
         join(paths.repoDir, 'README.md'),
-        `# ${input.name}\n\n由 Tenon 创建的应用工作区。\n`,
+        `# ${input.name}\n\nApp workspace created by Tenon.\n`,
         'utf8',
       )
       // 模板必须在 initRepo 之前铺完：铺模板与首次提交是同一个动作

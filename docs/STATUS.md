@@ -224,6 +224,7 @@ GUI 类（`apps` / `component` / `inspector` / `e2e` / `real` / `packaged`）**�
 | **系统生成的文本** | **服务端也按这个语言说话**：`packages/protocol/src/locale.ts` 持有进程级当前语言（服务端启动读设置、`settings.set` 时更新，网页在 Provider 里同步同一个值），`messages/*.ts` 是"服务端会念给用户听"的文案表（错误消息 + 门禁结论 + 组件系统 + 远端指路）。**控制台日志与 git 历史仍是单一英文** —— 它们会离开这台机器、被 `git log` 与 grep 读，两种语言的历史等于搜不齐。判定口诀：**会离开这台机器的写英文，只在界面上出现的做双语** |
 | **给模型看的字** | **一律英文，且不随界面语言变**：角色提示词（`roles.ts`）、工具 description 与参数说明、工具结果与错误（`tools/*.ts`）、`formatTscReport`、写进应用仓库的 `docs/AGENTS.md`。理由不是"英文更好"，是两部分别成立的事实：① 这些字同时是模型的输入，混语言会改模型行为（开始用中文思考、把工具名写成中文），而且没法测；② 其中一半会跟着应用仓库离开本机。**唯一例外**：引用检查项结论时要同时点名 `Did not run` / `没跑成` —— 那是"给人看的字"，会随界面语言变，模型必须两版都认得。护栏在 `packages/agent/test/prompts-english.test.ts`（角色提示词 + 全部工具描述扫 CJK） |
 | **组件（注入进应用页面的脚本）** | **跟界面语言，但不是一次翻译**：组件跑在预览 iframe 里、拿不到 i18n Context，语言由网关注入时递过去（`window.__tenonLocale` + `tenon:locale` 消息/事件），切语言时 `PreviewPanel` 往 iframe 广播。组件内部各带一张 `en`/`zh` 小表（**不依赖 `@tenon/protocol` 的整张文案表** —— 那会把 30KB 文案塞进每个组件），状态类文字按"当前状态"重画。三个名字共用 `protocol/src/component-locale.ts` 的常量 |
+| **生成应用的模板与导出产物** | **一律英文，不跟界面语言走**。`packages/generator/templates/**` 是**应用的源码**（生成后进用户仓库、也是模型读它来改代码）；`export.ts` 渲染的 README / start.sh / .env.example / Dockerfile / compose 会部署到别处。跟着界面语言翻的后果是：同一份模板在中英文机器上产出两种代码，同一份部署包发给中英文同事两种文档。**护栏 `i18n-guard.test.ts` 扫全仓字符串字面量**（`packages/*/src` + `plugins/bundled` + `generator/templates`），回流当场红 |
 
 ---
 
@@ -3601,6 +3602,9 @@ DoD 写的是「快照保留策略」。真去量发现**大头不是快照**：
 | **文案有状态时，切语言要按"当前状态"重画** | 组件的状态栏/按钮不是一句静态文案：`思考中…`、`已导出 12 行`、`操作失败`、`连不上`。只替换 idle 那一句，正在导出的人切完语言会看到英文界面上写着「已导出 12 行」。做法：把状态存成数据（`{kind:'done', rows}`），文字永远由 `paint()` 从当前语言算出来，切语言只重跑 `paint()` |
 | **`win.webContents.reload()` 之后不能靠 `waitFor(旧元素)` 判断新文档就绪** | reload 是异步的，而旧文档的 DOM 还在 —— `waitFor(球)` 会在**即将卸载的旧文档**上立刻通过。后果有两层：①"刷新后状态还在"这类断言变成假阳性（什么都没验到）；②`postMessage` 被丢弃（消息投给一个正在消失的 window），表现是"切语言没反应"，但手动 `dispatchEvent(new MessageEvent(...))` 却正常 —— 看着像注入脚本的监听坏了，其实是页面根本还没换。判据只能用导航事件（`webContents.once('did-finish-load')`），`readyState` 不行（旧文档也是 complete） |
 | **按容器的选择器去"点组件"，测试会假阳性** | `data-tenon-component` 挂在组件 root 上，真正的球是它的**子按钮**。`document.querySelector('[data-tenon-component=…]').click()` 点的是 root，不会打开面板 —— 但后续断言全都能过：`querySelectorAll('textarea')` 找得到隐藏的输入框、`.click()` 对可见性不敏感。于是"点球能打开"长期是假阳性。组件给球单独标了 `data-tenon-open`，判断"打开了"要用 `offsetParent !== null`。**通用规则：能用"可见性"断言的，别用"元素存在"** |
+| **数"还剩多少处"这个动作本身会骗人：口径决定结论** | i18n 收尾时前五轮都用 `git ls-files "packages/*/src/**"` 数中文，结论是"只剩 70 处"。第六轮加了个**扫全仓的护栏**（`packages/protocol/test/i18n-guard.test.ts`），一上线立刻红了 28 处 —— 全在 `packages/generator/templates/`，那是**生成应用的源码**，不在任何 `src/` 下，五轮统计一次都没扫到。教训：**别用"数一遍"验收一个横切面，要立一条会红的测试**；数出来的数字只对当时那个 glob 成立 |
+| **按行扫字符串，跨行拼接的会误判（两个方向都会）** | 同一个原因造成两次错判：① 漏 —— `new TenonError(\n  'CODE',\n  '中文消息')` 整行没有中文（这条已记在上面的多行字符串坑）；② 误报 —— 提示词里 `"... — \"Did not run\" / "` + `"没跑成" — ..."` 是跨行拼接的，只看本行会以为"只有中文"。护栏的豁免因此要看**上一行**。写这类扫描器时，行粒度只适合"防回流"，不适合"算总数" |
+| **生成的 JS 里出现撇号会截断单引号字符串** | `res.end('... Check this process's log.')` —— 这段是**当代码生成**的（`serve.mjs` 模板），语法错在 `tsc` 里看不出来（它只是个字符串），只有 `checkJs` 那条测试会红。改这类"代码生成代码"的文案时避开撇号，或改用双引号；同理 `${}` 与反引号也要当心（见上面那条） |
 
 
 ---

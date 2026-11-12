@@ -38,7 +38,7 @@ function bodyOf(exception: unknown, status: number): unknown {
 
 function summarize(body: unknown, max = 200): string {
   const text = typeof body === 'string' ? body : JSON.stringify(body)
-  if (text === undefined) return '（无响应体）'
+  if (text === undefined) return '(no response body)'
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
 

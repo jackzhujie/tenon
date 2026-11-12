@@ -46,7 +46,7 @@ export function activate(input: ActivateInput): void {
     ExportTable,
     ({ appId: inputAppId }, principal, self) => {
       if (inputAppId !== appId || principal.appId !== appId) {
-        throw invalid('principal', `这个组件属于应用 ${appId}，不是 ${inputAppId}`)
+        throw invalid('principal', `this component belongs to app ${appId}, not ${inputAppId}`)
       }
       const phase = self.state('phase', Type.String(), 'idle')
       const lastFile = self.state('lastFile', Type.String(), '')
@@ -59,12 +59,12 @@ export function activate(input: ActivateInput): void {
         rows: rowsState,
 
         export: async ({ filename, columns, rows }, ctx) => {
-          if (columns.length === 0) throw invalid('empty', '这张表没有表头，导不出 CSV')
+          if (columns.length === 0) throw invalid('empty', 'this table has no header row, so it cannot be exported as CSV')
           const wrong = rows.findIndex((row) => row.length !== columns.length)
           if (wrong !== -1) {
             throw invalid(
               'shape',
-              `第 ${wrong + 1} 行有 ${rows[wrong]?.length ?? 0} 列，表头是 ${columns.length} 列 —— 导出会错位`,
+              `row ${wrong + 1} has ${rows[wrong]?.length ?? 0} cells but the header has ${columns.length} — the export would be misaligned`,
             )
           }
           const file = safeName(filename)
@@ -72,7 +72,7 @@ export function activate(input: ActivateInput): void {
           phase.replace(ctx, 'done')
           lastFile.replace(ctx, file)
           rowsState.replace(ctx, rows.length)
-          log?.(`[csv-export] ${appId} 导出 ${file}（${rows.length} 行）`)
+          log?.(`[csv-export] ${appId} exported ${file} (${rows.length} rows)`)
           return { csv, bytes: Buffer.byteLength(csv, 'utf8') }
         },
       }

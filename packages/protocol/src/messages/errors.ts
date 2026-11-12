@@ -194,6 +194,63 @@ export const errorsEn = {
     'This month\u2019s total budget is used up ({used} of {limit}). It resets on the 1st; to keep going now, raise the monthly limit.',
   'error.budget.globalTotalExhausted':
     'The total budget is used up ({used} of {limit}). This one does not reset monthly — raise it (or remove it) to keep going.',
+
+  'error.db.migrationFailed': 'Database migration {version} ({name}) failed: {detail}',
+  'error.db.unparsableConnection': '(unparsable connection string)',
+  'error.db.pgliteTimeout': 'PGlite did not become ready within {seconds}s (data directory {dir})',
+  'error.db.postgresUnreachable': 'Cannot reach this PostgreSQL ({target}): {detail}',
+
+  'error.componentStorage.badKey': 'Key length must be 1..{max}',
+  'error.componentStorage.valueTooLarge': 'A value may be at most {max}KB; this one is {actual}KB',
+  'error.componentStorage.tooManyKeys': 'At most {max} keys — the space is full. Delete some and try again.',
+
+  'error.prices.readBack': 'The price was written but cannot be read back (this is a bug).',
+  'error.releases.readBack': 'The release record was written but cannot be read back.',
+
+  'error.rpc.unknownMethod': 'Unknown method: {method}',
+  'error.rpc.postOnly': 'RPC goes through POST /rpc/<method>',
+  'error.auth.missingToken': 'Missing or invalid access token',
+
+  'error.component.noActivate': '{id}: the server facet does not export activate()',
+  'error.component.incompatibleHint':
+    'This component is not compatible with the current Tenon version — update it.',
+  'error.component.loadFailed': '{id} failed to load: {detail}',
+  'error.component.loadFailedHint':
+    'Check the stack trace in the log; usually the component and host versions do not match, or the facet build is stale (run build:plugins).',
+
+  'error.remote.notConfigured': 'This app has no remote repository configured',
+  'error.remote.notConfiguredHint':
+    'Fill in the address and token once in "Remote repository" of the release dialog.',
+  'error.remote.tagMissing': 'The repository has no tag {version} — this release may have been cleaned up',
+  'error.remote.tagMissingHint':
+    'Publish once more; older versions already pushed to the remote are unaffected.',
+  'error.remote.unexpected': 'Something went wrong while pushing: {detail}',
+  'error.remote.unexpectedHint': 'Check whether the remote address still opens, then check the local network.',
+
+  'note.pricingApplied':
+    'Prices saved, but an app is running: restart the server after this turn for them to take effect',
+  'note.depsNotReady':
+    'Dependencies are not installed (writing code still works, but type checks will be inaccurate)',
+  'note.backendDepsFailed': 'Backend dependencies are not installed (the code is written; reinstall once)',
+  'note.authDepsFailed': 'Auth dependencies are not installed (the code is written; reinstall once)',
+  'note.restartPreviewFailed': 'Restarting the preview failed — start it manually',
+  'note.authGateMissing': 'The sign-in page was not wired up',
+  'note.authGateHint':
+    'src/main.tsx does not match the template: wrap <App/> in <AuthGate>. Until then every request returns 401 while the page shows no sign-in form.',
+  'note.providerMissing': 'That provider no longer exists (it may have just been deleted)',
+  'note.providerProbeOk': 'Endpoint and credentials both work ({model})',
+
+  'note.storage.depsOutside': '{id}: dependency directory is not under apps/ — skipped',
+  'note.storage.nothingToClean':
+    'Nothing to clean (already cleaned, or the apps never installed dependencies)',
+  'note.storage.snapshotsKept': 'Every app kept at most {keep} snapshots — nothing to clean',
+  'note.storage.noBackupRepo': 'No bare backup repository yet (it appears after the first release)',
+  'note.storage.gcFailed': '{name}: gc failed ({detail})',
+  'note.storage.alreadyCompact': 'The backup repository is already as compact as it gets',
+
+  'log.tag.backend': 'backend',
+  'log.tag.auth': 'auth',
+  'log.tag.export': 'export',
 } as const
 
 export type ErrorMessageKey = keyof typeof errorsEn
@@ -368,4 +425,55 @@ export const errorsZh: Record<ErrorMessageKey, string> = {
     '本月总额度用完了（本月已用 {used}，上限 {limit}）。下月 1 日自动重置；要现在继续，就把「每月总额度」调高。',
   'error.budget.globalTotalExhausted':
     '总额度用完了（累计已用 {used}，上限 {limit}）。这道闸不会按月份重置 —— 要继续就得把它调高（或者取消这一项）。',
+
+  'error.db.migrationFailed': 'tenon.db 迁移 {version}({name}) 失败：{detail}',
+  'error.db.unparsableConnection': '(无法解析的连接串)',
+  'error.db.pgliteTimeout': 'PGlite 在 {seconds}s 内没有就绪（数据目录 {dir}）',
+  'error.db.postgresUnreachable': '连不上这个 PostgreSQL（{target}）：{detail}',
+
+  'error.componentStorage.badKey': '键名长度要在 1..{max} 之间',
+  'error.componentStorage.valueTooLarge': '一个值最多 {max}KB，这次是 {actual}KB',
+  'error.componentStorage.tooManyKeys': '最多 {max} 个键，已经满了。删掉一些再存',
+
+  'error.prices.readBack': '价格写进去了却读不出来（这是个 bug）',
+  'error.releases.readBack': '写入发布记录后读不回来',
+
+  'error.rpc.unknownMethod': '未知方法：{method}',
+  'error.rpc.postOnly': 'RPC 请用 POST /rpc/<method>',
+  'error.auth.missingToken': '缺少或错误的访问令牌',
+
+  'error.component.noActivate': '{id} 的 server facet 没有导出 activate()',
+  'error.component.incompatibleHint': '这个组件与当前 Tenon 版本不兼容，更新它',
+  'error.component.loadFailed': '{id} 加载失败：{detail}',
+  'error.component.loadFailedHint':
+    '看日志里的堆栈；多半是组件与宿主版本不匹配，或者 facet 构建产物过期（先跑 build:plugins）',
+
+  'error.remote.notConfigured': '这个应用还没有配置远端仓库',
+  'error.remote.notConfiguredHint': '在发布对话框的「远端仓库」里填一次地址和令牌。',
+  'error.remote.tagMissing': '仓库里没有 {version} 这个标签，可能这一版已经被清理掉了',
+  'error.remote.tagMissingHint': '重新发布一版即可；已经推到远端的旧版本不受影响。',
+  'error.remote.unexpected': '推送时出了意外：{detail}',
+  'error.remote.unexpectedHint': '先看远端地址是否还能打开；再看本机网络。',
+
+  'note.pricingApplied': '价格已保存，但有应用正在跑：这一轮结束后重启服务才生效',
+  'note.depsNotReady': '依赖没装好（不影响写代码，但类型检查会不准）',
+  'note.backendDepsFailed': '后端依赖没装好（代码已写入，重装一次即可）',
+  'note.authDepsFailed': '账号体系依赖没装好（代码已写入，重装一次即可）',
+  'note.restartPreviewFailed': '重启预览失败，请手动点一次启动',
+  'note.authGateMissing': '登录页没自动接上',
+  'note.authGateHint':
+    'src/main.tsx 的形状和模板不一样：请把 <App/> 包进 <AuthGate>。在那之前接口会 401，而页面上没有登录框。',
+  'note.providerMissing': '这个提供商不存在（可能刚被删掉）',
+  'note.providerProbeOk': '端点与凭据都通（{model}）',
+
+  'note.storage.depsOutside': '{id}：依赖目录不在 apps 之下，已跳过',
+  'note.storage.nothingToClean': '没有可清理的依赖（都已清过或应用还没装过依赖）',
+  'note.storage.snapshotsKept': '每个应用都只留下了 {keep} 份以内的快照，无需清理',
+  'note.storage.noBackupRepo': '还没有备份裸库（发布过一次才会有）',
+  'note.storage.gcFailed': '{name}：gc 失败（{detail}）',
+  'note.storage.alreadyCompact': '备份库已经是最紧凑的状态',
+
+  'log.tag.backend': '加后端',
+  'log.tag.auth': '加登录',
+  'log.tag.export': '导出',
 }

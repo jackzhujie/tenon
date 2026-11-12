@@ -59,7 +59,7 @@ async function restore(storage: StorageLike | undefined, log?: (line: string) =>
   try {
     raw = await storage.get(STATE_KEY)
   } catch (error) {
-    log?.(`[approval] 读存储失败，按空状态启动：${error instanceof Error ? error.message : String(error)}`)
+    log?.(`[approval] failed to read storage; starting with an empty state: ${error instanceof Error ? error.message : String(error)}`)
     return EMPTY
   }
   if (raw === null || raw === '') return EMPTY
@@ -77,7 +77,7 @@ async function restore(storage: StorageLike | undefined, log?: (line: string) =>
     const nextId = Math.max(typeof parsed.nextId === 'number' ? parsed.nextId : 1, maxUsed + 1)
     return { items, nextId }
   } catch (error) {
-    log?.(`[approval] 存储里的数据不是合法 JSON，按空状态启动：${String(error)}`)
+    log?.(`[approval] stored data is not valid JSON; starting with an empty state: ${String(error)}`)
     return EMPTY
   }
 }
@@ -86,7 +86,7 @@ export async function activate(input: ActivateInput): Promise<void> {
   const { host, appId } = input
 
   if (input.storage === undefined) {
-    input.log?.('[approval] 没有 db:read / db:write 权限，审批数据只在内存里（重启即失）')
+    input.log?.('[approval] no db:read / db:write permission; approvals live in memory only (lost on restart)')
   }
   let cache = await restore(input.storage, input.log)
 
@@ -94,7 +94,7 @@ export async function activate(input: ActivateInput): Promise<void> {
     Approval,
     ({ appId: inputAppId }, principal, self) => {
       if (inputAppId !== appId || principal.appId !== appId) {
-        throw invalid('principal', `这个组件属于应用 ${appId}，不是 ${inputAppId}`)
+        throw invalid('principal', `this component belongs to app ${appId}, not ${inputAppId}`)
       }
       const phase = self.state('phase', Type.String(), 'idle')
       /*
@@ -131,7 +131,7 @@ export async function activate(input: ActivateInput): Promise<void> {
 
         submit: async ({ title }, ctx) => {
           const text = title.trim()
-          if (text === '') throw invalid('empty', '标题不能为空')
+          if (text === '') throw invalid('empty', 'the title cannot be empty')
           const id = `AP-${nextId++}`
           items.change(ctx, (list) => [...list, { id, title: text, state: 'submitted' }])
           phase.replace(ctx, 'submitted')
@@ -142,9 +142,9 @@ export async function activate(input: ActivateInput): Promise<void> {
 
         decide: async ({ id, approve }, ctx) => {
           const item = items.value.find((entry) => entry.id === id)
-          if (item === undefined) throw invalid('missing', `没有编号为 ${id} 的单子`)
+          if (item === undefined) throw invalid('missing', `no item with id ${id}`)
           if (item.state !== 'submitted') {
-            throw invalid('settled', `${id} 已经是「${item.state}」，不能再审一次`)
+            throw invalid('settled', `${id} is already ${item.state} and cannot be reviewed again`)
           }
           items.change(ctx, (list) =>
             list.map((entry) =>

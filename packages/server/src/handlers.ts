@@ -215,7 +215,7 @@ async function applyPriceChange(agent: AgentRuntime, core: CoreServices): Promis
         plan === undefined
           ? null
           : { mode: plan.mode, providerId: plan.choice.provider, modelId: plan.choice.modelId },
-      error: '价格已保存，但有应用正在跑：这一轮结束后重启服务才生效',
+      error: msg('note.pricingApplied'),
       changed: false,
     }
   }
@@ -293,7 +293,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
             bus,
             app.id,
             'warn',
-            '依赖没装好（不影响写代码，但类型检查会不准）',
+            msg('note.depsNotReady'),
             error instanceof Error ? error.message : String(error),
           )
         })
@@ -331,7 +331,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         }
       }
 
-      for (const note of result.notes) pushTenonLog(bus, app.id, 'info', '加后端', note)
+      for (const note of result.notes) pushTenonLog(bus, app.id, 'info', msg('log.tag.backend'), note)
 
       let depsResult: { installed: boolean; command: string; durationMs: number } | null = null
       if (input.installDeps) {
@@ -341,7 +341,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
             bus,
             app.id,
             'warn',
-            '后端依赖没装好（代码已写入，重装一次即可）',
+            msg('note.backendDepsFailed'),
             error instanceof Error ? error.message : String(error),
           )
           return null
@@ -364,7 +364,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
             bus,
             app.id,
             'warn',
-            '重启预览失败，请手动点一次启动',
+            msg('note.restartPreviewFailed'),
             error instanceof Error ? error.message : String(error),
           )
         })
@@ -402,14 +402,14 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         }
       }
 
-      for (const note of result.notes) pushTenonLog(bus, app.id, 'info', '加登录', note)
+      for (const note of result.notes) pushTenonLog(bus, app.id, 'info', msg('log.tag.auth'), note)
       if (!result.wired) {
         pushTenonLog(
           bus,
           app.id,
           'warn',
-          '登录页没自动接上',
-          'src/main.tsx 的形状和模板不一样：请把 <App/> 包进 <AuthGate>。在那之前接口会 401，而页面上没有登录框。',
+          msg('note.authGateMissing'),
+          msg('note.authGateHint'),
         )
       }
 
@@ -420,7 +420,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
             bus,
             app.id,
             'warn',
-            '账号体系依赖没装好（代码已写入，重装一次即可）',
+            msg('note.authDepsFailed'),
             error instanceof Error ? error.message : String(error),
           )
           return null
@@ -439,7 +439,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
             bus,
             app.id,
             'warn',
-            '重启预览失败，请手动点一次启动',
+            msg('note.restartPreviewFailed'),
             error instanceof Error ? error.message : String(error),
           )
         })
@@ -493,7 +493,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
           bus,
           input.appId,
           'warn',
-          '依赖没装好（不影响写代码，但类型检查会不准）',
+          msg('note.depsNotReady'),
           error instanceof Error ? error.message : String(error),
         )
       })
@@ -539,7 +539,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
        */
       void deps.components.ensure(input.appId).catch((error: unknown) => {
         process.stderr.write(
-          `[components] ${input.appId} 激活失败：${error instanceof Error ? error.message : String(error)}\n`,
+          `[components] ${input.appId} failed to activate: ${error instanceof Error ? error.message : String(error)}\n`,
         )
       })
       return { preview: started }
@@ -857,7 +857,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         appName: app.name,
         appId: app.id,
         installDeps: input.installDeps,
-        onLog: (line) => pushTenonLog(bus, app.id, 'info', '导出', line),
+        onLog: (line) => pushTenonLog(bus, app.id, 'info', msg('log.tag.export'), line),
       })
     },
 
@@ -872,7 +872,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
         appId: app.id,
         target: 'docker',
         port: input.port,
-        onLog: (line) => pushTenonLog(bus, app.id, 'info', '导出', line),
+        onLog: (line) => pushTenonLog(bus, app.id, 'info', msg('log.tag.export'), line),
       })
     },
 
@@ -997,7 +997,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
 
     'provider.test': async (input) => {
       const profile = core.providers.find(input.id)
-      if (profile === undefined) return { ok: false, latencyMs: 0, message: '这个提供商不存在（可能刚被删掉）' }
+      if (profile === undefined) return { ok: false, latencyMs: 0, message: msg('note.providerMissing') }
       const apiKey = core.providers.revealApiKey(input.id)
       const base = (profile.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '')
       const started = Date.now()
@@ -1023,7 +1023,7 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
           // 提供商的原文比"连接失败"有用得多：401 是 key，404 多半是模型 id
           return { ok: false, latencyMs, message: `${response.status} ${body.slice(0, 400)}` }
         }
-        return { ok: true, latencyMs, message: `端点与凭据都通（${profile.modelId}）` }
+        return { ok: true, latencyMs, message: msg('note.providerProbeOk', { model: profile.modelId }) }
       } catch (error) {
         return {
           ok: false,

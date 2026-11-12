@@ -14,7 +14,7 @@ function toDto(item: ItemEntity): Item {
 
 function parseId(raw: string): number {
   const id = Number(raw)
-  if (!Number.isInteger(id) || id <= 0) throw new BadRequestException(`id 不合法：${raw}`)
+  if (!Number.isInteger(id) || id <= 0) throw new BadRequestException(`invalid id: ${raw}`)
   return id
 }
 

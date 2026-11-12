@@ -59,7 +59,7 @@ export function redact(connectionString: string): string {
     if (url.password !== '') url.password = '***'
     return url.toString()
   } catch {
-    return '(无法解析的连接串)'
+    return msg('error.db.unparsableConnection')
   }
 }
 

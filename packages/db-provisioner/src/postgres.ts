@@ -93,11 +93,14 @@ export class PostgresProvider implements DatabaseProvider {
       await client.connect()
       const result = await client.query<{ version: string }>('select version() as version')
       this.state = 'ready'
-      this.log(`[tenon] 应用库就绪（${redact(this.options.connectionString)}：${result.rows[0]?.version.split(',')[0] ?? 'PG'}）`)
+      this.log(`[tenon] app database ready (${redact(this.options.connectionString)}: ${result.rows[0]?.version.split(',')[0] ?? 'PG'})`)
     } catch (err) {
       this.state = 'failed'
       // 用户看到的那句话必须是完整的：只说 "connect ECONNREFUSED" 等于让人猜是哪个库
-      const message = `连不上这个 PostgreSQL（${redact(this.options.connectionString)}）：${messageOf(err)}`
+      const message = msg('error.db.postgresUnreachable', {
+      target: redact(this.options.connectionString),
+      detail: messageOf(err),
+    })
       this.error = message
       throw new TenonError('DB_START_FAILED', message, { mode: this.mode })
     } finally {
@@ -125,7 +128,7 @@ export class PostgresProvider implements DatabaseProvider {
       await writeFile(target, bytes)
       const info = await stat(target)
       this.log(
-        `[tenon] 应用库快照 ${target}（${snapshot.tableCount} 张表 / ${snapshot.rowCount} 行 / ` +
+        `[tenon] app snapshot ${target} (${snapshot.tableCount} tables / ${snapshot.rowCount} rows / ` +
           `${(info.size / 1024).toFixed(1)}KB）`,
       )
       return { mode: this.mode, file: target, bytes: info.size, createdAt: Date.now() }
@@ -156,7 +159,7 @@ export class PostgresProvider implements DatabaseProvider {
         )
       }
       for (const dropped of report.droppedColumns) {
-        this.log(`[tenon] ${dropped.table} 的列 ${dropped.columns.join(', ')} 已不在当前库里，跳过`)
+        this.log(`[tenon] ${dropped.table}: columns ${dropped.columns.join(', ')} no longer exist in the target database, skipped`)
       }
       this.log(`[tenon] app database restored from ${snapshot.file} (${report.totalRows} rows)`)
     } catch (err) {

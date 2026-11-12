@@ -142,7 +142,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
       return reply.code(404).send(
         rpcFail({
           code: 'METHOD_NOT_FOUND',
-          message: `未知方法：${method}`,
+          message: msg('error.rpc.unknownMethod', { method }),
           details: { available: Object.keys(rpcMethods) },
         }),
       )
@@ -231,7 +231,7 @@ export function buildServer(options: BuildServerOptions): TenonServer {
 
   app.get('/rpc', async (_request, reply) => {
     return reply.code(404).send(
-      rpcFail({ code: 'METHOD_NOT_FOUND', message: 'RPC 请用 POST /rpc/<method>' }),
+      rpcFail({ code: 'METHOD_NOT_FOUND', message: msg('error.rpc.postOnly') }),
     )
   })
 

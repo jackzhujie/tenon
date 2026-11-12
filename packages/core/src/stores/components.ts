@@ -12,6 +12,7 @@
  * 配额（见 `STORAGE_LIMITS`）不是"以防万一"，而是这个能力的**边界**：没有上限，
  * 一个写坏循环的组件能把这个产品库撑爆，而那时整个 Tenon 都起不来。
  */
+import { msg } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
 
 export const STORAGE_LIMITS = {
@@ -89,14 +90,17 @@ export class ComponentStore {
     if (key === '' || key.length > STORAGE_LIMITS.maxKeyLength) {
       throw new ComponentStorageLimitError(
         'bad-key',
-        `键名长度要在 1..${STORAGE_LIMITS.maxKeyLength} 之间`,
+        msg('error.componentStorage.badKey', { max: STORAGE_LIMITS.maxKeyLength }),
       )
     }
     const bytes = Buffer.byteLength(value, 'utf8')
     if (bytes > STORAGE_LIMITS.maxValueBytes) {
       throw new ComponentStorageLimitError(
         'value-too-large',
-        `一个值最多 ${STORAGE_LIMITS.maxValueBytes / 1024}KB，这次是 ${(bytes / 1024).toFixed(1)}KB`,
+        msg('error.componentStorage.valueTooLarge', {
+          max: STORAGE_LIMITS.maxValueBytes / 1024,
+          actual: (bytes / 1024).toFixed(1),
+        }),
       )
     }
     const existing = this.db.get<{ key: string }>(
@@ -109,7 +113,7 @@ export class ComponentStore {
     if (existing === undefined && this.count(appId, componentId) >= STORAGE_LIMITS.maxKeys) {
       throw new ComponentStorageLimitError(
         'too-many-keys',
-        `最多 ${STORAGE_LIMITS.maxKeys} 个键，已经满了。删掉一些再存`,
+        msg('error.componentStorage.tooManyKeys', { max: STORAGE_LIMITS.maxKeys }),
       )
     }
     this.db.run(

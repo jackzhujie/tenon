@@ -7,7 +7,7 @@
  *
  * 单位：**美元 / 百万 token**。与 pi 的 `model.cost` 一致，不做二次换算。
  */
-import type { ModelPrice } from '@tenon/protocol'
+import { msg, type ModelPrice } from '@tenon/protocol'
 import type { TenonDatabase } from '../db.js'
 import { newId } from '../ids.js'
 
@@ -95,7 +95,7 @@ export class PriceStore {
       now,
     )
     const saved = this.find(input.profileId, input.modelId)
-    if (saved === undefined) throw new Error('价格写进去了却读不出来（这是个 bug）')
+    if (saved === undefined) throw new Error(msg('error.prices.readBack'))
     return saved
   }
 

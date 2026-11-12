@@ -173,7 +173,7 @@ export class DatabaseManager {
        */
       const name = this.dbMode === 'postgres' ? 'db.rows.json.gz' : 'db.tar.gz'
       const snapshot = await running.dump(join(dir, name))
-      this.options.log?.(`[tenon] 库快照 ${sha.slice(0, 7)}（${(snapshot.bytes / 1024 / 1024).toFixed(1)}MB）`)
+      this.options.log?.(`[tenon] database snapshot ${sha.slice(0, 7)} (${(snapshot.bytes / 1024 / 1024).toFixed(1)}MB)`)
       return snapshot
     } finally {
       // 本来就没跑：存完按原状停掉，别为了一个快照把内存占着
@@ -232,7 +232,7 @@ export class DatabaseManager {
     if (this.dbMode === 'postgres' && !wasReady) await provider.start()
     try {
       await provider.restore(snapshot)
-      this.options.log?.(`[tenon] 库已还原到 ${snapshot.file}`)
+      this.options.log?.(`[tenon] database restored to ${snapshot.file}`)
     } finally {
       if (!wasReady) await this.release(appId)
     }

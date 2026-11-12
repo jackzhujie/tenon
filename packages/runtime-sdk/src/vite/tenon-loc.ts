@@ -83,7 +83,7 @@ export function readOptions(options: unknown): Required<TenonLocOptions> {
     typeof options === 'object' && options !== null ? (options as Partial<TenonLocOptions>) : {}
   if (typeof raw.appRoot !== 'string' || raw.appRoot === '') {
     throw new Error(
-      'tenon-loc: 缺少 appRoot 选项。vite.config.ts 应写成 { appRoot: import.meta.dirname }',
+      'tenon-loc: the appRoot option is required. In vite.config.ts use { appRoot: import.meta.dirname }',
     )
   }
   return { appRoot: raw.appRoot, libraryDirs: raw.libraryDirs ?? DEFAULT_LIBRARY_DIRS }

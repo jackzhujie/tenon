@@ -60,7 +60,7 @@ export class AuthService {
    */
   async setup(email: string, password: string): Promise<SessionUser> {
     if (!(await this.needsSetup())) {
-      throw new ConflictException('这个应用已经有账号了，请直接用邮箱登录')
+      throw new ConflictException('this app already has an account; sign in with your email')
     }
     return this.createUser(email, password, 'admin')
   }
@@ -68,7 +68,7 @@ export class AuthService {
   async createUser(email: string, password: string, role: Role): Promise<SessionUser> {
     const normalized = email.trim().toLowerCase()
     const existing = await this.users.findOne({ where: { email: normalized } })
-    if (existing !== null) throw new ConflictException('这个邮箱已经有人用了')
+    if (existing !== null) throw new ConflictException('that email is already taken')
     const user = this.users.create({
       email: normalized,
       passwordHash: await hashPassword(password),
@@ -132,12 +132,12 @@ export class AuthService {
 
   /** 删账号：不能删自己、不能删掉最后一个管理员（后者等于把系统锁死） */
   async remove(actor: SessionUser, id: number): Promise<void> {
-    if (actor.id === id) throw new BadRequestException('不能删掉自己')
+    if (actor.id === id) throw new BadRequestException('you cannot delete yourself')
     const target = await this.users.findOne({ where: { id } })
     if (target === null) return
     if (target.role === 'admin') {
       const admins = await this.users.count({ where: { role: 'admin' } })
-      if (admins <= 1) throw new BadRequestException('至少要留一个管理员')
+      if (admins <= 1) throw new BadRequestException('at least one admin must remain')
     }
     await this.users.delete({ id })
   }
@@ -145,9 +145,9 @@ export class AuthService {
   /** 改口令（自己改自己）。当前口令不对就不给改 —— 拿到别人没锁屏的电脑改密码是最常见的接管方式 */
   async changePassword(actor: SessionUser, current: string, next: string): Promise<void> {
     const user = await this.users.findOne({ where: { id: actor.id } })
-    if (user === null) throw new UnauthorizedException('账号不在了')
+    if (user === null) throw new UnauthorizedException('the account no longer exists')
     if (!(await verifyPassword(current, user.passwordHash))) {
-      throw new UnauthorizedException('当前密码不对')
+      throw new UnauthorizedException('the current password is wrong')
     }
     user.passwordHash = await hashPassword(next)
     await this.users.save(user)

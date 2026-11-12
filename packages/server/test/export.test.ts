@@ -82,7 +82,7 @@ describe('start.sh', () => {
 
   it('没有后端的应用会在脚本里说明"这个变量用不上"', () => {
     const source = renderStart({ hasApi: false })
-    expect(source).toContain('没有后端')
+    expect(source).toContain('no backend')
   })
 })
 
@@ -92,21 +92,21 @@ describe('.env.example / README.md', () => {
     expect(source).toContain('DATABASE_URL=')
     expect(source).toContain('PORT=3000')
     // 没有 pool.max 的环境判断语义 —— 它是容量参数，注释里说清
-    expect(source).toContain('并发容量参数')
+    expect(source).toContain('capacity knob')
   })
 
   it('README 必须写清产物里**没有**什么（数据库与组件）', () => {
     const source = renderReadme({ appName: '测试应用', appId: 'app_x', hasApi: true, hasLock: true })
     expect(source).toContain('# 测试应用')
     // 这两句是"用户拿走后最容易被误解"的地方
-    expect(source).toContain('没有数据库')
-    expect(source).toContain('没有组件')
+    expect(source).toContain('No database')
+    expect(source).toContain('No components')
     expect(source).toContain('pnpm install --prod --frozen-lockfile')
   })
 
   it('没有 lock 文件时不说"可复现"', () => {
     const source = renderReadme({ appName: 'x', appId: 'app_x', hasApi: false, hasLock: false })
-    expect(source).toContain('版本可能浮动')
+    expect(source).toContain('versions may drift')
     expect(source).not.toContain('--frozen-lockfile`')
   })
 })

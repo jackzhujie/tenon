@@ -101,10 +101,10 @@ const AUTH_MARKERS: Markers = {
   end: '<!-- tenon:auth:end -->',
 }
 
-const AGENTS_HEADER = `# 项目说明（给 Agent 读）
+const AGENTS_HEADER = `# Project notes (for the Agent)
 
-> 这份文件是这个项目的长期记忆：架构、约定、坑、运行方式。
-> 带 \`tenon:\` 标记的几节由 Tenon 维护，**不要手改**；其余小节随便写。
+> This file is the project's long-term memory: architecture, conventions, pitfalls, how to run it.
+> Sections marked \`tenon:\` are maintained by Tenon — **do not edit them by hand**; write freely elsewhere.
 `
 
 /** 把一节塞进它的标记之间；没有标记就追加到文末（不动别人写的任何内容） */
@@ -130,7 +130,7 @@ function spliceSection(text: string, body: string, markers: Markers): string {
 async function includeShared(repoDir: string, notes: string[]): Promise<void> {
   const file = join(repoDir, 'tsconfig.json')
   if (!(await exists(file))) {
-    notes.push('没有 tsconfig.json（不是 TypeScript 项目？），没自动把 shared 加进 include')
+    notes.push('No tsconfig.json (not a TypeScript project?), so "shared" was not added to include')
     return
   }
   try {
@@ -142,7 +142,7 @@ async function includeShared(repoDir: string, notes: string[]): Promise<void> {
     await writeFile(file, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
   } catch {
     // tsconfig 允许注释与尾逗号，JSON.parse 会失败 —— 这条是"尽力"，失败要说出来
-    notes.push('tsconfig.json 里可能有注释（不是纯 JSON），没自动加 shared：请手动把 "shared" 放进 include')
+    notes.push('tsconfig.json may contain comments (not plain JSON), so "shared" was not added — add it to include by hand')
   }
 }
 
@@ -154,7 +154,7 @@ async function ignoreDistServer(repoDir: string, notes: string[]): Promise<void>
   if (text.includes('dist-server')) return
   const patched = text.replace(/(['"])dist\/\*\*\1/, (match, quote: string) => `${match}, ${quote}dist-server/**${quote}`)
   if (patched === text) {
-    notes.push('eslint.config.mjs 里没有 `dist/**` 那条 ignores，没自动加 dist-server（lint 会扫到后端产物）')
+    notes.push('eslint.config.mjs has no "dist/**" ignore entry, so dist-server was not added (lint would scan the backend build output)')
     return
   }
   await writeFile(file, patched, 'utf8')
@@ -222,7 +222,7 @@ export async function applyApiFeature(input: ApplyApiFeatureInput): Promise<Appl
     for (const [name, version] of Object.entries(fragmentDeps)) {
       if (current[name] !== undefined) {
         if (current[name] !== version) {
-          notes.push(`${name} 已有版本 ${String(current[name])}，保留（功能包想要 ${String(version)}）`)
+          notes.push(`${name} is already at ${String(current[name])}; kept it (the feature wanted ${String(version)})`)
         }
         continue
       }
@@ -245,7 +245,7 @@ export async function applyApiFeature(input: ApplyApiFeatureInput): Promise<Appl
    * 预览时由网关在编译完之后补（见 `gateway/src/api.ts` 的 `pinOutputModule`）。
    */
   if (pkg['type'] === 'module') {
-    notes.push('这个应用是 ESM 的（package.json 有 "type": "module"）：已加 scripts/mark-cjs.mjs 给编译产物钉 commonjs，否则后端启动会 require is not defined')
+    notes.push('This app is ESM (package.json has "type": "module"): added scripts/mark-cjs.mjs to pin the compiled output to CommonJS — otherwise the backend starts with "require is not defined"')
   }
 
   await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8')
@@ -340,7 +340,7 @@ async function registerAuthEntities(repoDir: string, notes: string[]): Promise<v
   const file = join(repoDir, 'api', 'db.ts')
   if (!(await exists(file))) {
     notes.push(
-      '没有 api/db.ts，没自动登记账号表：请把 AuthUser / AuthSession 加进 entities（漏了的话登录会报 relation "auth_users" does not exist）',
+      'No api/db.ts, so the auth tables were not registered: add AuthUser / AuthSession to entities (without them, sign-in fails with relation "auth_users" does not exist)',
     )
     return
   }
@@ -349,7 +349,7 @@ async function registerAuthEntities(repoDir: string, notes: string[]): Promise<v
   const pattern = /export const entities = \[([\s\S]*?)\] as const/
   if (!pattern.test(text)) {
     notes.push(
-      'api/db.ts 里找不到 `export const entities = [...] as const`，请手动把 AuthUser / AuthSession 加进去（漏了的话登录会报 relation "auth_users" does not exist）',
+      'Could not find `export const entities = [...] as const` in api/db.ts — add AuthUser / AuthSession by hand (without them, sign-in fails with relation "auth_users" does not exist)',
     )
     return
   }
@@ -366,7 +366,7 @@ async function registerAuthModule(repoDir: string, notes: string[]): Promise<voi
   const file = join(repoDir, 'api', 'app.module.ts')
   if (!(await exists(file))) {
     notes.push(
-      '没有 api/app.module.ts，没自动挂上 AuthModule：请手动 import 并加进 imports（漏了的话守卫不生效，所有接口公开）',
+      'No api/app.module.ts, so AuthModule was not wired: import it and add it to imports (without it the guard never runs and every endpoint is public)',
     )
     return
   }
@@ -374,7 +374,7 @@ async function registerAuthModule(repoDir: string, notes: string[]): Promise<voi
   if (text.includes('AuthModule')) return
   if (!/imports:\s*\[/.test(text)) {
     notes.push(
-      'api/app.module.ts 的 @Module 里找不到 `imports: [`，请手动加 AuthModule（漏了的话守卫不生效，所有接口公开）',
+      'Could not find `imports: [` in the @Module of api/app.module.ts — add AuthModule by hand (without it the guard never runs and every endpoint is public)',
     )
     return
   }
@@ -394,7 +394,7 @@ async function wrapWithAuthGate(repoDir: string, notes: string[]): Promise<boole
   const file = join(repoDir, 'src', 'main.tsx')
   if (!(await exists(file))) {
     notes.push(
-      '没有 src/main.tsx，没自动接上登录页：请把 <App/> 包进 <AuthGate>（不接的话接口全 401，而页面上没有登录框）',
+      'No src/main.tsx, so the sign-in page was not wired: wrap <App/> in <AuthGate> (without it every request returns 401 while the page shows no sign-in form)',
     )
     return false
   }
@@ -405,7 +405,7 @@ async function wrapWithAuthGate(repoDir: string, notes: string[]): Promise<boole
   const match = pattern.exec(text)
   if (match === null) {
     notes.push(
-      'src/main.tsx 的形状和模板不一样（找不到 <TenonErrorBoundary>）：请把 <App/> 包进 <AuthGate>，否则接口全 401 而页面上没有登录框',
+      'src/main.tsx does not match the template (no <TenonErrorBoundary>): wrap <App/> in <AuthGate>, otherwise every request returns 401 while the page shows no sign-in form',
     )
     return false
   }

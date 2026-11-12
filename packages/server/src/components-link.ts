@@ -44,7 +44,7 @@ export function createComponentBridge(options: ComponentBridgeOptions): AppCompo
   /** 这个应用的 web facet：磁盘上的绝对路径（没有就 null） */
   async function webFacetFile(): Promise<string | null> {
     const activated = await options.runtime.ensure(options.appId).catch((error: unknown) => {
-      log(`[components] ${options.appId} 激活失败：${error instanceof Error ? error.message : String(error)}`)
+      log(`[components] ${options.appId} failed to activate: ${error instanceof Error ? error.message : String(error)}`)
       return null
     })
     if (activated === null) return null

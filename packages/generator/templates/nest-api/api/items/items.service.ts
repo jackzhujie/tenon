@@ -18,13 +18,13 @@ export class ItemsService {
 
   async setDone(id: number, done: boolean): Promise<ItemEntity> {
     const item = await this.items.findOne({ where: { id } })
-    if (item === null) throw new NotFoundException(`没有 id=${id} 的事项`)
+    if (item === null) throw new NotFoundException(`no item with id=${id}`)
     item.done = done
     return this.items.save(item)
   }
 
   async remove(id: number): Promise<void> {
     const result = await this.items.delete({ id })
-    if (result.affected === 0) throw new NotFoundException(`没有 id=${id} 的事项`)
+    if (result.affected === 0) throw new NotFoundException(`no item with id=${id}`)
   }
 }

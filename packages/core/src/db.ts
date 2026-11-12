@@ -10,6 +10,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
+import { msg } from '@tenon/protocol'
 
 export interface Migration {
   readonly version: number
@@ -218,7 +219,11 @@ export class TenonDatabase {
       } catch (err) {
         this.db.exec('ROLLBACK')
         throw new Error(
-          `tenon.db 迁移 ${migration.version}(${migration.name}) 失败：${err instanceof Error ? err.message : String(err)}`,
+          msg('error.db.migrationFailed', {
+            version: migration.version,
+            name: migration.name,
+            detail: err instanceof Error ? err.message : String(err),
+          }),
         )
       }
     }

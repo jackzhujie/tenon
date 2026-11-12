@@ -15,7 +15,7 @@ function flag(name: string): string | undefined {
 async function main(): Promise<void> {
   const portRaw = flag('TENON_PORT')
   const port = portRaw === undefined ? 0 : Number(portRaw)
-  if (Number.isNaN(port)) throw new Error(`TENON_PORT 不是数字：${portRaw}`)
+  if (Number.isNaN(port)) throw new Error(`TENON_PORT is not a number: ${portRaw}`)
 
   const running = await startServer({
     port,
@@ -38,17 +38,17 @@ async function main(): Promise<void> {
 
   if (model === undefined) {
     process.stderr.write(
-      '[tenon] 还没有可用模型：设置 TENON_FAUX=1 用假模型调试，或在设置里配置提供商。\n',
+      '[tenon] no model available: set TENON_FAUX=1 to debug with the faux model, or configure a provider in settings.\n',
     )
   } else if (model.mode === 'faux') {
-    process.stderr.write('[tenon] 模型为 faux（开发模式），回复内容是假的，仅用于验证链路。\n')
+    process.stderr.write('[tenon] using the faux model (dev mode): replies are fake, only for exercising the pipeline.\n')
   }
 
   let stopping = false
   const shutdown = async (signal: string): Promise<void> => {
     if (stopping) return
     stopping = true
-    process.stderr.write(`[tenon] 收到 ${signal}，正在关闭…\n`)
+    process.stderr.write(`[tenon] received ${signal}, shutting down…\n`)
     await running.close()
     process.exit(0)
   }
@@ -68,14 +68,14 @@ async function main(): Promise<void> {
    * supervisor"时才启用。
    */
   if (process.env['TENON_STDIN_SHUTDOWN'] === '1') {
-    process.stdin.on('end', () => void shutdown('stdin 关闭'))
+    process.stdin.on('end', () => void shutdown('stdin closed'))
     // 管道异常（对端被杀）也当关停：总比挂在那里当孤儿好
-    process.stdin.on('error', () => void shutdown('stdin 断开'))
+    process.stdin.on('error', () => void shutdown('stdin disconnected'))
     process.stdin.resume()
   }
 }
 
 main().catch((err: unknown) => {
-  process.stderr.write(`[tenon] 启动失败：${err instanceof Error ? err.stack ?? err.message : String(err)}\n`)
+  process.stderr.write(`[tenon] failed to start: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`)
   process.exit(1)
 })

@@ -143,7 +143,7 @@ export async function activateComponents(options: ActivateOptions): Promise<Acti
     // dev 打开 schema 校验：宁可早点炸，也不要让一个写错的 state 静默上线
     dev: true,
     onError: (error) => {
-      log(`[components] ${options.appId} 后台任务出错：${describe(error)}`)
+      log(`[components] ${options.appId} background task failed: ${describe(error)}`)
     },
   })
 
@@ -159,8 +159,8 @@ export async function activateComponents(options: ActivateOptions): Promise<Acti
         problems.push(
           problem(
             target.id,
-            `${target.id} 的 server facet 没有导出 activate()`,
-            '这个组件与当前 Tenon 版本不兼容，更新它',
+            msg('error.component.noActivate', { id: target.id }),
+            msg('error.component.incompatibleHint'),
           ),
         )
         continue
@@ -177,12 +177,12 @@ export async function activateComponents(options: ActivateOptions): Promise<Acti
       loaded.push(target.id)
     } catch (error) {
       const message = describe(error)
-      log(`[components] ${options.appId} 加载 ${target.id} 失败：${message}`)
+      log(`[components] ${options.appId} failed to load ${target.id}: ${message}`)
       problems.push(
         problem(
           target.id,
-          `${target.id} 加载失败：${message}`,
-          '看日志里的堆栈；多半是组件与宿主版本不匹配，或者 facet 构建产物过期（先跑 build:plugins）',
+          msg('error.component.loadFailed', { id: target.id, detail: message }),
+          msg('error.component.loadFailedHint'),
         ),
       )
     }

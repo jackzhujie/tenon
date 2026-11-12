@@ -53,10 +53,10 @@ export class AuthGuard implements CanActivate {
     if (isPublic === true) return true
 
     const token = readCookie(request.headers.cookie, AUTH_COOKIE_NAME)
-    if (token === null) throw new UnauthorizedException('需要先登录')
+    if (token === null) throw new UnauthorizedException('sign-in required')
 
     const user = await this.auth.resolve(token)
-    if (user === null) throw new UnauthorizedException('登录已过期，请重新登录')
+    if (user === null) throw new UnauthorizedException('the session has expired; sign in again')
 
     request.user = user
     return true

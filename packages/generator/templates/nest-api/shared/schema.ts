@@ -7,7 +7,7 @@
 import { z } from 'zod'
 
 export const ItemInput = z.object({
-  title: z.string().trim().min(1, '标题不能为空').max(120, '标题最多 120 个字'),
+  title: z.string().trim().min(1, 'the title is required').max(120, 'the title is at most 120 characters'),
 })
 export type ItemInput = z.infer<typeof ItemInput>
 

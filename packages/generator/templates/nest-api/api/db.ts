@@ -17,7 +17,7 @@ export function databaseUrl(): string {
   const url = process.env['DATABASE_URL']
   if (url === undefined || url === '') {
     throw new Error(
-      '没有 DATABASE_URL。Tenon 起预览时会注入；手动跑就自己设一个 postgres:// 连接串。',
+      'DATABASE_URL is missing. Tenon injects it when it starts a preview; for a manual run, set your own postgres:// connection string.',
     )
   }
   return url

@@ -27,6 +27,7 @@ import { execFile } from 'node:child_process'
 import { lstat, readdir, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import { appPaths, type TenonHome } from '@tenon/core'
+import { msg } from '@tenon/protocol'
 
 /** 盘点的分块。`reclaimable` 为真的才允许出现在清理动作里 */
 export type StorageCategoryKey = 'git' | 'deps' | 'code' | 'database' | 'snapshots' | 'exports' | 'metadata'
@@ -280,7 +281,7 @@ export async function cleanStorage(
     for (const appId of targets) {
       const depsDir = join(appPaths(home, appId).repoDir, 'node_modules')
       if (outside(home.appsDir, depsDir)) {
-        notes.push(`${appId}：依赖目录不在 apps 之下，已跳过`)
+        notes.push(msg('note.storage.depsOutside', { id: appId }))
         continue
       }
       const info = await stat(depsDir).catch(() => null)
@@ -290,7 +291,7 @@ export async function cleanStorage(
       freedBytes += measured.bytes
       removed.push(depsDir)
     }
-    if (removed.length === 0) notes.push('没有可清理的依赖（都已清过或应用还没装过依赖）')
+    if (removed.length === 0) notes.push(msg('note.storage.nothingToClean'))
     return { freedBytes, removed, notes }
   }
 
@@ -308,14 +309,14 @@ export async function cleanStorage(
         removed.push(item.path)
       }
     }
-    if (removed.length === 0) notes.push(`每个应用都只留下了 ${keep} 份以内的快照，无需清理`)
+    if (removed.length === 0) notes.push(msg('note.storage.snapshotsKept', { keep }))
     return { freedBytes, removed, notes }
   }
 
   // backups-gc
   const names = (await listDir(home.backupsDir)).filter((name) => name.endsWith('.git'))
   if (names.length === 0) {
-    notes.push('还没有备份裸库（发布过一次才会有）')
+    notes.push(msg('note.storage.noBackupRepo'))
     return { freedBytes, removed, notes }
   }
   for (const name of names) {
@@ -330,7 +331,10 @@ export async function cleanStorage(
        */
       await runGit(['gc', '--quiet'], repo)
     } catch (error) {
-      notes.push(`${name}：gc 失败（${error instanceof Error ? error.message : String(error)}）`)
+      notes.push(msg('note.storage.gcFailed', {
+          name,
+          detail: error instanceof Error ? error.message : String(error),
+        }))
       continue
     }
     const after = await usage(repo)
@@ -338,6 +342,6 @@ export async function cleanStorage(
     freedBytes += saved
     if (saved > 0) removed.push(repo)
   }
-  if (freedBytes === 0 && notes.length === 0) notes.push('备份库已经是最紧凑的状态')
+  if (freedBytes === 0 && notes.length === 0) notes.push(msg('note.storage.alreadyCompact'))
   return { freedBytes, removed, notes }
 }

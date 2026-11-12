@@ -100,12 +100,15 @@ export class PgliteProvider implements DatabaseProvider {
           : new PGlite({ dataDir: this.options.dataDir, loadDataDir: this.loadDataDir })
       this.loadDataDir = null
       await withTimeout(db.waitReady as Promise<unknown>, START_TIMEOUT_MS, () =>
-        `PGlite 在 ${START_TIMEOUT_MS / 1000}s 内没有就绪（数据目录 ${this.options.dataDir}）`,
+        msg('error.db.pgliteTimeout', {
+          seconds: START_TIMEOUT_MS / 1000,
+          dir: this.options.dataDir,
+        }),
       )
       this.db = db
       await this.listen()
       this.state = 'ready'
-      this.log(`[tenon] 应用库就绪（pglite ${this.connectionString()}，pool.max=1）`)
+      this.log(`[tenon] app database ready (pglite ${this.connectionString()}, pool.max=1)`)
     } catch (err) {
       this.state = 'failed'
       this.error = messageOf(err)

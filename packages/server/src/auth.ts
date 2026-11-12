@@ -5,7 +5,7 @@
  */
 import { timingSafeEqual } from 'node:crypto'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { TRANSPORT, rpcFail } from '@tenon/protocol'
+import { TRANSPORT, msg, rpcFail } from '@tenon/protocol'
 
 /** 健康检查不需要 Token：外部 supervisor / 探针要用，且它不泄露任何用户数据 */
 const PUBLIC_PATHS = new Set<string>([TRANSPORT.healthPath])
@@ -46,7 +46,7 @@ export function requireBearer(token: string, options: AuthOptions = {}) {
       await reply
         .code(401)
         .header('content-type', 'application/json; charset=utf-8')
-        .send(rpcFail({ code: 'UNAUTHORIZED', message: '缺少或错误的访问令牌' }))
+        .send(rpcFail({ code: 'UNAUTHORIZED', message: msg('error.auth.missingToken') }))
     }
   }
 }
