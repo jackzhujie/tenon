@@ -26,7 +26,8 @@ export const AppDoc = defineDoc<AppDocShape>({
   history: 'rewindable',
   fork: 'current',
   initial: () => ({
-    name: '未命名应用',
+    /* 默认名是**存下来的数据**（不是文案），英文：它可能被写进提交信息、导出目录名 */
+    name: 'Untitled app',
     description: '',
     styleId: null,
     routes: [],

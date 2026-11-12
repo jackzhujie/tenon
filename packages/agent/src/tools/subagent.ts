@@ -133,12 +133,12 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
     async execute(args, api: ToolExecutionApi, context) {
       const input = args as { role?: string; task?: string }
       const task = typeof input.task === 'string' ? input.task.trim() : ''
-      if (task === '') return errorResult('参数 `task` 不能为空：要给子 Agent 一个具体的问题')
+      if (task === '') return errorResult('`task` must not be empty: give the sub agent one concrete question')
 
       const spec = input.role === undefined ? undefined : roleOf(input.role)
       if (spec === undefined || !DELEGABLE_ROLES.includes(spec.id)) {
         const available = DELEGABLE_ROLES.map((id) => ROLES[id].label).join(' / ')
-        return errorResult(`没有这个子角色：${String(input.role)}。可用的是 ${available}`)
+        return errorResult(`No such role: ${String(input.role)}. Available: ${available}`)
       }
       const planned = plannedRejection(spec)
       if (planned !== undefined) {
@@ -148,10 +148,10 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
 
       const tools = toolsForRole(spec, options.getTools())
       if (tools.length === 0) {
-        return errorResult(`${spec.label} 的工具一个都没装好（期望：${spec.tools.join(' / ')}）`)
+        return errorResult(`${spec.label} has none of its tools registered (expected: ${spec.tools.join(' / ')})`)
       }
       const harness = options.getHarness()
-      if (harness === undefined) return errorResult('harness 还没就绪，稍后重试')
+      if (harness === undefined) return errorResult('The harness is not ready yet — retry in a moment')
 
       // 1. 上次重跑到这里时建过的子会话（同一个工具 task 只该有一个）
       const existing = await api.commit(
@@ -221,16 +221,16 @@ export function createSubagentTool(options: SubagentToolOptions): ToolRegistrati
       await api.details(detailOf(spend), context)
 
       if (settled.status !== 'done') {
-        return errorResult(`${spec.label} 没有给出结论（${settled.status}）${answer === '' ? '' : `：${answer}`}`)
+        return errorResult(`${spec.label} did not reach a conclusion (${settled.status})${answer === '' ? '' : `: ${answer}`}`)
       }
       if (answer === '') {
-        return errorResult(`${spec.label} 跑完了但没有输出结论`)
+        return errorResult(`${spec.label} finished but produced no answer`)
       }
       return {
         output: [
           {
             type: 'text',
-            text: `${spec.label} 的结论（子会话 #${String(child.id)}）：\n${answer}`,
+            text: `${spec.label} concluded (sub conversation #${String(child.id)}):\n${answer}`,
           },
         ],
       }

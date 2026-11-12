@@ -128,12 +128,12 @@ export function checkCommand(repoDir: string, command: string): string | undefin
     const target = match[1]
     // 没有参数（`cd && make`）等价于 `cd ~`；`cd -` 回到上一个目录，两个都不可预测
     if (target === undefined || target === '-') {
-      return '拒绝：`cd` 没有指定目录（等价于回 home），而命令只能在应用工作区里跑。要换目录请用工作区内的相对路径。'
+      return 'Refused: a bare `cd` goes to the home directory, and commands may only run inside the app workspace. Use a path inside the workspace instead.'
     }
     // `$(...)` / `$VAR` 这类静态算不出来，交给运行时；猜错方向是把正常命令打死
     if (/[$`]/.test(target)) continue
     if (!isInside(repoDir, expandHome(target))) {
-      return `拒绝：这条命令把工作目录切到了应用工作区之外（${target}）。所有文件都在工作区（repo/）里，请改用相对路径。`
+      return `Refused: this command moves the working directory to ${target}, outside the app workspace. Every file lives inside the workspace (repo/) — use a relative path.`
     }
   }
 
@@ -144,7 +144,7 @@ export function checkCommand(repoDir: string, command: string): string | undefin
     // 只是提到这个名字（`grep .tenon README.md`）不算访问；必须是路径形状
     if (!path.includes('/')) continue
     if (isInside(repoDir, path)) continue
-    return `拒绝：${path} 不在这个应用的工作区里 —— 那里是别的应用的数据或本机的密钥库。这个应用只能碰 repo/ 里的文件。`
+    return `Refused: ${path} is not inside this app's workspace — that path is another app's data, or the local key store. This app may only touch files under its own repo/.`
   }
 
   // 路径要当字面量比：home 里可能带 `.` / `+`，不转义会变成通配符（用户名带点的机器上必踩）
@@ -157,7 +157,7 @@ export function checkCommand(repoDir: string, command: string): string | undefin
     const target = literal(slash(`${home}/${name}`))
     const pattern = new RegExp(`(^|[\\s"'=:(])${target}(?=[/\\s"'\`;|&)]|$)`)
     if (pattern.test(slash(expanded))) {
-      return `拒绝：命令访问了 ~/${name} —— 那是宿主凭据所在，不属于这个应用。要在项目里配置凭据，请用环境变量或工作区内的文件。`
+      return `Refused: the command reaches ~/${name} — that is where host credentials live, and it does not belong to this app. To give the project a credential, use an environment variable or a file inside the workspace.`
     }
   }
 
@@ -240,10 +240,10 @@ function pathGuard(repoDir: string) {
   return (args: Record<string, unknown>): string | undefined => {
     const path = args['path']
     if (typeof path !== 'string' || path === '') {
-      return '参数 `path` 缺失。所有文件路径都相对于应用工作区根目录。'
+      return 'Missing `path`. Every file path is relative to the app workspace root.'
     }
     if (!isInside(repoDir, path)) {
-      return `拒绝访问工作区之外的路径：${path}。只能读写应用工作区（repo/）里的文件。`
+      return `Refusing to touch a path outside the workspace: ${path}. Only files inside the app workspace (repo/) can be read or written.`
     }
     return undefined
   }

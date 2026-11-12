@@ -266,7 +266,7 @@ describe('组件商店', () => {
     const text = result.output.map((part) => part.text).join('')
     expect(result.isError).toBeFalsy()
     // 说清"这次是从 Hub 下的"——模型会把这句话转述给用户
-    expect(text).toContain('刚从 Hub 下载')
+    expect(text).toContain('downloaded from the Hub')
 
     const list = await rpc<{ components: { id: string; version: string; source: string }[] }>(
       running!,

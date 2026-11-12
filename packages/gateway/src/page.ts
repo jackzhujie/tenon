@@ -259,12 +259,12 @@ export class PageBridge {
     args: Record<string, unknown> = {},
     options: { timeoutMs?: number; waitMs?: number } = {},
   ): Promise<PageReply> {
-    if (this.closed) throw new PageError('closed', '预览已经停了，页面通道也关了')
+    if (this.closed) throw new PageError('closed', 'The preview has stopped, so the page channel is closed')
     const page = await this.waitForPage(options.waitMs ?? 3000)
     if (page === null) {
       throw new PageError(
         'missing',
-        '预览页面没有连上。先把预览打开（或等 dev server 就绪）再试 —— 这条通道只能驱动已经打开的页面。',
+        'No preview page is connected. Open the preview first (or wait for the dev server), then try again — this channel can only drive a page that is already open.',
       )
     }
     const id = randomUUID()
@@ -281,7 +281,7 @@ export class PageBridge {
          * 这是在测试里被"超时之后 poll 应该是 null"这一条抓到的。
          */
         this.drop(id)
-        reject(new PageError('timeout', `页面在 ${Math.round(timeoutMs / 1000)} 秒内没有回话（命令：${name}）`))
+        reject(new PageError('timeout', `The page did not answer within ${Math.round(timeoutMs / 1000)}s (command: ${name})`))
       }, timeoutMs)
       timer.unref?.()
       this.pending.set(id, { name, handed: false, resolve, reject, timer })
@@ -306,7 +306,7 @@ export class PageBridge {
     const info = await Promise.race([
       arrived,
       new Promise<PageSessionInfo>((_, reject) =>
-        setTimeout(() => reject(new PageError('timeout', `跳到 ${path} 之后新页面没有报到`)), timeoutMs),
+        setTimeout(() => reject(new PageError('timeout', `The new page did not check in after navigating to ${path}`)), timeoutMs),
       ),
     ])
     this.helloWaiters.delete(ticket)
@@ -324,7 +324,7 @@ export class PageBridge {
     this.waiters.clear()
     for (const [id, entry] of this.pending) {
       clearTimeout(entry.timer)
-      entry.reject(new PageError('closed', '预览停了，命令没有执行'))
+      entry.reject(new PageError('closed', 'The preview stopped; the command did not run'))
       this.pending.delete(id)
     }
     this.args.clear()
@@ -446,7 +446,7 @@ export const PAGE_SCRIPT = `(function () {
     try {
       return Array.prototype.slice.call(document.querySelectorAll(selector));
     } catch (e) {
-      throw new Error('选择器写错了：' + selector + '（' + e.message + '）');
+      throw new Error('Bad selector: ' + selector + ' (' + e.message + ')');
     }
   }
 
@@ -454,7 +454,7 @@ export const PAGE_SCRIPT = `(function () {
     var list = findAll(selector);
     var at = typeof index === 'number' ? index : 0;
     if (list.length <= at) {
-      throw new Error('没找到第 ' + (at + 1) + ' 个「' + selector + '」（一共 ' + list.length + ' 个）');
+      throw new Error('No element #' + (at + 1) + ' for "' + selector + '" (found ' + list.length + ')');
     }
     return list[at];
   }
@@ -586,7 +586,7 @@ export const PAGE_SCRIPT = `(function () {
   function handle(command) {
     var action = actions[command.name];
     if (!action) {
-      return sendReply(command, { ok: false, error: '不认识的命令：' + command.name });
+      return sendReply(command, { ok: false, error: 'Unknown command: ' + command.name });
     }
     /*
      * 抛异常也必须回话。之前这里是空的 catch 分支 —— 页面里 one() 找不到元素就直接抛，

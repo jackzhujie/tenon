@@ -4,6 +4,12 @@
  * 这里是**唯一事实来源** —— 工具集、档位、提示词、能不能派活都只写一遍。
  * 以前这些东西散在 prompt 字符串和注册代码里，加一个角色要改三处、还容易漏掉"子 Agent 不该有的工具"。
  *
+ * **提示词一律英文**，跟着界面语言翻是错的：它唯一的读者是模型，而英文指令在
+ * 各家模型上最稳（中文指令会让一部分模型开始用中文思考、把工具名也写成中文）。
+ * 界面上的双语只覆盖"给用户看的字"，不覆盖"给模型看的字"（见 STATUS §2）。
+ * 唯一的例外是**引用工具输出的原文**时要点名中英两种写法 —— `checks` 的摘要按界面
+ * 语言输出，模型必须两版都认得，否则中文界面上它会以为检查"没跑"其实是"通过了"。
+ *
  * 两条纪律：
  * 1. **子角色的工具集是白名单，不是黑名单**。`explore` 只读是因为它的名字里没有 `write`，
  *    而不是因为我们在别处记得把它删掉。要写文件的角色必须自己列出来。
@@ -24,8 +30,6 @@ export interface RoleSpec {
   readonly id: RoleId
   readonly label: string
   readonly tier: ModelTier
-  /** 一句话职责，工具描述与界面都用它 */
-  readonly purpose: string
   /** 白名单：这个角色能用哪些工具（按名字选） */
   readonly tools: readonly string[]
   /**
@@ -67,7 +71,6 @@ export const ROLES: Record<RoleId, RoleSpec> = {
     id: 'builder',
     label: 'Builder',
     tier: 'comprehensive',
-    purpose: '主角色：跟用户对话，决定改什么代码',
     tools: [
       'read',
       'write',
@@ -86,7 +89,6 @@ export const ROLES: Record<RoleId, RoleSpec> = {
     id: 'explore',
     label: 'Explore',
     tier: 'fast',
-    purpose: '定位代码：这个功能在哪、这行从哪来的',
     tools: ['read', 'ls', 'glob', 'grep'],
     instructions: `${ROLE_COMMON}
 
@@ -101,13 +103,12 @@ Do not paste whole files back. If you cannot find it after a handful of searches
     id: 'librarian',
     label: 'Librarian',
     tier: 'fast',
-    purpose: '查文档与约定：这个库怎么用、这个项目有什么规矩',
     tools: ['read', 'ls', 'glob', 'grep'],
     instructions: `${ROLE_COMMON}
 
 Your job: answer framework and project-convention questions from what is actually on disk —
 AGENTS.md, README, docs/, and the type definitions inside node_modules (grep them, do not guess the API).
-Quote the file and line you took the answer from. If the repo does not answer it, say "仓库里没有依据" instead of
+Quote the file and line you took the answer from. If the repo does not answer it, say "not in this repo" instead of
 recalling the library from memory: a wrong API costs more than an honest gap.
 Note: external documentation search is not wired up yet, so only on-disk material counts.`,
     canDelegate: false,
@@ -123,7 +124,6 @@ Note: external documentation search is not wired up yet, so only on-disk materia
      * 主角色跑命令时每条都在转录里、随时能被打断；脚本里四十条命令的输出只有脚本自己看得到。
      * 要写文件就回主角色改，这条不变式让"子 Agent 只读"对五个角色都成立。
      */
-    purpose: '写一次性脚本：批量读、过滤、汇总、跑探查',
     tools: ['codemode', 'read', 'ls', 'glob', 'grep'],
     modelTools: ['codemode'],
     extensions: ['tenon.codeact'],
@@ -154,7 +154,6 @@ Rules:
     id: 'e2e',
     label: 'E2E',
     tier: 'comprehensive',
-    purpose: '自验收：打开预览、点一遍、看断言过不过',
     /*
      * 只有预览工具，一个文件工具都没有 —— 这是刻意的：验收的人不该顺手改代码。
      * 发现了什么就报回去，改由主角色改（改完再让它验一遍，形成"改 → 验"的闭环）。
@@ -182,7 +181,6 @@ You cannot write files: report the defect, do not try to fix it.`,
     id: 'reviewer',
     label: 'Reviewer',
     tier: 'thinking',
-    purpose: '提交前审查：风险清单，不改代码',
     /*
      * 只读 + 三个判据工具。顺序在提示词里写死：`git_diff` → `typecheck` → `lint`。
      * 只看 diff 会变成猜（"这里是不是少了 try/catch"）；只看 typecheck 会漏掉契约漂移
@@ -198,10 +196,11 @@ Order of work (do not skip 1-3, and do not reorder them):
 1. git_diff — see the actual changed lines. Review **what changed**, not the whole repository.
    If it says the working tree is clean, pass commit:"HEAD" to review the last commit instead.
 2. typecheck — run the app's own tsc. A type error is a finding, not a tool failure.
-   If it says "没跑成" (deps missing, no tsconfig), the check did NOT happen: say so in the report.
+   A check that could not run (deps missing, no tsconfig) says so in its first line —
+   "Did not run" / "没跑成". If you see that, the check did NOT happen: say so in the report.
 3. lint — run the app's own lint. An unused variable usually means a half-finished edit
    (the old implementation is still there); a hook called conditionally is a crash waiting.
-   Warnings are not findings. If it says "没跑成", the check did NOT happen: say so.
+   Warnings are not findings. A check that could not run did NOT happen: say so.
 4. read / grep only where the diff points — a changed signature, a new endpoint, a migration.
 
 Look for: contract drift between front and back end, missing error handling on a new path,
@@ -212,7 +211,7 @@ after a rewrite (that is what lint's unused-variable rule is pointing at).
 Output at most five items, most severe first, exactly one line each:
   [blocker|risk|nit] path:line — what is wrong — one-line fix
 Then one closing line: what you checked and what you could not check.
-Say "没有发现问题" only after all three checks actually ran. Never imply a check passed when it did not run.
+Report "no problems found" only after all three checks actually ran. Never imply a check passed when it did not run.
 You cannot write files and you cannot commit: report, do not fix.`,
     canDelegate: false,
     readiness: 'ready',
@@ -257,7 +256,7 @@ export function modelToolsFor(
  */
 export function plannedRejection(spec: RoleSpec): string | undefined {
   if (spec.readiness !== 'planned') return undefined
-  return `${spec.label} 还没接上（${spec.pending ?? '缺工具'}），换个角色或自己做`
+  return `${spec.label} is not wired up yet (${spec.pending ?? 'missing tools'}). Use another role or do it yourself.`
 }
 
 /** 这个角色要用到哪些扩展（按名字）：多数角色继承父会话的，CodeAct 要额外要一个沙箱 */

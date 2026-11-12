@@ -179,11 +179,11 @@ describe('add_backend 工具', () => {
     const execute = tool!.execute as unknown as (input: unknown) => Promise<ToolText>
 
     const text = readText(await execute({ reason: '要存报销单' }))
-    expect(text).toContain('已给这个应用加上后端')
+    expect(text).toContain('Added a backend to this app')
     expect(text).toContain('要存报销单')
     // 装依赖 + 重启由宿主接手（不给的话模型下一步会看到一堆"找不到 @nestjs/core"）
     expect(handedOff).toBe(true)
 
-    expect(readText(await execute({}))).toContain('已经有后端')
+    expect(readText(await execute({}))).toContain('already has a backend')
   })
 })

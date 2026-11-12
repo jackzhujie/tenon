@@ -152,7 +152,7 @@ export class TaskGraphService {
     })
     // 单帧出错不能把整条链卡死：下一帧还得继续投递
     entry.queue = next.catch((err: unknown) => {
-      console.error(`[tenon] 任务图更新失败（${appId}）：`, err)
+      console.error(`[tenon] task graph update failed (${appId}):`, err)
     })
     return entry.queue
   }

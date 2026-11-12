@@ -69,13 +69,13 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
       const installed = read.kind === 'ok' ? read.assembly.components.map((item) => item.id) : []
       const available = await listAvailable({ roots: options.roots, installed })
       if (available.length === 0) {
-        return ok('这个版本没有可用的组件。不要自己写一个替代品；告诉用户"没有可装的组件"。')
+        return ok('No components are available in this build. Do not write a replacement yourself; tell the user there is nothing to install.')
       }
       const lines = available.map((item) => {
-        const mark = item.installed ? '（已装）' : ''
-        return `- ${item.id} — ${item.name} v${item.version}${mark}：${item.description}`
+        const mark = item.installed ? ' (installed)' : ''
+        return `- ${item.id} — ${item.name} v${item.version}${mark}: ${item.description}`
       })
-      return ok(`可装组件：\n${lines.join('\n')}`)
+      return ok(`Installable components:\n${lines.join('\n')}`)
     },
   }
 
@@ -101,7 +101,7 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
     async execute(rawArgs) {
       const args = rawArgs as InstallArgs
       const id = args.id?.trim()
-      if (id === undefined || id === '') return fail('id 不能为空（用 list_components 看有哪些）')
+      if (id === undefined || id === '') return fail('`id` must not be empty (use list_components to see the ids)')
 
       const mounts =
         args.slot === undefined || args.slot === ''
@@ -126,7 +126,7 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
           ...(options.hub === undefined ? {} : { hub: options.hub }),
         })
       } catch (error) {
-        return fail(`装 ${id} 时出错了：${error instanceof Error ? error.message : String(error)}`)
+        return fail(`Installing ${id} failed: ${error instanceof Error ? error.message : String(error)}`)
       }
 
       /*
@@ -138,18 +138,18 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
         const detail = run.downloadError
         const tail =
           detail.code === 'HUB_PAID_NOT_AVAILABLE'
-            ? '这是付费组件，购买流程还没做，现在装不了。把这条告诉用户，不要自己写一个替代品。'
-            : '把这条原因告诉用户，不要自己写一个替代品。'
+            ? 'This is a paid component and there is no purchase flow yet, so it cannot be installed. Tell the user; do not write a replacement.'
+            : 'Tell the user this reason; do not write a replacement.'
         return fail(
-          `没装上 ${id}：${detail.message}${detail.hint === null ? '' : `（${detail.hint}）`}\n${tail}`,
+          `Could not install ${id}: ${detail.message}${detail.hint === null ? '' : ` (${detail.hint})`}\n${tail}`,
         )
       }
 
       if (!run.result.ok) {
         const detail = run.result.problems
-          .map((item) => `- ${item.message}${item.hint === null ? '' : `（${item.hint}）`}`)
+          .map((item) => `- ${item.message}${item.hint === null ? '' : ` (${item.hint})`}`)
           .join('\n')
-        return fail(`没装上 ${id}：\n${detail}\n不要自己写一个替代品；把这条原因告诉用户。`)
+        return fail(`Could not install ${id}:\n${detail}\nDo not write a replacement; tell the user this reason.`)
       }
       const result = run.result
 
@@ -162,15 +162,15 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
       const component = result.component
       const where =
         component.mounts.length === 0
-          ? '没有界面（只有服务端能力）'
+          ? 'no UI (server-side capability only)'
           : component.mounts
-              .map((mount) => (mount.prefix === null ? mount.slot : `${mount.slot}（${mount.prefix}）`))
-              .join('、')
-      const notes = result.notes.length === 0 ? '' : `\n注意：${result.notes.join('；')}`
+              .map((mount) => (mount.prefix === null ? mount.slot : `${mount.slot} (${mount.prefix})`))
+              .join(', ')
+      const notes = result.notes.length === 0 ? '' : `\nNotes: ${result.notes.join('; ')}`
       return ok(
-        `已装 ${component.name}（${component.id} v${component.version}）${run.downloaded ? '，刚从 Hub 下载' : ''}，挂载：${where}。` +
-          `装配声明写在 ${result.assemblyFile}，docs/AGENTS.md 的「已装组件」已同步。` +
-          `它的 UI 由平台注入，**不要再去写悬浮球/聊天框**。${notes}`,
+        `Installed ${component.name} (${component.id} v${component.version})${run.downloaded ? ', downloaded from the Hub' : ''}; mounted at ${where}. ` +
+          `The assembly declaration is in ${result.assemblyFile} and the "Installed components" section of docs/AGENTS.md is in sync. ` +
+          `Its UI is injected by the platform — **do not write a floating button or a chat box yourself**.${notes}`,
       )
     },
   }
@@ -179,7 +179,7 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
     name: REMOVE_COMPONENT_TOOL,
     description:
       'Remove a component from this app. It deletes the entry from app.components.json, clears the ' +
-      '"已装组件" section of docs/AGENTS.md, and deactivates the component immediately. ' +
+      '"Installed components" section of docs/AGENTS.md, and deactivates the component immediately. ' +
       'Idempotent: removing something that is not installed is fine. The component itself ' +
       '(files shipped with Tenon) is never touched.',
     parameters: Type.Object({
@@ -188,7 +188,7 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
     replay: 'safe',
     async execute(rawArgs) {
       const id = (rawArgs as { id?: string }).id?.trim()
-      if (id === undefined || id === '') return fail('id 不能为空（用 list_components 看装了哪些）')
+      if (id === undefined || id === '') return fail('`id` must not be empty (use list_components to see what is installed)')
       const result = await uninstallComponent({
         repoDir: options.repoDir,
         roots: options.roots,
@@ -201,10 +201,13 @@ export function createComponentsTools(options: ComponentsToolsOptions): ToolRegi
         // 重新激活失败不该让"卸"这个动作报错：声明已经删了
       }
       if (!result.removed) {
-        return ok(`${id} 本来就没装。${result.agentsDoc.changed ? 'AGENTS.md 的「已装组件」已同步。' : ''}`)
+        return ok(`${id} was not installed. ${result.agentsDoc.changed ? 'The "Installed components" section of AGENTS.md is in sync.' : ''}`)
       }
-      const left = result.remaining.length === 0 ? '现在这个应用没有装任何组件' : `还剩：${result.remaining.map((item) => item.id).join('、')}`
-      return ok(`已卸 ${id}：装配声明删了，docs/AGENTS.md 的「已装组件」已同步，组件已停用。${left}。`)
+      const left =
+        result.remaining.length === 0
+          ? 'This app now has no components.'
+          : `Still installed: ${result.remaining.map((item) => item.id).join(', ')}.`
+      return ok(`Removed ${id}: the declaration is gone, the "Installed components" section of docs/AGENTS.md is in sync, and the component is deactivated. ${left}`)
     },
   }
 

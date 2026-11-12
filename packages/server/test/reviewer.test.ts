@@ -139,7 +139,7 @@ describe('reviewer 子 Agent', () => {
     const typecheck = childResults.find((row) => row.toolName === 'typecheck')
     const typecheckText = textOf(typecheck)
     expect(typecheck?.isError).toBeFalsy()
-    expect(typecheckText).toContain('没跑成')
+    expect(typecheckText).toContain('Did not run')
     expect(typecheckText).not.toContain('✓')
 
     // 5. 清单回到父轮，父轮据此收尾
@@ -166,7 +166,7 @@ describe('reviewer 子 Agent', () => {
 
     const childId = (await childConversationIds(app.id))[0]
     const diff = (await toolResultsOf(app.id, childId)).find((row) => row.toolName === 'git_diff')
-    expect(textOf(diff)).toContain('工作区是干净的')
+    expect(textOf(diff)).toContain('working tree is clean')
     // 干净的工作区不该被当成"看过一遍、没问题"
     expect(textOf(diff)).toContain('commit:"HEAD"')
   })

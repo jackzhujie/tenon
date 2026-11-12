@@ -66,7 +66,7 @@ describe('tsc 摘要文案', () => {
       elapsedMs: 3200,
     })
     expect(report.ok).toBe(true)
-    expect(report.text).toBe('✓ 类型检查通过（tsconfig.json，3.2s）')
+    expect(report.text).toBe('✓ Typecheck passed (tsconfig.json, 3.2s)')
   })
 
   it('失败时带文件行列与错误码，最多 12 条', () => {
@@ -80,9 +80,9 @@ describe('tsc 摘要文案', () => {
     const report = formatTscReport({ diagnostics: many, other: [] }, false, { elapsedMs: 1500 })
     expect(report.ok).toBe(false)
     expect(report.errorCount).toBe(20)
-    expect(report.text).toContain('✗ 类型检查失败：20 个错误')
+    expect(report.text).toContain('✗ Typecheck failed: 20 errors')
     expect(report.text).toContain('src/a.ts:1:1  TS2322  bad')
-    expect(report.text).toContain('还有 8 条未列出')
+    expect(report.text).toContain('8 more not listed')
   })
 
   it('★ 没有诊断但退出码非 0：报"没跑成"，绝不报通过', () => {
@@ -90,13 +90,13 @@ describe('tsc 摘要文案', () => {
       exitCode: 1,
     })
     expect(report.ok).toBe(false)
-    expect(report.text).toContain('没跑成')
+    expect(report.text).toContain('did not run')
     expect(report.text).toContain('error TS5023')
     expect(report.text).not.toContain('✓')
   })
 
   it('被超时杀掉（exitCode 为 undefined）也要说出来', () => {
     const report = formatTscReport({ diagnostics: [], other: [] }, false, {})
-    expect(report.text).toContain('超时/被杀')
+    expect(report.text).toContain('timeout/killed')
   })
 })

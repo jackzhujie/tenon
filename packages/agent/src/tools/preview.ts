@@ -74,11 +74,11 @@ function errorResult(message: string): { isError: true; output: { type: 'text'; 
 /** 页面里的报错跟在每条结果后面 —— 这就是"发现了什么不对"的第一手证据 */
 function withErrors(body: string, errors: readonly string[] | undefined): string {
   if (errors === undefined || errors.length === 0) return body
-  return `${body}\n\n页面报错：\n${errors.map((line) => `  - ${line}`).join('\n')}`
+  return `${body}\n\nPage errors:\n${errors.map((line) => `  - ${line}`).join('\n')}`
 }
 
 function describeValue(value: unknown): string {
-  if (value === undefined) return '（没有返回）'
+  if (value === undefined) return '(no value returned)'
   if (typeof value === 'string') return value
   try {
     return JSON.stringify(value)
@@ -91,8 +91,8 @@ export function createPreviewTools(options: PreviewToolsOptions): ToolRegistrati
   const driver = (): PageDriver | undefined => options.getDriver(options.appId)
   const missing = (): { isError: true; output: { type: 'text'; text: string }[] } =>
     errorResult(
-      '这个应用还没有预览在跑。让用户点一下预览（或等 dev server 就绪）再试 —— ' +
-        '这些工具只能驱动已经打开的页面，它们不会自己起一个浏览器。',
+      'This app has no preview running. Ask the user to open the preview (or wait for the dev server), then try again — ' +
+        'these tools can only drive a page that is already open; they do not start a browser themselves.',
     )
 
   const read: ToolRegistration = {
@@ -114,7 +114,7 @@ export function createPreviewTools(options: PreviewToolsOptions): ToolRegistrati
         ...(input.selector === undefined ? {} : { selector: input.selector }),
         ...(input.maxChars === undefined ? {} : { maxChars: input.maxChars }),
       })
-      if (!result.ok) return errorResult(`读不到页面：${result.error ?? '未知原因'}`)
+      if (!result.ok) return errorResult(`Could not read the page: ${result.error ?? 'unknown reason'}`)
       const value = (result.value ?? {}) as {
         title?: string
         path?: string
@@ -127,7 +127,7 @@ export function createPreviewTools(options: PreviewToolsOptions): ToolRegistrati
         output: [
           text(
             withErrors(
-              `${header}\n\n${body === '' ? '（页面没有可见文字）' : body}${value.truncated === true ? '\n…（已截断）' : ''}`,
+              `${header}\n\n${body === '' ? '(no visible text on the page)' : body}${value.truncated === true ? '\n… (truncated)' : ''}`,
               result.errors,
             ),
           ),
@@ -163,10 +163,10 @@ export function createPreviewTools(options: PreviewToolsOptions): ToolRegistrati
       }
       const hasSelector = typeof input.selector === 'string' && input.selector !== ''
       if (!hasSelector && typeof input.text !== 'string' && typeof input.count !== 'number') {
-        return errorResult('断言至少要给一个条件：`selector` / `text` / `count`（`value` 需要配合 `selector`）')
+        return errorResult('An assertion needs at least one condition: `selector` / `text` / `count` (`value` needs `selector`)')
       }
       if (!hasSelector && (typeof input.value === 'string' || typeof input.count === 'number')) {
-        return errorResult('`value` 与 `count` 都要配合 `selector` 使用')
+        return errorResult('`value` and `count` only make sense together with `selector`')
       }
       const timeoutMs = Math.min(input.timeoutMs ?? DEFAULT_ASSERT_TIMEOUT, MAX_ASSERT_TIMEOUT)
       const result = await page.run(
@@ -182,26 +182,26 @@ export function createPreviewTools(options: PreviewToolsOptions): ToolRegistrati
         { timeoutMs: timeoutMs + 4000 },
       )
       if (!result.ok) {
-        return errorResult(`断言没能执行：${result.error ?? '未知原因'}`)
+        return errorResult(`The assertion could not run: ${result.error ?? 'unknown reason'}`)
       }
       const value = (result.value ?? {}) as { pass?: boolean; seen?: Record<string, unknown> }
       const expectations: string[] = []
-      if (hasSelector && typeof input.count === 'number') expectations.push(`${input.selector} 有 ${input.count} 个`)
-      else if (hasSelector) expectations.push(`存在 ${input.selector}`)
-      if (typeof input.text === 'string') expectations.push(`含有文字「${input.text}」`)
-      if (typeof input.value === 'string') expectations.push(`${input.selector ?? ''} 的值是「${input.value}」`)
-      const expected = expectations.join('，')
+      if (hasSelector && typeof input.count === 'number') expectations.push(`${input.selector} has ${input.count} elements`)
+      else if (hasSelector) expectations.push(`${input.selector} exists`)
+      if (typeof input.text === 'string') expectations.push(`contains the text "${input.text}"`)
+      if (typeof input.value === 'string') expectations.push(`${input.selector ?? ''} has the value "${input.value}"`)
+      const expected = expectations.join('; ')
       const seen = describeValue(value.seen ?? {})
 
       if (value.pass === true) {
-        return { output: [text(withErrors(`✓ 断言通过：${expected}\n实测：${seen}`, result.errors))] }
+        return { output: [text(withErrors(`✓ Assertion passed: ${expected}\nobserved: ${seen}`, result.errors))] }
       }
       return {
         output: [
           text(
             withErrors(
-              `✗ 断言未通过：${expected}\n实测：${seen}\n` +
-                '这是"页面与预期不一致"，不是工具坏了。回去看源码/改代码，改完再断言一次。',
+              `✗ Assertion failed: ${expected}\nobserved: ${seen}\n` +
+                'This means the page does not match the expectation — the tool itself worked. Go back to the source, fix it, then assert again.',
               result.errors,
             ),
           ),
@@ -225,15 +225,15 @@ export function createPreviewTools(options: PreviewToolsOptions): ToolRegistrati
       if (page === undefined) return missing()
       const input = args as { selector?: string; index?: number }
       if (typeof input.selector !== 'string' || input.selector === '') {
-        return errorResult('参数 `selector` 缺失：要告诉我在哪个元素上点')
+        return errorResult('Missing `selector`: tell me which element to click')
       }
       const result = await page.run('click', {
         selector: input.selector,
         ...(input.index === undefined ? {} : { index: input.index }),
       })
-      if (!result.ok) return errorResult(`点不到：${result.error ?? '未知原因'}`)
+      if (!result.ok) return errorResult(`Could not click: ${result.error ?? 'unknown reason'}`)
       const value = (result.value ?? {}) as { clicked?: string }
-      return { output: [text(withErrors(`已点击 ${value.clicked ?? input.selector}`, result.errors))] }
+      return { output: [text(withErrors(`Clicked ${value.clicked ?? input.selector}`, result.errors))] }
     },
   }
 
@@ -253,22 +253,22 @@ export function createPreviewTools(options: PreviewToolsOptions): ToolRegistrati
       if (page === undefined) return missing()
       const input = args as { selector?: string; value?: string; submit?: boolean }
       if (typeof input.selector !== 'string' || input.selector === '') {
-        return errorResult('参数 `selector` 缺失：要告诉我在哪个输入框里打字')
+        return errorResult('Missing `selector`: tell me which input to type into')
       }
-      if (typeof input.value !== 'string') return errorResult('参数 `value` 缺失')
+      if (typeof input.value !== 'string') return errorResult('Missing `value`')
       const result = await page.run('type', {
         selector: input.selector,
         value: input.value,
         submit: input.submit === true,
       })
-      if (!result.ok) return errorResult(`输入失败：${result.error ?? '未知原因'}`)
+      if (!result.ok) return errorResult(`Could not type: ${result.error ?? 'unknown reason'}`)
       const value = (result.value ?? {}) as { value?: string; typed?: string }
       return {
         output: [
           text(
             withErrors(
-              `已输入到 ${value.typed ?? input.selector}，当前值「${value.value ?? ''}」` +
-                (input.submit === true ? '（并提交）' : ''),
+              `Typed into ${value.typed ?? input.selector}; it now holds "${value.value ?? ''}"` +
+                (input.submit === true ? ' (and submitted)' : ''),
               result.errors,
             ),
           ),
@@ -291,9 +291,9 @@ export function createPreviewTools(options: PreviewToolsOptions): ToolRegistrati
       if (page === undefined) return missing()
       const input = args as { path?: string }
       const path = typeof input.path === 'string' ? input.path.trim() : ''
-      if (path === '') return errorResult('参数 `path` 缺失（形如 /items）')
+      if (path === '') return errorResult('Missing `path` (e.g. /items)')
       const info = await page.navigate(path.startsWith('/') ? path : `/${path}`)
-      return { output: [text(`已打开 ${info.path}（${info.title}）`)] }
+      return { output: [text(`Opened ${info.path} (${info.title})`)] }
     },
   }
 

@@ -313,7 +313,7 @@ export class HarnessPool {
     const resumed: unknown = harness.resume()
     if (resumed instanceof Promise) {
       resumed.catch((err: unknown) => {
-        console.error(`[tenon] ${appId} resume() 失败：`, err)
+        console.error(`[tenon] ${appId} resume() failed:`, err)
       })
     }
 

@@ -109,7 +109,7 @@ describe('卸载即清理（DoD ②）', () => {
      * 失败时只说"true 不是 falsy"，工具的返回原文一个字都不显示 —— 而那句话里
      * 往往就写着真正的原因（"找不到组件" / "facet 构建产物过期" / 某个 EPERM）。
      */
-    expect(textOf(installed)).toContain('已装')
+    expect(textOf(installed)).toContain('Installed')
     expect(installed.isError).toBeFalsy()
 
     const afterInstall = await rpc<{ components: { id: string; loaded: boolean }[] }>(
@@ -125,7 +125,7 @@ describe('卸载即清理（DoD ②）', () => {
 
     // ② 卸
     const removed = await call(tools, 'remove_component', { id: ID })
-    expect(textOf(removed)).toContain('已卸')
+    expect(textOf(removed)).toContain('Removed')
     expect(removed.isError).toBeFalsy()
 
     const listAfter = await rpc<{ components: unknown[]; available: { id: string; installed: boolean }[] }>(
@@ -137,7 +137,7 @@ describe('卸载即清理（DoD ②）', () => {
     expect(listAfter.available[0]).toMatchObject({ id: ID, installed: false })
 
     const docAfterRemove = await readFile(join(repository, AGENTS_DOC), 'utf8')
-    expect(docAfterRemove).toContain('（无）')
+    expect(docAfterRemove).toContain('(none)')
     expect(docAfterRemove).not.toContain(ID)
 
     // ③ 仓库里不该再有任何指向它的引用（代码、声明、文档都算）
@@ -146,7 +146,7 @@ describe('卸载即清理（DoD ②）', () => {
     // ④ 幂等：再卸一次不报错，文件也不变
     const again = await call(tools, 'remove_component', { id: ID })
     expect(again.isError).toBeFalsy()
-    expect(textOf(again)).toContain('本来就没装')
+    expect(textOf(again)).toContain('was not installed')
     expect(await readFile(join(repository, AGENTS_DOC), 'utf8')).toBe(docAfterRemove)
   })
 
@@ -175,7 +175,7 @@ describe('卸载即清理（DoD ②）', () => {
     }
     expect(assembly.components).toEqual([expect.objectContaining({ id: ID, enabled: false })])
     // AGENTS.md 要写明"已关闭"，否则 Agent 会以为它还在界面上
-    expect(await readFile(join(repoDir, AGENTS_DOC), 'utf8')).toContain('已关闭')
+    expect(await readFile(join(repoDir, AGENTS_DOC), 'utf8')).toContain('disabled')
 
     const on = await rpc<{ components: { enabled: boolean; loaded: boolean }[] }>(
       server,
@@ -190,6 +190,6 @@ describe('卸载即清理（DoD ②）', () => {
     await call(tools, 'install_component', { id: ID })
     const list = await call(tools, 'list_components', {})
     expect(textOf(list)).toContain(ID)
-    expect(textOf(list)).toContain('（已装）')
+    expect(textOf(list)).toContain('(installed)')
   })
 })

@@ -427,7 +427,7 @@ export class UsageService {
       entry.models = models
       entry.tools = tools
     } catch (err) {
-      console.error('[tenon] 读用量失败，沿用上一次的值：', err)
+      console.error('[tenon] could not read usage; keeping the previous value:', err)
     }
   }
 

@@ -241,7 +241,7 @@ describe('lint 脚本', () => {
     const result = await runLintScript(dir)
     expect(result.status).toBe('fail')
     expect(result.detail).toContain('第0条')
-    expect(result.detail).toContain('省略')
+    expect(result.detail).toContain('lines omitted')
     expect(result.detail).toContain('✖ 120 problems')
   })
 })

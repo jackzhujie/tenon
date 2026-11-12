@@ -59,7 +59,7 @@ function clip(text: string, maxBytes: number): { text: string; clipped: boolean 
   if (bytes <= maxBytes) return { text, clipped: false }
   // 按字节截断可能切在多字节字符中间，退回一个安全长度再 trim
   const safe = Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8')
-  return { text: `${safe.replace(/\uFFFD+$/, '')}\n…（已截断，原文 ${(bytes / 1024).toFixed(0)}KB）`, clipped: true }
+  return { text: `${safe.replace(/\uFFFD+$/, '')}\n… (truncated, source was ${(bytes / 1024).toFixed(0)}KB)`, clipped: true }
 }
 
 export function createReviewTools(options: ReviewToolsOptions): ToolRegistration[] {
@@ -89,8 +89,8 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
             : await gitops.showCommit(repoDir, input.commit)
       } catch (err) {
         return fail(
-          `读不了这个仓库的改动：${err instanceof Error ? err.message : String(err)}。` +
-            '（这个应用应该自动初始化过 git 仓库；如果反复失败，告诉用户而不是继续猜。）',
+          `Could not read this repository's changes: ${err instanceof Error ? err.message : String(err)}. ` +
+            '(The app should have a git repository initialised; if this keeps failing, tell the user instead of guessing.)',
         )
       }
 
@@ -99,29 +99,29 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
 
       if (files.length === 0) {
         if (filter !== undefined) {
-          return ok(`这个改动里没有涉及 ${filter} 的文件。`)
+          return ok(`This change touches no files under ${filter}.`)
         }
         return ok(
           input.commit === undefined
-            ? '工作区是干净的：没有任何未提交的改动（这一轮可能什么都没改，或者改动已经提交）。' +
-                '想评审上一版提交就传 commit:"HEAD"。'
-            : '这条提交没有改动任何文件。',
+            ? 'The working tree is clean: there are no uncommitted changes (this turn may have changed nothing, or the change is already committed). ' +
+                'To review the last commit instead, pass commit:"HEAD".'
+            : 'This commit changes no files.',
         )
       }
 
       const insertions = files.reduce((sum, file) => sum + file.insertions, 0)
       const deletions = files.reduce((sum, file) => sum + file.deletions, 0)
       const base =
-        'base' in result && result.base !== undefined ? `相对 ${result.base.slice(0, 7)}` : '相对空仓库'
+        'base' in result && result.base !== undefined ? `against ${result.base.slice(0, 7)}` : 'against an empty repository'
       const rows = files.map((file) => `### ${file.path}  (${file.status}, +${file.insertions} −${file.deletions})`)
       const body = files.map((file) => file.patch.trimEnd()).join('\n')
       const omitted = 'omitted' in result ? result.omitted : 0
       const tail =
         omitted > 0
-          ? `\n\n… 还有 ${omitted} 个文件没展开。用 read / grep 直接看它们，别假设它们没问题。`
+          ? `\n\n… ${omitted} more files not expanded. Read them with read / grep — do not assume they are fine.`
           : ''
       const clipped = clip(
-        `${base}的改动：${files.length} 个文件（+${insertions} −${deletions}）\n\n${rows.join('\n')}\n\n${body}${tail}`,
+        `Changes ${base}: ${files.length} ${files.length === 1 ? 'file' : 'files'} (+${insertions} −${deletions})\n\n${rows.join('\n')}\n\n${body}${tail}`,
         MAX_PATCH_BYTES,
       )
       return ok(clipped.text)
@@ -133,7 +133,8 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
     description:
       'Run the app\'s own TypeScript compiler (tsc --noEmit) over its tsconfig(s) and return the errors. ' +
       'Needs the app dependencies installed (node_modules). A failing typecheck is information, not a tool ' +
-      'error: put it in your risk list. If it says "没跑成", the check did NOT happen — do not treat it as passing.',
+      'error: put it in your risk list. A check that could not run says so in its first line — "Did not run" / ' +
+      '"没跑成" — and that means the check did NOT happen: do not treat it as passing.',
     parameters: Type.Object({
       timeoutMs: Type.Optional(Type.Number({ description: 'Per-config timeout in ms (default 60000, max 120000)' })),
     }),
@@ -141,6 +142,8 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
     async execute(args) {
       const input = args as { timeoutMs?: number }
       const result = await runTypecheck(repoDir, {
+        // 模型的输入：固定英文，别跟着界面语言抖（见 checks.ts 的 say）
+        locale: 'en',
         ...(options.nodePath === undefined ? {} : { nodePath: options.nodePath }),
         ...(options.tscEntry === undefined ? {} : { tscEntry: options.tscEntry }),
         // 顺序要紧：构造参数是默认值，模型传的那个才是覆盖
@@ -150,14 +153,14 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
 
       if (result.reason === 'no-config') {
         return ok(
-          '⏭ 这个应用没有 tsconfig.json —— 类型检查无从跑起。\n' +
-            '注意：**这不等于通过**。如果改动里有 .ts/.tsx，请在风险清单里写一句"没有配置类型检查"。',
+          '⏭ This app has no tsconfig.json — there is nothing to typecheck with.\n' +
+            'Note: **this is not a pass**. If the change contains .ts/.tsx, write one line in your risk list saying typecheck is not configured.',
         )
       }
       if (result.reason === 'no-typescript') {
         return ok(
-          '✗ 没跑成：仓库的 node_modules 里没有 typescript（依赖还没装好）。\n' +
-            '**这不等于通过。** 让用户先把预览打开（会装依赖），或者用 read 人工看改动。',
+          '✗ Did not run: typescript is not in the repository\'s node_modules (dependencies are not installed).\n' +
+            '**This is not a pass.** Ask the user to open the preview once (that installs dependencies), or read the change manually.',
         )
       }
       return ok(result.sections.join('\n'))
@@ -171,7 +174,7 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
       'Where typecheck catches type errors, lint catches the two things tsc cannot see: ' +
       'unused variables (usually a half-finished edit — the old implementation was not deleted) and ' +
       'broken hook usage (a real crash at runtime). Warnings do not fail it. ' +
-      'If it says "没跑成", the check did NOT happen — do not treat it as passing.',
+      'A check that could not run says so — "Did not run" / "没跑成" — and that means it did NOT happen: do not treat it as passing.',
     parameters: Type.Object({
       timeoutMs: Type.Optional(Type.Number({ description: 'Timeout in ms (default 90000, max 300000)' })),
     }),
@@ -183,20 +186,22 @@ export function createReviewTools(options: ReviewToolsOptions): ToolRegistration
        * 跑得更久，拿 60s 当默认会让一次正常的检查被误判成超时。
        */
       const result = await runLintScript(repoDir, {
+        locale: 'en',
         ...(typeof input.timeoutMs === 'number' && input.timeoutMs > 0 ? { timeoutMs: input.timeoutMs } : {}),
       })
 
       if (result.status === 'skip') {
         return ok(
           `⏭ ${result.summary}\n` +
-            '注意：**这不等于通过**。如果改动里有 .ts/.tsx，请在风险清单里写一句"这个应用没有配置 lint"。',
+            'Note: **this is not a pass**. If the change contains .ts/.tsx, write one line in your risk list saying lint is not configured.',
         )
       }
       if (result.status === 'fail') {
         const body = result.detail === null ? '' : `\n${result.detail}\n`
         return ok(
           `✗ ${result.summary}\n${body}` +
-            '这是一条发现，不是工具错误。如果上面说的是"没跑成"，在报告里写清是哪一步没跑成。',
+            'This is a finding, not a tool error. If the line above says the check did not run ("Did not run" / "没跑成"), ' +
+            'state in the report which step did not run.',
         )
       }
       return ok(`✓ ${result.summary}`)

@@ -119,14 +119,14 @@ function buildFaux(): ResolvedModel {
     lanes.set(lane, queue)
     if (step !== undefined) return step()
     if (lane !== 'builder') {
-      return fauxAssistantMessage(`【faux · ${lane}】子 Agent 收到了任务，但没有为它写剧本。`)
+      return fauxAssistantMessage(`[faux · ${lane}] The sub agent received a task, but no script was written for it.`)
     }
     const lastUser = [...context.messages].reverse().find((message) => message.role === 'user')
     const excerpt = (typeof lastUser?.content === 'string' ? lastUser.content : '').replace(/\s+/g, ' ').slice(0, 40)
     return fauxAssistantMessage(
-      `【开发模式 · faux 模型】收到：「${excerpt}」。\n\n` +
-        '这条回复来自 pi-ai 的本地假模型，用来验证「提交 → 流式 → 落库 → SSE」这条链路。' +
-        '要接真模型，请在设置里添加提供商（OpenAI 兼容）并填入 API Key，然后把 agent.activeProviderId 指向它。',
+      `[dev mode · faux model] Received: "${excerpt}".\n\n` +
+        'This reply comes from pi-ai\'s local fake model; it exists to exercise submit → stream → persist → SSE. ' +
+        'To use a real model, add a provider (OpenAI-compatible) in Settings, paste an API key, and point agent.activeProviderId at it.',
     )
   }
 

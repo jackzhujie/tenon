@@ -285,7 +285,7 @@ export class ChatService {
       this.options.publish({ type: 'app.status', appId, status })
     } catch (err) {
       // 状态是给人看的信息，落不了库不值得把进程带崩；真出错有别的日志兜着
-      console.error(`[tenon] 写入应用状态失败（${status}）：`, err)
+      console.error(`[tenon] failed to write app state (${status}):`, err)
     }
   }
 
@@ -320,7 +320,7 @@ export class ChatService {
       })
       .catch((err: unknown) => {
         // 记账失败不该影响对话本身：这一轮照跑，下一轮 submit 还会再判一次
-        console.error(`[tenon] 预算检查失败（${appId}）：`, err)
+        console.error(`[tenon] budget check failed (${appId}):`, err)
       })
   }
 

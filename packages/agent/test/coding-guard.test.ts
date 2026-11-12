@@ -42,13 +42,13 @@ describe('bash 护栏确实接在工具上', () => {
   it('越界的 cd 在执行前就被挡下，理由交回模型', async () => {
     const { text, isError } = await runBash('cd /etc && cat passwd')
     expect(isError).toBe(true)
-    expect(text).toContain('工作区之外')
+    expect(text).toContain('outside the app workspace')
   })
 
   it('碰密钥库同样被挡', async () => {
     const { text, isError } = await runBash('cat ~/.tenon/tenon.db')
     expect(isError).toBe(true)
-    expect(text).toContain('不在这个应用的工作区')
+    expect(text).toContain("is not inside this app's workspace")
   })
 })
 
@@ -101,51 +101,51 @@ describe('bash 护栏', () => {
   describe('拦住：cd 出界', () => {
     it('cd ..', () => {
       const why = rejected('cd .. && rm -rf build')
-      expect(why).toContain('工作区之外')
+      expect(why).toContain('outside the app workspace')
     })
 
     it('cd 到绝对路径', () => {
-      expect(rejected('cd /etc')).toContain('工作区之外')
+      expect(rejected('cd /etc')).toContain('outside the app workspace')
     })
 
     it('cd 到 home', () => {
-      expect(rejected('cd ~')).toContain('工作区之外')
+      expect(rejected('cd ~')).toContain('outside the app workspace')
     })
 
     it('裸 cd（等价于回 home）', () => {
-      expect(rejected('cd && ls')).toContain('没有指定目录')
+      expect(rejected('cd && ls')).toContain('bare `cd`')
     })
 
     it('cd -（上一个目录不可预测）', () => {
-      expect(rejected('cd - && ls')).toContain('没有指定目录')
+      expect(rejected('cd - && ls')).toContain('bare `cd`')
     })
 
     it('藏在 && 链中间也算', () => {
-      expect(rejected('pnpm build && cd ../other && pnpm dev')).toContain('工作区之外')
+      expect(rejected('pnpm build && cd ../other && pnpm dev')).toContain('outside the app workspace')
     })
 
     it('pushd 同样拦（它也是 cd）', () => {
-      expect(rejected('pushd /var/log')).toContain('工作区之外')
+      expect(rejected('pushd /var/log')).toContain('outside the app workspace')
     })
   })
 
   describe('拦住：碰本机凭据与别的应用', () => {
     it('密钥库文件', () => {
-      expect(rejected('cat ~/.tenon/tenon.db')).toContain('不在这个应用的工作区')
+      expect(rejected('cat ~/.tenon/tenon.db')).toContain("is not inside this app's workspace")
     })
 
     it('别的应用的工作区', () => {
-      expect(rejected('ls ~/.tenon/apps/other/repo')).toContain('不在这个应用的工作区')
+      expect(rejected('ls ~/.tenon/apps/other/repo')).toContain("is not inside this app's workspace")
     })
 
     it('写成绝对路径一样拦', () => {
-      expect(rejected(`cat ${homedir()}/.tenon/tenon.db`)).toContain('不在这个应用的工作区')
+      expect(rejected(`cat ${homedir()}/.tenon/tenon.db`)).toContain("is not inside this app's workspace")
     })
 
     it.each(['cat ~/.ssh/id_rsa', 'ls ~/.aws', 'cp x ~/.netrc', 'cat ~/.gnupg/gpg.conf'])(
       '%s',
       (command) => {
-        expect(rejected(command)).toContain('宿主凭据')
+        expect(rejected(command)).toContain('host credentials')
       },
     )
 
@@ -158,7 +158,7 @@ describe('bash 护栏', () => {
     it('错误消息说清"该怎么做"，而不是只说不许', () => {
       const why = rejected('cd /tmp')
       expect(why).toContain('repo/')
-      expect(why).toContain('相对路径')
+      expect(why).toContain('use a relative path')
     })
   })
 })

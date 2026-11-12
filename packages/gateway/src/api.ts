@@ -129,7 +129,7 @@ function lastLines(launched: Launched, count = 6): string {
     .output()
     .split('\n')
     .filter((line) => line.trim() !== '')
-  return rows.slice(-count).join(' / ') || '（没有输出）'
+  return rows.slice(-count).join(' / ') || '[no output]'
 }
 
 /** 轮询到文件出现为止；编译器自己先退出就当失败（配置错 / 找不到 tsconfig） */

@@ -23,7 +23,7 @@ export async function findFreePort(host = '127.0.0.1'): Promise<number> {
   const address = server.address()
   const port = typeof address === 'object' && address !== null ? address.port : 0
   await new Promise<void>((resolve) => server.close(() => resolve()))
-  if (port === 0) throw new Error('拿不到空闲端口')
+  if (port === 0) throw new Error('Could not find a free port')
   return port
 }
 
@@ -43,6 +43,6 @@ export async function findFreePorts(count: number, used: Set<number> = new Set()
       }
     }
   }
-  if (ports.length !== count) throw new Error(`端口探测失败：要 ${count} 个，只拿到 ${ports.length} 个`)
+  if (ports.length !== count) throw new Error(`Port probe failed: wanted ${count}, got ${ports.length}`)
   return ports
 }

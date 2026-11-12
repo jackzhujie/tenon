@@ -103,12 +103,12 @@ describe('角色表', () => {
       readiness: 'planned',
       pending: '缺 `codemode` 沙箱',
     }
-    expect(plannedRejection(planned)).toContain('还没接上')
+    expect(plannedRejection(planned)).toContain('is not wired up yet')
     expect(plannedRejection(planned)).toContain('codemode')
     // 接好的角色不能误报
     expect(plannedRejection(ROLES.codeact)).toBeUndefined()
     // 没说缺什么时也给一句能读的话
-    expect(plannedRejection({ ...planned, pending: undefined })).toContain('缺工具')
+    expect(plannedRejection({ ...planned, pending: undefined })).toContain('missing tools')
   })
 
   it('★ 只有 CodeAct 的 read/ls/glob/grep 不给模型（它们只给脚本调）', () => {
@@ -238,7 +238,7 @@ describe('只读检索工具（真文件系统）', () => {
 
   it('grep 的 literal / ignoreCase / glob 都生效', async () => {
     expect(await run('grep', { pattern: 'HANDLE', ignoreCase: true })).toContain('src/util.ts')
-    expect(await run('grep', { pattern: 'HANDLE' })).toContain('没有匹配')
+    expect(await run('grep', { pattern: 'HANDLE' })).toContain('No lines match')
     // `handle = 1` 里没有正则语义，用 literal 才能按字面找 `= 1`
     expect(await run('grep', { pattern: '= 1', literal: true })).toContain('src/util.ts')
     const onlyMd = await run('grep', { pattern: 'handle', glob: '*.md' })
@@ -255,7 +255,7 @@ describe('只读检索工具（真文件系统）', () => {
       ['glob', { pattern: '**/*', path: '/etc' }],
       ['grep', { pattern: 'root', path: '/etc/passwd' }],
     ] as const) {
-      expect(await run(tool, args), tool).toContain('拒绝访问工作区之外的路径')
+      expect(await run(tool, args), tool).toContain('Refusing to search outside the workspace')
     }
   })
 })

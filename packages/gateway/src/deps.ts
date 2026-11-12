@@ -98,7 +98,7 @@ export async function ensureDeps(options: EnsureDepsOptions): Promise<DepsResult
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const timer = setTimeout(() => {
-      lines.push(`[tenon] 安装超时（${Math.round(timeoutMs / 1000)}s），已终止`)
+      lines.push(`[tenon] install timed out (${Math.round(timeoutMs / 1000)}s), killed`)
       killTree(child)
     }, timeoutMs)
 
@@ -110,7 +110,7 @@ export async function ensureDeps(options: EnsureDepsOptions): Promise<DepsResult
      */
     const onAbort = (): void => {
       cancelled = true
-      lines.push('[tenon] 应用已被删除，安装已取消')
+      lines.push('[tenon] the app was deleted, install cancelled')
       killTree(child)
     }
     options.signal?.addEventListener('abort', onAbort, { once: true })
@@ -126,7 +126,7 @@ export async function ensureDeps(options: EnsureDepsOptions): Promise<DepsResult
     child.stderr.on('data', collect)
     child.on('error', (err) => {
       clearTimeout(timer)
-      lines.push(`[tenon] 起不来：${err.message}`)
+      lines.push(`[tenon] could not start: ${err.message}`)
       resolve(null)
     })
     child.on('close', (exitCode) => {

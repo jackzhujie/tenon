@@ -57,9 +57,9 @@ function clampLimit(value: unknown): number {
 
 function guardPath(repoDir: string, candidate: unknown): string | undefined {
   if (candidate === undefined || candidate === '') return undefined
-  if (typeof candidate !== 'string') return '参数 `path` 必须是字符串'
+  if (typeof candidate !== 'string') return '`path` must be a string'
   if (!isInside(repoDir, candidate)) {
-    return `拒绝访问工作区之外的路径：${candidate}。只能检索应用工作区（repo/）里的文件。`
+    return `Refusing to search outside the workspace: ${candidate}. Only files inside the app workspace (repo/) can be searched.`
   }
   return undefined
 }
@@ -178,7 +178,7 @@ export function createSearchTools(options: SearchToolsOptions): ToolRegistration
       try {
         entries = await readdir(target, { withFileTypes: true })
       } catch {
-        return errorResult(`目录不存在或不可读：${input.path ?? '.'}`)
+        return errorResult(`Directory does not exist or is unreadable: ${input.path ?? '.'}`)
       }
       const rows: string[] = []
       const dirs = entries.filter((entry) => entry.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))
@@ -195,8 +195,8 @@ export function createSearchTools(options: SearchToolsOptions): ToolRegistration
         )
         rows.push(`${entry.name}\t${size}`)
       }
-      if (rows.length === 0) return { output: [{ type: 'text', text: '(空目录)' }] }
-      const more = dirs.length + files.length > rows.length ? `\n… 还有 ${dirs.length + files.length - rows.length} 项未列出` : ''
+      if (rows.length === 0) return { output: [{ type: 'text', text: '(empty directory)' }] }
+      const more = dirs.length + files.length > rows.length ? `\n… ${dirs.length + files.length - rows.length} more entries not listed` : ''
       return { output: [{ type: 'text', text: rows.join('\n') + more }] }
     },
   }
@@ -215,7 +215,7 @@ export function createSearchTools(options: SearchToolsOptions): ToolRegistration
     async execute(args) {
       const input = args as { pattern?: string; path?: string; limit?: number }
       if (typeof input.pattern !== 'string' || input.pattern === '') {
-        return errorResult('参数 `pattern` 缺失，例如 "src/**/*.tsx"')
+        return errorResult('Missing `pattern`, e.g. "src/**/*.tsx"')
       }
       const rejection = guardPath(repoDir, input.path)
       if (rejection !== undefined) return errorResult(rejection)
@@ -226,14 +226,14 @@ export function createSearchTools(options: SearchToolsOptions): ToolRegistration
         const scope = relative(root, resolve(repoDir, rel)).split(sep).join('/')
         return matcher.test(scope) || matcher.test(rel)
       })
-      if (walked.files.length === 0) return { output: [{ type: 'text', text: `没有匹配 ${input.pattern} 的文件` }] }
+      if (walked.files.length === 0) return { output: [{ type: 'text', text: `No files match ${input.pattern}` }] }
       const shown = walked.files.slice(0, limit)
       const truncated = walked.truncated || walked.files.length > shown.length
       return {
         output: [
           {
             type: 'text',
-            text: shown.join('\n') + (truncated ? `\n… 结果被截断（上限 ${limit}，扫描 ${walked.files.length}）` : ''),
+            text: shown.join('\n') + (truncated ? `\n… truncated (limit ${limit}, scanned ${walked.files.length})` : ''),
           },
         ],
       }
@@ -264,7 +264,7 @@ export function createSearchTools(options: SearchToolsOptions): ToolRegistration
         limit?: number
       }
       if (typeof input.pattern !== 'string' || input.pattern === '') {
-        return errorResult('参数 `pattern` 缺失')
+        return errorResult('Missing `pattern`')
       }
       const rejection = guardPath(repoDir, input.path)
       if (rejection !== undefined) return errorResult(rejection)
@@ -274,7 +274,7 @@ export function createSearchTools(options: SearchToolsOptions): ToolRegistration
         const source = input.literal === true ? input.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : input.pattern
         regex = new RegExp(source, input.ignoreCase === true ? 'i' : '')
       } catch (err) {
-        return errorResult(`正则写法有问题：${err instanceof Error ? err.message : String(err)}`)
+        return errorResult(`Invalid regular expression: ${err instanceof Error ? err.message : String(err)}`)
       }
 
       const limit = clampLimit(input.limit)
@@ -315,14 +315,14 @@ export function createSearchTools(options: SearchToolsOptions): ToolRegistration
       }
 
       if (hits.length === 0) {
-        return { output: [{ type: 'text', text: `没有匹配 ${input.pattern} 的行（扫描 ${candidates.length} 个文件）` }] }
+        return { output: [{ type: 'text', text: `No lines match ${input.pattern} (scanned ${candidates.length} files)` }] }
       }
       const capped = hits.length >= limit || bytes >= MAX_OUTPUT_BYTES
       return {
         output: [
           {
             type: 'text',
-            text: hits.join('\n') + (capped ? `\n… 匹配被截断（上限 ${limit} 条）` : ''),
+            text: hits.join('\n') + (capped ? `\n… matches truncated (limit ${limit})` : ''),
           },
         ],
       }

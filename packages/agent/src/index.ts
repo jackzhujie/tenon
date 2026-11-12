@@ -12,6 +12,7 @@ import { planModel, resolveModel, type ModelPlan, type ResolvedModel } from './m
 import { TaskGraphService } from './taskgraph.js'
 import type { PageDriverProvider } from './tools/preview.js'
 import { UsageService } from './usage.js'
+import { msg } from '@tenon/protocol'
 import type { SseEventInput } from '@tenon/protocol'
 
 export * from './context.js'
@@ -171,7 +172,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     },
 
     async applyModel(applyOptions: { force?: boolean } = {}): Promise<ModelApplyResult> {
-      if (closed) return { ok: false, error: '服务正在关闭' }
+      if (closed) return { ok: false, error: msg('error.agent.closing') }
       const next = planModel(options.core, { env: options.env })
       const same =
         applyOptions.force !== true &&
@@ -188,7 +189,7 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       await teardown()
       plan = next
       if (plan === undefined) {
-        return { ok: false, error: '还没有选中任何提供商' }
+        return { ok: false, error: msg('error.agent.noProvider') }
       }
       try {
         build()

@@ -99,7 +99,7 @@ describe('装组件', () => {
     expect(assembly.components[0]?.version).toBe('^1.0.0')
 
     const doc = await readText(join(repoDir, AGENTS_DOC))
-    expect(doc).toContain('## 已装组件')
+    expect(doc).toContain('## Installed components')
     expect(doc).toContain('AI 小助手')
     expect(doc).toContain('tenon.test.assistant')
     expect(doc).toContain('用它，不要自己写聊天框')
@@ -181,12 +181,12 @@ describe('装组件', () => {
     const doc = await readText(join(repoDir, AGENTS_DOC))
     expect(doc).toContain('## 架构')
     expect(doc).toContain('两层：前端 + Nest。')
-    expect(doc).toContain('## 已装组件')
+    expect(doc).toContain('## Installed components')
     // 再卸一次：架构那段仍然在，组件那段变成"（无）"
     await uninstallComponent({ repoDir, roots: roots(), tenonVersion: '0.0.0', id: 'tenon.test.assistant' })
     const after = await readText(join(repoDir, AGENTS_DOC))
     expect(after).toContain('## 架构')
-    expect(after).toContain('（无）')
+    expect(after).toContain('(none)')
     expect(after).not.toContain('AI 小助手')
   })
 })

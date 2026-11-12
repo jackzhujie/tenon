@@ -183,6 +183,8 @@ export const errorsEn = {
   'error.push.noTokenHint': 'Writing to a remote requires a token. Enter it once in the publish dialog; it is stored encrypted.',
 
   'error.agent.retrying': 'The model call failed — retry {attempt}',
+  'error.agent.closing': 'The service is shutting down',
+  'error.agent.noProvider': 'No provider is selected yet',
   'error.agent.snapshotFailed':
     'Database snapshot failed, so this version cannot roll data back with the code: {detail}',
 
@@ -357,6 +359,8 @@ export const errorsZh: Record<ErrorMessageKey, string> = {
   'error.push.noTokenHint': '远端写操作必须带令牌。在发布对话框里填一次，会加密保存。',
 
   'error.agent.retrying': '模型调用失败，正在第 {attempt} 次重试',
+  'error.agent.closing': '服务正在关闭',
+  'error.agent.noProvider': '还没有选中任何提供商',
   'error.agent.snapshotFailed': '库快照失败，这一版将无法连数据一起回滚：{detail}',
 
   'error.budget.appExhausted': '这个应用的额度用完了（已用 {used}，上限 {limit}）。调高上限，或者换一个应用继续。',

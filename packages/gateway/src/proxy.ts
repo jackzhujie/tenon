@@ -120,7 +120,7 @@ function collectLogBody(
     if (size > MAX_LOG_BODY) {
       aborted = true
       res.writeHead(413, { 'content-type': 'text/plain; charset=utf-8' })
-      res.end('日志太长')
+      res.end('log too large')
       req.destroy()
       return
     }
@@ -159,7 +159,7 @@ function readJson(req: IncomingMessage, res: ServerResponse, limit: number): Pro
       size += chunk.length
       if (size > limit) {
         res.writeHead(413, { 'content-type': 'text/plain; charset=utf-8' })
-        res.end('太大了')
+        res.end('too large')
         req.destroy()
         return
       }
@@ -216,7 +216,7 @@ async function servePagePath(
   }
   if (req.method !== 'POST') {
     res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end('只接受 POST')
+    res.end('POST only')
     return
   }
   const body = (await readJson(req, res, MAX_PAGE_BODY)) as Record<string, unknown> | null
@@ -265,7 +265,7 @@ async function servePagePath(
 }
 
 export async function startGateway(options: GatewayOptions): Promise<Gateway> {  const routes = options.routes
-  if (routes.length === 0) throw new Error('gateway: 至少要有一条路由')
+  if (routes.length === 0) throw new Error('gateway: at least one route is required')
   const host = options.host ?? LOOPBACK
   const stats: GatewayStats = { http: 0, upgrade: 0, upgradeFailed: 0, upstreamErrors: 0 }
   const sockets = new Set<Socket>()
@@ -312,7 +312,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
               'content-type': 'text/plain; charset=utf-8',
               'cache-control': 'no-store',
             })
-            res.end('这个应用没有要注入的组件')
+            res.end('this app has no components to inject')
             return
           }
           res.writeHead(200, {
@@ -325,7 +325,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
         },
         () => {
           res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
-          res.end('组件脚本读不出来')
+          res.end('could not read the component script')
         },
       )
       return
@@ -393,7 +393,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
     upstream.on('error', () => {
       stats.upstreamErrors += 1
       if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
-      res.end('网关：上游没响应（dev server 可能还在启动或已经退出）')
+      res.end('gateway: upstream did not respond (the dev server may still be starting, or has exited)')
     })
     req.pipe(upstream)
   })
@@ -462,7 +462,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
   const address = server.address()
   if (address === null || typeof address === 'string') {
     await new Promise<void>((resolve) => server.close(() => resolve()))
-    throw new Error('gateway: 拿不到监听端口')
+    throw new Error('gateway: could not get a listening port')
   }
 
   let closed = false
@@ -472,7 +472,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> { 
     stats,
     updateRoute(prefix, port) {
       const route = routes.find((r) => r.prefix === prefix)
-      if (route === undefined) throw new Error(`gateway: 没有前缀为 ${prefix} 的路由`)
+      if (route === undefined) throw new Error(`gateway: no route with prefix ${prefix}`)
       route.port = port
     },
     async close() {

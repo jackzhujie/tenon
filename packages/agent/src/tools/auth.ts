@@ -57,9 +57,9 @@ export function createAuthTools(options: AuthToolsOptions): ToolRegistration[] {
             {
               type: 'text',
               text:
-                '这个应用已经有登录了（package.json 的 tenon.auth 是 true），什么都没改。\n' +
-                '接着做：新接口默认就要登录；要公开某个接口给它挂 `@Public()`（api/auth/public.decorator.ts）。\n' +
-                '取当前用户用 `@CurrentUser() user: SessionUser`，并按 user.id 过滤数据。',
+                'This app already has sign-in (package.json `tenon.auth` is true). Nothing was changed.\n' +
+                'Next: new endpoints require a session by default; to make one public, decorate it with `@Public()` (api/auth/public.decorator.ts).\n' +
+                'Read the current user with `@CurrentUser() user: SessionUser` and filter data by user.id.',
             },
           ],
         }
@@ -74,35 +74,35 @@ export function createAuthTools(options: AuthToolsOptions): ToolRegistration[] {
       const lines: string[] = []
       lines.push(
         reason === ''
-          ? '已给这个应用加上账号体系。'
-          : `已给这个应用加上账号体系——${reason}。`,
+          ? 'Added accounts and sign-in to this app.'
+          : `Added accounts and sign-in to this app — ${reason}.`,
       )
       if (result.addedBackend) {
-        lines.push('这个应用原来没有后端，登录必须有后端才能拦得住，所以一并补上了（NestJS + PostgreSQL）。')
+        lines.push('This app had no backend, and sign-in cannot be enforced without one, so it was added too (NestJS + PostgreSQL).')
       }
       lines.push('')
-      lines.push('现在的行为：')
-      lines.push('- 没登录的人**调不动任何接口**（除了 /api/health 与 /api/auth/*）')
-      lines.push('- 第一次打开会显示"创建第一个管理员"，建完这个口子自动关闭')
-      lines.push('- 管理员在右上角「成员」里加人；退出登录会删掉服务端那条会话')
+      lines.push('How it behaves now:')
+      lines.push('- Someone who is not signed in **cannot call any endpoint** (except /api/health and /api/auth/*)')
+      lines.push('- The first visit shows a "create the first admin" screen; once that admin exists the door closes')
+      lines.push('- Admins add people from the "members" panel in the top-right; signing out deletes the server-side session')
       lines.push('')
-      lines.push('新增：')
+      lines.push('Added:')
       for (const file of result.files) lines.push(`- ${file}`)
       lines.push('')
-      lines.push('接下去这样用：')
-      lines.push('1. 新接口默认就要登录。要公开必须显式挂 `@Public()` —— 别反过来做')
-      lines.push('2. 取当前用户：`@CurrentUser() user: SessionUser`，用 user.id 过滤数据，')
-      lines.push('   不要信前端传来的 userId')
-      lines.push('3. 前端把数据请求都放在 `<AuthGate>` 里面（main.tsx 里已经包好了）')
+      lines.push('How to use it from here:')
+      lines.push('1. New endpoints require a session by default. To make one public you must add `@Public()` explicitly — never the other way around')
+      lines.push('2. Read the current user with `@CurrentUser() user: SessionUser` and filter data by user.id.')
+      lines.push('   Do not trust a userId sent by the front end')
+      lines.push('3. Keep data requests inside `<AuthGate>` on the front end (main.tsx is already wrapped)')
 
       if (!result.wired) {
         lines.push('')
         lines.push(
-          '★ 有一处没自动接上：src/main.tsx 的形状和模板不一样，登录页没能包进去。' +
-            '现在接口已经会返回 401，但页面上没有登录框 —— 请把 <App/> 包进 <AuthGate>。',
+          '★ One spot could not be wired automatically: src/main.tsx does not have the template\'s shape, so the sign-in page was not wrapped in. ' +
+            'The endpoints already return 401, but the page has no sign-in form — please wrap <App/> in <AuthGate>.',
         )
       }
-      for (const note of result.notes) lines.push('', `注意：${note}`)
+      for (const note of result.notes) lines.push('', `Note: ${note}`)
       return { output: [{ type: 'text', text: lines.join('\n') }] }
     },
   }

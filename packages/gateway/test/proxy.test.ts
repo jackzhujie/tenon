@@ -156,7 +156,7 @@ describe('App Gateway', () => {
 
     const response = await fetch(`${gateway.url}/`)
     expect(response.status).toBe(502)
-    expect(await response.text()).toContain('上游没响应')
+    expect(await response.text()).toContain('upstream did not respond')
     expect(gateway.stats.upstreamErrors).toBe(1)
     expect(dead.port).not.toBe(deadPort)
   })
@@ -191,7 +191,7 @@ describe('App Gateway', () => {
   })
 
   it('没有路由就直接报错（兜底路由是必须的）', async () => {
-    await expect(startGateway({ routes: [] })).rejects.toThrow(/至少要有一条路由/)
+    await expect(startGateway({ routes: [] })).rejects.toThrow(/at least one route is required/)
   })
 
   /*

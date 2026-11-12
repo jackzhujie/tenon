@@ -40,7 +40,7 @@ describe('checkScriptOptions', () => {
     expect(refusal).toContain('3600000')
     expect(refusal).toContain(String(DEFAULT_SCRIPT_LIMITS.maxTimeoutMs))
     // 拒绝的话要给出路，否则模型只会重试同一个脚本
-    expect(refusal).toContain('拆小')
+    expect(refusal).toContain('Split the work')
   })
 
   it('输出预算也夹：那是唯一回到父会话上下文的东西', () => {

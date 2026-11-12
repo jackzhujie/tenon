@@ -70,7 +70,7 @@ export function classifyLine(line: string, stream: 'stdout' | 'stderr'): LogLeve
 }
 
 function clamp(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max)}…（已截断，原长 ${text.length}）`
+  return text.length <= max ? text : `${text.slice(0, max)}… (truncated, source was ${text.length} chars)`
 }
 
 /** 这一行是不是堆栈的一部分（`    at foo (...)`） */
@@ -94,7 +94,7 @@ export class LogStore {
    */
   add(appId: string, input: LogInput, now: number = Date.now()): LogEntry {
     const message = clamp(
-      stripAnsi(input.message).trim() === '' ? '(空日志)' : stripAnsi(input.message).trim(),
+      stripAnsi(input.message).trim() === '' ? '[empty log]' : stripAnsi(input.message).trim(),
       MAX_MESSAGE,
     )
     const detail = input.detail == null || input.detail === '' ? null : clamp(input.detail, MAX_DETAIL)

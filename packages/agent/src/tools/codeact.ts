@@ -117,14 +117,14 @@ export function checkScriptOptions(code: string, limits: ScriptLimits = DEFAULT_
 
   if (options.timeoutMs !== undefined && options.timeoutMs > limits.maxTimeoutMs) {
     return (
-      `脚本要求 ${options.timeoutMs}ms，超过上限 ${limits.maxTimeoutMs}ms（默认 ${DEFAULT_TIMEOUT_MS}ms）。` +
-      '把任务拆小：一次处理一部分文件/记录，多跑几次脚本。'
+      `The script asks for ${options.timeoutMs}ms, over the limit of ${limits.maxTimeoutMs}ms (default ${DEFAULT_TIMEOUT_MS}ms). ` +
+      'Split the work: handle a slice of the files or records per run and run the script a few times.'
     )
   }
   if (options.maxOutputTokens !== undefined && options.maxOutputTokens > limits.maxOutputTokens) {
     return (
-      `脚本要求输出 ${options.maxOutputTokens} tokens，超过上限 ${limits.maxOutputTokens}。` +
-      '只 text() 结论（计数、前几行、匹配到的名字），不要 text() 整份内容。'
+      `The script asks for ${options.maxOutputTokens} output tokens, over the limit of ${limits.maxOutputTokens}. ` +
+      'text() the conclusion only (a count, the first few lines, the names that matched) — do not text() whole documents.'
     )
   }
   return null

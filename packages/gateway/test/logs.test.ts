@@ -116,7 +116,7 @@ describe('LogStore', () => {
 
     const long = store.add(APP_ID, { source: 'vite', level: 'info', message: 'x'.repeat(5000) }, 9999)
     expect(long.message.length).toBeLessThan(2100)
-    expect(long.message).toContain('已截断')
+    expect(long.message).toContain('truncated')
   })
 })
 

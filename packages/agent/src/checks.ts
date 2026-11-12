@@ -28,9 +28,21 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { msg } from '@tenon/protocol'
-import type { CheckId, CheckOutcome, CheckStatus, GateOutcome, ServerMessageKey } from '@tenon/protocol'
+import { getLocale, msg, msgIn } from '@tenon/protocol'
+import type { CheckId, CheckOutcome, CheckStatus, GateOutcome, Locale, MessageParams, ServerMessageKey } from '@tenon/protocol'
 import { formatTscReport, invokePnpm, parseTscOutput, resolvePnpm, scrubEnv, withNodeShim } from '@tenon/core'
+
+/**
+ * 取一条检查项文案，语言**由调用方决定**。
+ *
+ * 为什么要一个显式参数而不是直接 `msg()`：同一句结论有两个读者 ——
+ * 发布对话框（跟界面语言）与 Reviewer 的 `typecheck` / `lint` 工具（模型的输入，
+ * 必须与提示词同语言）。两者共用一个函数是因为「什么算通过」只能有一个实现；
+ * 语言是唯一的差异，就该是唯一的参数。
+ */
+function say(locale: Locale | undefined, key: ServerMessageKey, params?: MessageParams): string {
+  return msgIn(locale ?? getLocale(), key, params)
+}
 
 const MAX_TSC_BYTES = 128 * 1024
 const DEFAULT_TSC_TIMEOUT_MS = 60_000
@@ -198,6 +210,12 @@ export interface TypecheckResult {
 }
 
 export interface TypecheckOptions {
+  /**
+   * 用哪种语言写 summary/detail。不传 = 当前进程语言（发布门禁要跟界面一致）。
+   * Reviewer 的工具传 'en'：它的输出同时是**模型的输入**，必须与提示词同语言，
+   * 而界面语言是用户偏好、会变 —— 让模型看的东西随界面抖动不是我们能验的东西。
+   */
+  locale?: Locale
   /** 测试用：跑 tsc 的 node 可执行文件（默认真实 `process.execPath`） */
   nodePath?: string
   /** 测试用：tsc 入口（默认 `<repo>/node_modules/typescript/bin/tsc`） */
@@ -219,7 +237,7 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
       status: 'skip',
       reason: 'no-config',
       sections: [],
-      summary: msg('check.skip.noTsconfig'),
+      summary: say(options.locale, 'check.skip.noTsconfig'),
       elapsedMs: 0,
       errorCount: 0,
     }
@@ -231,7 +249,7 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
       status: 'fail',
       reason: 'no-typescript',
       sections: [],
-      summary: msg('check.fail.noTypescript'),
+      summary: say(options.locale, 'check.fail.noTypescript'),
       elapsedMs: 0,
       errorCount: 0,
     }
@@ -270,12 +288,12 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
     if (!report.ok) {
       failed.push(
         parsed.diagnostics.length > 0
-          ? msg('check.fail.typecheckErrors', { config, count: parsed.diagnostics.length })
-          : msg('check.fail.typecheckNotRun', {
+          ? say(options.locale, 'check.fail.typecheckErrors', { config, count: parsed.diagnostics.length })
+          : say(options.locale, 'check.fail.typecheckNotRun', {
               config,
               reason: run.timedOut
-                ? msg('check.reason.timeout')
-                : msg('check.reason.exitCode', { code: run.code ?? msg('check.reason.noStart') }),
+                ? say(options.locale, 'check.reason.timeout')
+                : say(options.locale, 'check.reason.exitCode', { code: run.code ?? say(options.locale, 'check.reason.noStart') }),
             }),
       )
     }
@@ -283,12 +301,12 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
   }
 
   const where =
-    configs.length === 1 ? (configs[0] as string) : msg('check.where.configs', { count: configs.length })
+    configs.length === 1 ? (configs[0] as string) : say(options.locale, 'check.where.configs', { count: configs.length })
   if (failed.length === 0) {
     return {
       status: 'pass',
       sections,
-      summary: msg('check.pass.typecheck', { where, elapsed: seconds(elapsedMs) }),
+      summary: say(options.locale, 'check.pass.typecheck', { where, elapsed: seconds(elapsedMs) }),
       elapsedMs,
       errorCount: 0,
     }
@@ -296,7 +314,7 @@ export async function runTypecheck(repoDir: string, options: TypecheckOptions = 
   return {
     status: 'fail',
     sections,
-    summary: msg('check.fail.typecheck', { failed: failed.join(msg('check.listSeparator')) }),
+    summary: say(options.locale, 'check.fail.typecheck', { failed: failed.join(say(options.locale, 'check.listSeparator')) }),
     elapsedMs,
     errorCount,
   }
@@ -320,10 +338,14 @@ async function readPackageJson(repoDir: string): Promise<PackageJson | undefined
 
 export interface TestOptions {
   timeoutMs?: number
+  /** 见 `TypecheckOptions.locale` */
+  locale?: Locale
 }
 
 export interface LintOptions {
   timeoutMs?: number
+  /** 见 `TypecheckOptions.locale` */
+  locale?: Locale
 }
 
 interface AppScriptRun {
@@ -416,7 +438,7 @@ async function runAppScript(
     child.stderr?.on('data', collect)
     child.on('error', (err) => {
       clearTimeout(timer)
-      output += `\n[tenon] 起不来：${err.message}`
+      output += `\n[tenon] could not start: ${err.message}`
       resolvePromise(null)
     })
     child.on('close', (exitCode) => {
@@ -444,7 +466,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'skip',
-      summary: msg('check.skip.noPackage'),
+      summary: say(options.locale, 'check.skip.noPackage'),
       detail: null,
       elapsedMs: 0,
     }
@@ -454,7 +476,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'skip',
-      summary: msg('check.skip.noScript', { name: 'test' }),
+      summary: say(options.locale, 'check.skip.noScript', { name: 'test' }),
       detail: null,
       elapsedMs: 0,
     }
@@ -465,8 +487,8 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'fail',
-      summary: msg('check.fail.depsMissing'),
-      detail: msg('check.hint.openPreviewFirst'),
+      summary: say(options.locale, 'check.fail.depsMissing'),
+      detail: say(options.locale, 'check.hint.openPreviewFirst'),
       elapsedMs: Date.now() - started,
     }
   }
@@ -484,7 +506,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'fail',
-      summary: msg('check.fail.timeout', { seconds: Math.round(timeoutMs / 1000) }),
+      summary: say(options.locale, 'check.fail.timeout', { seconds: Math.round(timeoutMs / 1000) }),
       detail: tail === '' ? null : tail,
       elapsedMs,
     }
@@ -493,7 +515,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'fail',
-      summary: msg('check.fail.notStarted', { name: 'test' }),
+      summary: say(options.locale, 'check.fail.notStarted', { name: 'test' }),
       detail: tail === '' ? null : tail,
       elapsedMs,
     }
@@ -502,7 +524,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
     return {
       id: 'test',
       status: 'fail',
-      summary: msg('check.fail.exitCode', { name: 'test', code }),
+      summary: say(options.locale, 'check.fail.exitCode', { name: 'test', code }),
       detail: tail === '' ? null : tail,
       elapsedMs,
     }
@@ -510,7 +532,7 @@ export async function runTestScript(repoDir: string, options: TestOptions = {}):
   return {
     id: 'test',
     status: 'pass',
-    summary: msg('check.pass.script', { name: 'test', elapsed: seconds(elapsedMs) }),
+    summary: say(options.locale, 'check.pass.script', { name: 'test', elapsed: seconds(elapsedMs) }),
     detail: null,
     elapsedMs,
   }
@@ -531,7 +553,7 @@ function lintExcerpt(output: string): string | null {
   if (lines.length <= LINT_HEAD_LINES + 3) return lines.join('\n')
   const head = lines.slice(0, LINT_HEAD_LINES)
   const summary = lines.slice(-2)
-  return [...head, `…（省略 ${lines.length - LINT_HEAD_LINES - 2} 行）`, ...summary].join('\n')
+  return [...head, `… (${lines.length - LINT_HEAD_LINES - 2} lines omitted)`, ...summary].join('\n')
 }
 
 /**
@@ -554,14 +576,14 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
   const started = Date.now()
   const pkg = await readPackageJson(repoDir)
   if (pkg === undefined) {
-    return { id: 'lint', status: 'skip', summary: msg('check.skip.noPackage'), detail: null, elapsedMs: 0 }
+    return { id: 'lint', status: 'skip', summary: say(options.locale, 'check.skip.noPackage'), detail: null, elapsedMs: 0 }
   }
   const script = pkg.scripts?.['lint']
   if (typeof script !== 'string' || script.trim() === '') {
     return {
       id: 'lint',
       status: 'skip',
-      summary: msg('check.skip.noScript', { name: 'lint' }),
+      summary: say(options.locale, 'check.skip.noScript', { name: 'lint' }),
       detail: null,
       elapsedMs: 0,
     }
@@ -572,8 +594,8 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
     return {
       id: 'lint',
       status: 'fail',
-      summary: msg('check.fail.depsMissing'),
-      detail: msg('check.hint.openPreviewFirst'),
+      summary: say(options.locale, 'check.fail.depsMissing'),
+      detail: say(options.locale, 'check.hint.openPreviewFirst'),
       elapsedMs: Date.now() - started,
     }
   }
@@ -586,19 +608,19 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
     return {
       id: 'lint',
       status: 'fail',
-      summary: msg('check.fail.timeout', { seconds: Math.round(timeoutMs / 1000) }),
+      summary: say(options.locale, 'check.fail.timeout', { seconds: Math.round(timeoutMs / 1000) }),
       detail: excerpt,
       elapsedMs,
     }
   }
   if (code === null) {
-    return { id: 'lint', status: 'fail', summary: msg('check.fail.notStarted', { name: 'lint' }), detail: excerpt, elapsedMs }
+    return { id: 'lint', status: 'fail', summary: say(options.locale, 'check.fail.notStarted', { name: 'lint' }), detail: excerpt, elapsedMs }
   }
   if (code !== 0 && looksLikeMissingCommand(repoDir, script, output)) {
     return {
       id: 'lint',
       status: 'fail',
-      summary: msg('check.fail.commandMissing', { name: 'lint' }),
+      summary: say(options.locale, 'check.fail.commandMissing', { name: 'lint' }),
       detail: excerpt,
       elapsedMs,
     }
@@ -607,7 +629,7 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
     return {
       id: 'lint',
       status: 'fail',
-      summary: msg('check.fail.exitCode', { name: 'lint', code }),
+      summary: say(options.locale, 'check.fail.exitCode', { name: 'lint', code }),
       detail: excerpt,
       elapsedMs,
     }
@@ -615,7 +637,7 @@ export async function runLintScript(repoDir: string, options: LintOptions = {}):
   return {
     id: 'lint',
     status: 'pass',
-    summary: msg('check.pass.script', { name: 'lint', elapsed: seconds(elapsedMs) }),
+    summary: say(options.locale, 'check.pass.script', { name: 'lint', elapsed: seconds(elapsedMs) }),
     detail: null,
     elapsedMs,
   }

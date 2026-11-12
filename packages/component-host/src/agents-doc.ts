@@ -9,8 +9,12 @@
  * 1. **只用一段带标记的区域**（`<!-- tenon:components:begin/end -->`）。整份 AGENTS.md 是
  *    应用自己的长期记忆，Agent 会往里写架构与坑，我们不能覆盖它。
  * 2. **幂等**：同样的组件写两遍，文件字节不变（否则每次安装都产生一个无意义的 commit）。
- * 3. **没有组件也留一段**（"（无）"）：卸载之后把那一段清空，比整段消失更好 ——
+ * 3. **没有组件也留一段**（"none"）：卸载之后把那一段清空，比整段消失更好 ——
  *    否则下次读的人会以为"这个项目从来没装过组件"。
+ *
+ * 文中的字**一律英文**：这份文件在用户的应用仓库里，会跟着仓库离开这台机器、
+ * 被 Agent 与 `git log` 读，也可能被推到公开仓库。跟界面语言绑定的话，同一个应用
+ * 在中英文两台上会写出两种内容。判定规则见 STATUS §2。
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -24,32 +28,36 @@ export function agentsDocPath(repoDir: string): string {
   return join(repoDir, AGENTS_DOC)
 }
 
-const HEADER = `# 项目说明（给 Agent 读）
+const HEADER = `# Project notes (read by the agent)
 
-> 这份文件是这个项目的长期记忆：架构、约定、坑、运行方式。
-> 下面「已装组件」那一节由 Tenon 维护，**不要手改**；其余小节随便写。
+> This file is the project's long-term memory: architecture, conventions, traps, how to run it.
+> The "Installed components" section below is maintained by Tenon — **do not edit it by hand**; every other section is yours.
 `
 
 /** 一段"已装组件"的正文（不含标记） */
 export function renderComponentsSection(components: readonly InstalledComponent[]): string {
   if (components.length === 0) {
-    return '## 已装组件\n\n（无）\n'
+    return '## Installed components\n\n(none)\n'
   }
-  const lines: string[] = ['## 已装组件', '', '> 这些组件由平台注入，**应用代码里不需要 import 它们**，也不要去改它们的实现。']
+  const lines: string[] = [
+    '## Installed components',
+    '',
+    '> These components are injected by the platform. **App code does not import them** and must not reimplement them.',
+  ]
   for (const component of components) {
-    const off = component.enabled ? '' : ' — **已关闭**（界面不加载，但装配声明还在）'
-    lines.push('', `### ${component.name}（\`${component.id}\` ${component.version}）${off}`)
+    const off = component.enabled ? '' : ' — **disabled** (its UI is not loaded, but the declaration is still here)'
+    lines.push('', `### ${component.name} (\`${component.id}\` ${component.version})${off}`)
     lines.push('', component.description)
     if (component.mounts.length > 0) {
       const where = component.mounts
-        .map((mount) => (mount.prefix === null ? mount.slot : `${mount.slot}（前缀 ${mount.prefix}）`))
-        .join('、')
-      lines.push('', `- 挂载点：${where}`)
+        .map((mount) => (mount.prefix === null ? mount.slot : `${mount.slot} (prefix ${mount.prefix})`))
+        .join(', ')
+      lines.push('', `- Mounted at: ${where}`)
     }
     if (component.permissions.length > 0) {
-      lines.push(`- 权限：${component.permissions.join('、')}`)
+      lines.push(`- Permissions: ${component.permissions.join(', ')}`)
     } else {
-      lines.push('- 权限：无（不碰文件、网络、数据库）')
+      lines.push('- Permissions: none (no filesystem, network or database access)')
     }
     lines.push('', component.agentHints)
   }

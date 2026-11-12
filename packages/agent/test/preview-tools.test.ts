@@ -66,7 +66,7 @@ describe('预览工具', () => {
     const read = toolOf('preview_read', undefined)
     const result = await read({})
     expect(result.isError).toBe(true)
-    expect(textOf(result)).toContain('还没有预览在跑')
+    expect(textOf(result)).toContain('no preview running')
   })
 
   it('read 带回页面正文与页面自己的报错', async () => {
@@ -91,14 +91,14 @@ describe('预览工具', () => {
     expect(result.isError).toBeUndefined()
     expect(textOf(result)).toContain('✗')
     expect(textOf(result)).toContain('提交中')
-    expect(textOf(result)).toContain('不是工具坏了')
+    expect(textOf(result)).toContain('the tool itself worked')
   })
 
   it('断言通过时说清"验的是什么"', async () => {
     const { driver } = await fakeDriver({ ok: true, value: { pass: true, seen: { contains: true } } })
     const result = await toolOf('preview_assert', driver)({ text: '合计', timeoutMs: 500 })
     expect(textOf(result)).toContain('✓')
-    expect(textOf(result)).toContain('含有文字「合计」')
+    expect(textOf(result)).toContain('contains the text "合计"')
   })
 
   it('参数不合法在发命令之前就拦住', async () => {
@@ -136,7 +136,7 @@ describe('预览工具', () => {
     const { driver, calls } = fakeDriver({ ok: true, value: { value: '120', typed: 'input「」' } })
     const result = await toolOf('preview_type', driver)({ selector: 'input', value: '120', submit: true })
     expect(calls[0]?.args).toMatchObject({ selector: 'input', value: '120', submit: true })
-    expect(textOf(result)).toContain('当前值「120」')
+    expect(textOf(result)).toContain('it now holds "120"')
   })
 
   it('open 会补上开头的斜杠，并等到新页面报到', async () => {

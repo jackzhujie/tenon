@@ -62,9 +62,9 @@ export function createBackendTools(options: BackendToolsOptions): ToolRegistrati
             {
               type: 'text',
               text:
-                '这个应用已经有后端了（package.json 的 tenon.api 指向 api/main.ts），什么都没改。\n' +
-                '接着做：实体写在 api/，在 api/db.ts 的 entities 与 api/app.module.ts 里登记，' +
-                '迁移放 api/migrations/（文件名带时间戳，启动时自动跑）。',
+                'This app already has a backend (package.json `tenon.api` points at api/main.ts). Nothing was changed.\n' +
+                'Next: put entities under api/, register them in the `entities` of api/db.ts and in api/app.module.ts, ' +
+                'and put migrations in api/migrations/ (timestamped filenames; they run automatically on startup).',
             },
           ],
         }
@@ -79,24 +79,24 @@ export function createBackendTools(options: BackendToolsOptions): ToolRegistrati
       const lines: string[] = []
       lines.push(
         reason === ''
-          ? '已给这个应用加上后端（NestJS + PostgreSQL），前端代码一行没动。'
-          : `已给这个应用加上后端（NestJS + PostgreSQL）——${reason}。前端代码一行没动。`,
+          ? 'Added a backend to this app (NestJS + PostgreSQL). Not a single line of front-end code was touched.'
+          : `Added a backend to this app (NestJS + PostgreSQL) — ${reason}. Not a single line of front-end code was touched.`,
       )
       lines.push('')
-      lines.push('新增：')
+      lines.push('Added:')
       for (const file of result.files) lines.push(`- ${file}`)
-      if (result.addedScripts.length > 0) lines.push('', `补的脚本：${result.addedScripts.join('、')}`)
+      if (result.addedScripts.length > 0) lines.push('', `Scripts added: ${result.addedScripts.join(', ')}`)
       lines.push('')
-      lines.push('接下去这样用：')
-      lines.push('1. `shared/schema.ts` 里定义接口的形状（zod），前后端都用它')
-      lines.push('2. `api/` 下加 entity / service / controller，在 `api/db.ts` 的 entities 与')
-      lines.push('   `api/app.module.ts` 的 TypeOrmModule.forFeature([...]) 里登记')
-      lines.push('3. 迁移放 `api/migrations/<时间戳>-Xxx.ts`（只用标准 PG 语法，PGlite 与真 PG 都要能跑）')
-      lines.push('4. 前端从 `src/api.ts` 调，一律相对路径 `/api/...`')
+      lines.push('How to use it from here:')
+      lines.push('1. Declare the shape of each endpoint in `shared/schema.ts` (zod) — both sides use it')
+      lines.push('2. Add entity / service / controller under `api/`, then register them in the `entities` of `api/db.ts`')
+      lines.push('   and in TypeOrmModule.forFeature([...]) inside `api/app.module.ts`')
+      lines.push('3. Put migrations in `api/migrations/<timestamp>-Xxx.ts` (standard PG syntax only — must run on PGlite and real PG)')
+      lines.push('4. Call it from the front end through `src/api.ts`, always with a relative path `/api/...`')
       lines.push('')
-      lines.push('三条不能破的约定：只认一个 DATABASE_URL；DATABASE_POOL_MAX 是容量参数不是环境标记；')
-      lines.push('迁移是 schema 的唯一来源（永远不开 synchronize）。这些也写进了 docs/AGENTS.md。')
-      for (const note of result.notes) lines.push('', `注意：${note}`)
+      lines.push('Three rules that must not break: one DATABASE_URL only; DATABASE_POOL_MAX is a capacity knob, not an environment flag;')
+      lines.push('migrations are the only source of the schema (never turn on synchronize). These are also written into docs/AGENTS.md.')
+      for (const note of result.notes) lines.push('', `Note: ${note}`)
       return { output: [{ type: 'text', text: lines.join('\n') }] }
     },
   }

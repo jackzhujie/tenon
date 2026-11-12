@@ -57,7 +57,7 @@ describe('git_diff（默认看工作区，不看提交）', () => {
 
     const { text, isError } = await run('git_diff')
     expect(isError).toBe(false)
-    expect(text).toContain('1 个文件')
+    expect(text).toContain('1 file')
     expect(text).toContain('src/App.tsx  (modified')
     expect(text).toContain("-export const title = 'old'")
     expect(text).toContain("+export const title = 'new'")
@@ -73,7 +73,7 @@ describe('git_diff（默认看工作区，不看提交）', () => {
 
     const clean = await run('git_diff')
     expect(clean.isError).toBe(false)
-    expect(clean.text).toContain('工作区是干净的')
+    expect(clean.text).toContain('working tree is clean')
     expect(clean.text).toContain('commit:"HEAD"')
 
     // 按它自己指的路走，就能看到上一版改了什么
@@ -93,13 +93,13 @@ describe('git_diff（默认看工作区，不看提交）', () => {
     expect(onlySrc.text).toContain('src/App.tsx')
     expect(onlySrc.text).not.toContain('api.ts')
 
-    expect((await run('git_diff', { path: 'nowhere/' })).text).toContain('没有涉及 nowhere/ 的文件')
+    expect((await run('git_diff', { path: 'nowhere/' })).text).toContain('touches no files under nowhere/')
   })
 
   it('不是 git 仓库时明确报错，而不是返回"没有改动"', async () => {
     const { text, isError } = await run('git_diff')
     expect(isError).toBe(true)
-    expect(text).toContain('读不了这个仓库的改动')
+    expect(text).toContain('Could not read this repository')
   })
 })
 
@@ -130,7 +130,7 @@ describe('typecheck（跑应用自己的 tsc）', () => {
     await writeProject('export const n: number = 1\n')
     const { text, isError } = await run('typecheck', {}, { tscEntry: TSC_ENTRY })
     expect(isError).toBe(false)
-    expect(text).toContain('✓ 类型检查通过')
+    expect(text).toContain('✓ Typecheck passed')
     expect(text).toContain('tsconfig.json')
   }, 30_000)
 
@@ -139,7 +139,7 @@ describe('typecheck（跑应用自己的 tsc）', () => {
     const { text, isError } = await run('typecheck', {}, { tscEntry: TSC_ENTRY })
     // 标成 isError 会让模型去重试工具，而它该做的是把这一条写进风险清单
     expect(isError).toBe(false)
-    expect(text).toContain('✗ 类型检查失败')
+    expect(text).toContain('✗ Typecheck failed')
     expect(text).toContain('src/a.ts:1:')
     expect(text).toContain('TS2322')
   }, 30_000)
@@ -147,15 +147,15 @@ describe('typecheck（跑应用自己的 tsc）', () => {
   it('★ 没有 tsconfig 时说"无从跑起"，绝不出现 ✓', async () => {
     await writeFile(join(dir, 'src', 'a.ts'), 'export const n = 1\n')
     const { text } = await run('typecheck', {}, { tscEntry: TSC_ENTRY })
-    expect(text).toContain('没有 tsconfig.json')
-    expect(text).toContain('这不等于通过')
+    expect(text).toContain('no tsconfig.json')
+    expect(text).toContain('this is not a pass')
     expect(text).not.toContain('✓')
   })
 
   it('★ 依赖没装（找不到 typescript）时说"没跑成"，绝不出现 ✓', async () => {
     await writeFile(join(dir, 'tsconfig.json'), '{"include":["src"]}')
     const { text } = await run('typecheck')
-    expect(text).toContain('没跑成')
+    expect(text).toContain('Did not run')
     expect(text).toContain('typescript')
     expect(text).not.toContain('✓')
   })
@@ -174,14 +174,14 @@ describe('typecheck（跑应用自己的 tsc）', () => {
 
     const { text, isError } = await run('typecheck')
     expect(isError).toBe(false)
-    expect(text).toContain('✓ 类型检查通过')
+    expect(text).toContain('✓ Typecheck passed')
   }, 30_000)
 
   it('多个 tsconfig 一起跑（Nest 模板有 tsconfig.server.json）', async () => {
     await writeProject('export const n: number = 1\n')
     await writeFile(join(dir, 'tsconfig.server.json'), JSON.stringify({ extends: './tsconfig.json' }))
     const { text } = await run('typecheck', {}, { tscEntry: TSC_ENTRY })
-    expect(text).toContain('tsconfig.json，')
+    expect(text).toContain('tsconfig.json,')
     expect(text).toContain('tsconfig.server.json')
     expect(text.split('\n').filter((line) => line.startsWith('✓'))).toHaveLength(2)
   }, 40_000)
@@ -201,7 +201,7 @@ describe('lint（第三种判据：tsc 看不见的那类问题）', () => {
     const { text, isError } = await run('lint')
     expect(isError).toBe(false)
     expect(text).toContain('⏭')
-    expect(text).toContain('不等于通过')
+    expect(text).toContain('not a pass')
   })
 
   it('★ 查到问题 → 带具体位置，且 isError=false（这是发现，不是工具错误）', async () => {
@@ -227,7 +227,7 @@ describe('lint（第三种判据：tsc 看不见的那类问题）', () => {
   it('"没跑成"绝不带 ✓（评审里最坏的假绿）', async () => {
     await withScripts({ lint: 'definitely-not-a-command-tenon' })
     const { text } = await run('lint')
-    expect(text).toContain('没跑成')
+    expect(text).toContain('Did not run')
     expect(text).not.toContain('✓')
   })
 })

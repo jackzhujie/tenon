@@ -90,27 +90,28 @@ export function formatTscReport(
 ): { ok: boolean; text: string; errorCount: number } {
   const max = options.maxItems ?? 12
   const where = options.config ?? 'tsconfig.json'
-  const took = options.elapsedMs === undefined ? '' : `，${(options.elapsedMs / 1000).toFixed(1)}s`
+  const took = options.elapsedMs === undefined ? '' : `, ${(options.elapsedMs / 1000).toFixed(1)}s`
   const count = result.diagnostics.length
 
   if (ok) {
-    return { ok: true, errorCount: 0, text: `✓ 类型检查通过（${where}${took}）` }
+    return { ok: true, errorCount: 0, text: `✓ Typecheck passed (${where}${took})` }
   }
 
   const head =
     count > 0
-      ? `✗ 类型检查失败：${count} 个错误（${where}${took}）`
-      : `✗ 类型检查没跑成（${where}${took}，退出码 ${options.exitCode ?? '超时/被杀'}）`
+      ? `✗ Typecheck failed: ${count} ${count === 1 ? 'error' : 'errors'} (${where}${took})`
+      : // 措辞里有 "did not run"：Reviewer 的提示词教模型认这句话（见 roles.ts），别随手改成 "failed"
+        `✗ Typecheck did not run (${where}${took}, exit code ${options.exitCode ?? 'timeout/killed'})`
 
   const body = result.diagnostics
     .slice(0, max)
     .map((item) => `  ${item.file}:${item.line}:${item.column}  ${item.code}  ${item.message}`)
-  if (count > max) body.push(`  … 还有 ${count - max} 条未列出`)
+  if (count > max) body.push(`  … ${count - max} more not listed`)
   // `other` 在"没有诊断"时是唯一线索，必须给出来，否则模型只知道"失败了"不知道为什么
   if (result.other.length > 0) {
     body.push('  ----')
     for (const line of result.other.slice(0, 8)) body.push(`  ${line}`)
-    if (result.other.length > 8) body.push(`  … 还有 ${result.other.length - 8} 行输出未列出`)
+    if (result.other.length > 8) body.push(`  … ${result.other.length - 8} more output lines not listed`)
   }
   return { ok: false, errorCount: count, text: [head, ...body].join('\n') }
 }

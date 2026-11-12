@@ -222,6 +222,7 @@ GUI 类（`apps` / `component` / `inspector` / `e2e` / `real` / `packaged`）**�
 | 商业化 | 个人免费（含全部核心能力）；企业版卖协作/SSO/RBAC/私有 Hub；License = AGPL-3.0（Server）+ Apache-2.0（Runtime SDK/模板/生成物）+ 双许可 |
 | **界面语言** | **中英两套，跟随系统、英文兜底**；真相存服务端 `settings.ui.locale`，本机 `localStorage` 只做首屏缓存（避免闪）。切入口在顶栏，不藏在设置里 |
 | **系统生成的文本** | **服务端也按这个语言说话**：`packages/protocol/src/locale.ts` 持有进程级当前语言（服务端启动读设置、`settings.set` 时更新，网页在 Provider 里同步同一个值），`messages/*.ts` 是"服务端会念给用户听"的文案表（错误消息 + 门禁结论 + 远端指路）。**控制台日志与 git 历史仍是单一英文** —— 它们会离开这台机器、被 `git log` 与 grep 读，两种语言的历史等于搜不齐。判定口诀：**会离开这台机器的写英文，只在界面上出现的做双语** |
+| **给模型看的字** | **一律英文，且不随界面语言变**：角色提示词（`roles.ts`）、工具 description 与参数说明、工具结果与错误（`tools/*.ts`）、`formatTscReport`、写进应用仓库的 `docs/AGENTS.md`。理由不是"英文更好"，是两部分别成立的事实：① 这些字同时是模型的输入，混语言会改模型行为（开始用中文思考、把工具名写成中文），而且没法测；② 其中一半会跟着应用仓库离开本机。**唯一例外**：引用检查项结论时要同时点名 `Did not run` / `没跑成` —— 那是"给人看的字"，会随界面语言变，模型必须两版都认得。护栏在 `packages/agent/test/prompts-english.test.ts`（角色提示词 + 全部工具描述扫 CJK） |
 
 ---
 
@@ -3590,6 +3591,9 @@ DoD 写的是「快照保留策略」。真去量发现**大头不是快照**：
 | **"英文界面上没有中文"只能全页普查，而且要留故意的口子** | 逐条核对不可行（我们不知道哪一处漏了），只能把渲染出来的文本全扫一遍找 CJK —— 连 `title` / `placeholder` / `aria-label` 一起扫（它们同样摆在脸上）。但这会误伤两类**故意**的中文：品牌字（榫）与语言按钮上那个「中」。给它们打标记（`data-brand` / `data-locale-toggle`）并在扫描器里跳过；**不要**往白名单里加文字，那样下次真漏了就再也报不出来 |
 | **无 GUI 会话里跑 Electron 要 `--no-sandbox --disable-gpu`** | CI、SSH、被外部沙箱包着跑的 agent 都算。不带这两个参数时子进程报 `sandbox initialization failed: Operation not permitted` + `GPU process exited unexpectedly: exit_code=6`，窗口一个都不渲染 —— 看着像 Electron 装坏了。`shot:locale` 因此带上它们（截图脚本不进产品包，代价可接受） |
 | **生成脚本的模板字符串里不能出现反引号** | `scripts/*.ts` 里常把 electron 主进程脚本写成模板字符串。注释里随手写一句 `` `[data-brand]` `` 就把外层字符串截断，报错是 `ReferenceError: data is not defined`（报在注释那一行，看着像语法没问题）—— 模板字符串里的注释一律用引号，不用反引号 |
+| **工具结果同时是模型的输入** | 所以它不能跟着界面语言变。把 `preview_assert` / `subagent` / `git_diff` 的结果翻成中文，等于让同一个提示词在两种语言下跑出两种模型行为 —— 而验收只在一种语言上做得到。做法：工具结果、错误、工具 description 一律英文（`packages/agent/test/prompts-english.test.ts` 扫 CJK）；**检查项结论**例外，它同时给发布对话框看，所以语言做成 `say(locale, …)` 的参数：门禁不传（跟界面），Reviewer 的工具传 `'en'` |
+| **提示词里引用工具输出的原文，翻译后会静默失效** | `roles.ts` 里曾写着「如果它说"没跑成"」—— 那是让 Reviewer 判断"检查到底跑没跑"的唯一线索。工具输出一翻英文，这句话就永远匹配不上，模型照样交一份"没问题"的报告。两个修法只能选一个：别引用原文（只讲语义），或者**同时点名两种写法**。现在选后者：「"Did not run" / "没跑成"」，因为 `checks` 的摘要确实随界面语言变 |
+| **工具输出里的中文藏在多行字符串里，按行扫会漏** | `grep "new TenonError("` 数出 79 处、实际 112 处，差的那 33 处是"错误码一行、消息在下一行"。工具结果同理（`lines.push(...)` 那种写法每行都是独立字符串）。要数清必须扫**字符串字面量**而不是扫行：先剔掉注释行，再在剩下的行里找 `'…中文…'`，多行的靠"函数体内全部字符串"兜 |
 
 
 ---

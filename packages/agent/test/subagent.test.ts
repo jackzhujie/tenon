@@ -48,7 +48,7 @@ describe('subagent 守卫', () => {
     for (const role of ['builder', 'nobody']) {
       const result = await call({ role, task: '干活' })
       expect(result.isError, role).toBe(true)
-      expect(result.text).toContain('没有这个子角色')
+      expect(result.text).toContain('No such role')
       expect(result.text).toContain('Explore')
     }
   })
@@ -61,12 +61,12 @@ describe('subagent 守卫', () => {
   it('白名单过滤后一个工具都没有时报错，不去建空会话', async () => {
     const result = await call({ role: 'explore', task: '找工作' }, { tools: [] })
     expect(result.isError).toBe(true)
-    expect(result.text).toContain('工具一个都没装好')
+    expect(result.text).toContain('has none of its tools registered')
   })
 
   it('harness 还没就绪时给可重试的提示，不抛异常', async () => {
     const result = await call({ role: 'explore', task: '找工作' })
     expect(result.isError).toBe(true)
-    expect(result.text).toContain('还没就绪')
+    expect(result.text).toContain('is not ready yet')
   })
 })

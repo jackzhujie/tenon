@@ -52,9 +52,9 @@ describe('工具结果回填', () => {
   it('失败：状态是 error，而不是 ok', () => {
     const messages = normalizeEntries([
       assistant('1', [{ type: 'toolCall', id: 'c1', name: 'write', arguments: { path: '../x' } }]),
-      toolResult('2', 'c1', '拒绝访问工作区之外的路径：../x', { isError: true }),
+      toolResult('2', 'c1', 'Refusing to touch a path outside the workspace: ../x', { isError: true }),
     ])
-    expect(messages[0]?.parts[0]).toMatchObject({ status: 'error', output: '拒绝访问工作区之外的路径：../x' })
+    expect(messages[0]?.parts[0]).toMatchObject({ status: 'error', output: 'Refusing to touch a path outside the workspace: ../x' })
   })
 
   it('结果还没来（跑到一半）：保持 ok，不编一个 output', () => {
