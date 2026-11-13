@@ -116,7 +116,9 @@ describe('导出 CSV', () => {
         .then(() => 'allowed', (error: unknown) => (error instanceof Error ? error.message : String(error)))
     })
     expect(outcome).not.toBe('allowed')
-    expect(String(outcome)).toContain('错位')
+    // 组件 server 侧的报错是英文单语：`plugins/bundled/**` 的字符串字面量不许有 CJK
+    // （i18n-guard 的硬约束，见 STATUS §2「生成应用的模板与导出产物」那行）
+    expect(String(outcome)).toContain('misaligned')
   })
 })
 
@@ -158,7 +160,8 @@ describe('审批流', () => {
     })
     expect(outcome.empty).not.toBe('allowed')
     expect(outcome.again).not.toBe('allowed')
-    expect(String(outcome.again)).toContain('不能再审')
+    // 同上：组件 server 侧英文单语
+    expect(String(outcome.again)).toContain('cannot be reviewed again')
   })
 
   it('状态跨 root 还在（linger）', async () => {

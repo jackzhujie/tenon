@@ -3274,7 +3274,7 @@ pnpm hub:check
 **验证**：run `42633408007` 十四步全绿。独立复核（不信 CI 自己）：线上 `generatedAt`
 = 那次运行时间、服务器四个文件 mtime 与之一致、本机 `pnpm hub:check` 全部通过。
 
-## 4.64 存储盘点与清理（BACKLOG 3.3）
+### 4.64 存储盘点与清理（BACKLOG 3.3）
 
 `~/.tenon` 一直在涨，而界面上没有任何地方提过这件事。现在顶栏有「存储」：
 `storage.report`（只读盘点）+ `storage.clean`（三个明确动作）。
@@ -3325,10 +3325,81 @@ DoD 写的是「快照保留策略」。真去量发现**大头不是快照**：
 - 真机截图（Electron/Chrome + CDP）：顶栏「存储 187.1 MB」→ 面板「依赖 138.2 MB /
   数据库 38.2 MB / 会话 5.9 MB / 快照 4.4 MB（1 份）/ 代码 198.8 KB / Git 112.3 KB」
 
+### 4.65 DCO 真的开始拦人了（BACKLOG 3.11）
+
+`CONTRIBUTING` 从 M0 就写着「必须带 `Signed-off-by`」，而仓库里 **71 个提交一个都没带**。
+不是谁反对它，是它失效得太安静：漏签不会让任何东西坏掉 —— 测试照跑、预览照起、
+版本照发。等到某天真要回答「这段代码你有权提交吗」，那句声明是空的。
+**没人执行、也没人发现的规则，等于没有这条规则。**
+
+现在 `.github/workflows/ci.yml` 多了一个独立的 `dco` job，本地可先跑 `pnpm check:dco`。
+
+#### 一、判定交给 git，不自己数
+
+第一反应是 `grep -c Signed-off-by`。它在本仓库数出 **71** —— 而真正的 trailer 是 **0**。
+多出来的全是**提交正文里提到这个词**（讲这条规则本身的那些文档型提交）。
+所以判定用 git 自己的 trailer 解析（`%(trailers:key=Signed-off-by,valueonly)`），
+它只认消息末尾那段连续的 trailer：
+
+| 规则 | 为什么 |
+|---|---|
+| 只认末尾 trailer 里的 `Signed-off-by: Name <email>` | 正文中间的示例行不是签名。git 的解析器正好是这个语义，自己按行匹配必然误判 |
+| 邮箱等于 **author 或 committer** 之一 | `commit -s` 写的是 committer；`rebase` / `--author` 之后两者会不同。任一匹配都代表「这个人签了」 |
+| 跳过 merge 提交 | 它没有自己的内容，GitHub 网页合并也代签不了 |
+| 跳过 `[bot]` | dependabot 的提交不带 trailer，也没人能补。**判断不能只看后缀**：真地址是 `49699333+dependabot[bot]@users.noreply.github.com`，`[bot]` 在中间 |
+
+#### 二、只查新增，不追溯
+
+追溯要 rebase 全部提交、改掉所有 sha，对已经公开的历史代价远大于收益。区间来自事件本身：
+
+| 场景 | 区间 |
+|---|---|
+| PR | `pull_request.base.sha..pull_request.head.sha` |
+| push | `event.before..event.after`（首次推送 `before` 是 40 个 `0`，当"没有 base"） |
+| 本地不传参 | `origin/main..HEAD` —— 正好是「我正要推的那几条」 |
+| 连 `origin/main` 都没有 | 只查 `HEAD` 一条，别把整个历史翻出来 |
+
+#### 三、三个刻意的选择
+
+| 选择 | 不这么做的后果 |
+|---|---|
+| `fetch-depth: 0`，且 `ref` 显式指向 head.sha | 浅克隆里 base 那个 sha 不存在，`git rev-list` 报 `bad revision`；脚本又把「没跑成」判成失败 —— 于是每个 PR 都红。PR 上的 `GITHUB_SHA` 还是 GitHub 造的 merge 提交，不是要查的 head |
+| 独立 job：既不并进矩阵，也不 `needs: check` | 并进矩阵 = 三平台各装一次依赖只为跑一条 git 检查；`needs: check` = 最便宜的错要等 8 分钟矩阵 |
+| 脚本用 tsx 跑（所以这个 job 也装依赖） | 换 `.mjs` 能省 40 秒，代价是它不进 typecheck、不进 lint、写不了 vitest。**门禁脚本自己坏掉时「看着绿」比慢 40 秒糟得多** |
+
+不用 GitHub 的 DCO App：多一个外部服务、多一次授权，结论还落在 Checks 里而不是日志里 ——
+而我们要的是**本地能先跑一遍**，红了当场改，不是推上去等通知。
+
+#### 四、脚本自己的 10 条测试
+
+`scripts/test/check-dco.test.ts`（`vitest.config.ts` 的 `include` 因此多了一条）。
+全部用**真的 git 仓库**（临时目录）跑，不 mock：要测的正是「git 怎么解析 trailer」，
+mock 掉之后就只在测自己的假设了。覆盖：缺 trailer / 正文中间的示例不算 / 签了别人 /
+author 与 committer 不同 / `[bot]` 地址在中间 / merge 跳过 / 区间只查增量 /
+无 base 只查最后一条 / 40 个 `0` 当没给。
+
+**第一次跑就发现两个字段错位**：`%an %ae %cn %ce %s trailers` 解构时少写一个变量，
+作者名被当成邮箱、邮箱被当成标题 —— 报错信息里"作者"那一栏赫然是 `Test User`，
+"标题"是 `t@example.com`。这种错不会让脚本崩，只会把错误指到错误的地方。
+
+#### 五、上线当天的两件事
+
+1. **本地 8 条未推提交全红**（都是 i18n 那几轮），用 `git rebase --signoff origin/main`
+   补签 —— 它们还没推到 GitHub，所以重写后仍是快进 push，不需要 `--force`。
+2. **顺手抓到两条已经红着的测试**：`official-plugins.test.ts` 还在断言中文
+   （「错位」「不能再审」），而上一轮 i18n 收尾已把组件 server 侧的报错改成英文。
+   断言改成英文关键词，并把「组件 server 侧只有英文」记成 BACKLOG 3.13 ——
+   它自己的语言通道还没做（web 侧有 `window.__tenonLocale`，server 侧没有）。
+
+测试计数 961 → 971。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
 |---|---|
+| **`grep -c Signed-off-by` 数出来的是假数** | 本仓库数出 71，真正的 trailer 是 **0** —— 多出来的全是提交正文里**提到**这个词（讲这条规则本身的那些提交）。判签名只能用 `%(trailers:key=Signed-off-by,valueonly)`：git 只把末尾那段连续的行当 trailer，正文中间的示例行不算，按行 grep 必然误判。推而广之：任何「数一数」的统计只对当时那个匹配口径成立 |
+| **浅克隆里 `git rev-list base..head` 报 `bad revision`** | `actions/checkout` 默认 `fetch-depth: 1`，base 那个 sha 根本不在本地。而门禁把「没跑成」判成失败（这是对的，否则坏了也算绿）→ **每个 PR 都红**。要 `fetch-depth: 0`；另外 PR 上的 `GITHUB_SHA` 是 GitHub 造的 **merge 提交**，不是要查的 head，得显式 `ref: pull_request.head.sha` |
+| **机器人的 `[bot]` 不在邮箱末尾** | 真地址是 `49699333+dependabot[bot]@users.noreply.github.com` —— `endsWith('[bot]')` 永远为假，于是 dependabot 的提交会稳定地让门禁红。用 `/\[bot\]/i` 判（名字一侧才是后缀） |
 | **`PGlite` 的 `pool.max` 必须是 1** | 不是调优建议。`pool.max=2` 时两条连接的事务落在同一个 backend 会话上，一条 `ROLLBACK` 会抹掉另一条已写入的行（实测 `iso-A` 丢失）。收益只有 19% p95，不值得 |
 | **`harness.resume()` 不能忘** | server 启动序列少了这句，崩溃恢复能力等于没有（spike 1 就是这么验证的）|
 | **`ELECTRON_RUN_AS_NODE` 的正确用法** | `spawn(process.execPath, [entry], { env: { ELECTRON_RUN_AS_NODE: '1' } })`；不要额外打包 Node |

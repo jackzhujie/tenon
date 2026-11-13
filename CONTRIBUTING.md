@@ -8,14 +8,16 @@
 
 ```bash
 pnpm install
+pnpm lint           # 0 error（10 条 warning 是既有的，别再加）
 pnpm typecheck      # 18 个 project
-pnpm test           # 700 项，约 4 分钟（串行跑，因为端口与文件系统都在用）
+pnpm test           # 971 项，约 4 分钟（串行跑，因为端口与文件系统都在用）
 pnpm build:web
 ```
 
-这三步就是 CI 跑的全部（`.github/workflows/ci.yml`）。**PR 必须让它绿。**
-`e2e:*` 系列（真 Chromium / 真 Docker / 真 PostgreSQL）不进 CI，按需在本地跑，
-改动涉及哪条链路就跑哪条：
+这五步加 `pnpm check:i18n`、四条零依赖 e2e，就是 CI 的 `check` 矩阵在三个平台上跑的全部
+（`.github/workflows/ci.yml`）。**PR 必须让它绿。** 另有一个独立的 `dco` job 只看提交签名。
+`e2e:*` 系列（真 Chromium / 真 Docker / 真 PostgreSQL）里需要联网装依赖与 docker 的那些
+只跑在 ubuntu runner 上，按需在本地跑，改动涉及哪条链路就跑哪条：
 
 | 改了什么 | 跑哪个 |
 |---|---|
@@ -35,6 +37,15 @@ pnpm build:web
   ```
 
   它表示你有权贡献这段代码。不需要签任何文件。
+
+- **CI 会逐条查这件事**（`dco` job，本地可先跑 `pnpm check:dco`）。漏签、或者签名里的邮箱
+  既不是 author 也不是 committer，都会红。嫌每次打 `-s` 麻烦就设一次：
+
+  ```bash
+  git config format.signoff true    # 之后每个提交自动带
+  ```
+
+  只查「这次新增的提交」，不回翻历史 —— 历史已经发出去，改 sha 的代价比它守的东西大。
 
 ## 两条红线
 

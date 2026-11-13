@@ -132,8 +132,9 @@
 | 3.8 | 🚧 **Agent 命令无沙箱 —— 护栏已上（2026-11-11），隔离仍欠** | 已完成：`bashGuard` 拦两类能静态看出来的越界（`cd` 出界 / 碰 `~/.tenon` 下别的应用与本机凭据目录），32 项测试（含接线级：摘掉 `guard:` 就会红）。**两处判断推翻了原计划**：① 「命令白名单」不成立 —— 装依赖必须允许 `npm run postinstall` 跑任意代码，白名单列不出有意义的名字，只会制造安全感；② 「确认弹窗」暂不做 —— 它会被一路点掉，变成习惯后真危险的那条也顺手放过，收益为负。数据也不缺：每次 bash 的 `command` 与输出**已经完整存在聊天记录的 tool part 里**，再列一张台账是同一份数据的第二份视图 | 隔离 | 只剩**系统调用级隔离**（M7 `gondolin` / 权限清单，DESIGN §15.3）。到那一步之前，`SECURITY.md` 必须一直写着"这是护栏不是沙箱" —— 措辞放松比没有护栏更危险 |
 | 3.9 | ✅ **真远端 push** —— 已完成（2026-11-10） | 发布对话框里填一次 HTTPS 地址 + 令牌（`SecretBox` 加密存库、永不回显），之后每次发布把分支与版本 tag 推过去。**远端失败不影响发布本身**（本地备份库已是完整一版），失败分类成 401/403/404/422/网络五种并各给一句指路，另有「再推一次」不消耗新版本号。只支持 HTTPS + 令牌：isomorphic-git 的 push 没有 SSH 实现（见 STATUS §5） | ✅ | ① 配好凭据能真推 ② 错令牌给出可操作的原因 ③ 补推不多出版本号。**真机六节全过**（2026-11-11，private 仓库 + fine-grained token）：`main` 分支与 `v2026.11.11-1` 标签都到了远端（用 GitHub API 从第三方视角复核过），错令牌报 `AUTH` + 指路，补推不多出记录 |
 | 3.10 | Linux 桌面端 | README：M7 后置；CI 出 AppImage 但无 GUI 验证 | M | 真机启动 + 冒烟；或明确宣布不做 |
-| 3.11 | DCO 未强制 | 欠账：靠 `git commit -s` 自觉 | XS | CI 里加一条 `Signed-off-by` 检查 |
+| 3.11 | ✅ **DCO 真的开始拦人了 —— 已完成（2026-11-13）** | `CONTRIBUTING` 从 M0 就写着「必须带 `Signed-off-by`」，而仓库里 71 个提交一个都没有。它是**漏了也不会让任何东西坏掉**的那类规则，所以没人发现。现在 CI 多一个独立的 `dco` job，本地可先跑 `pnpm check:dco`。判定交给 git 自己的 trailer 解析器（正文里提到这个词不算：`grep -c` 在本仓库数出 71，真 trailer 是 0）；只看新增提交、不追溯历史；merge 与 bot 提交跳过，签名邮箱匹配 author 或 committer 之一即可。脚本自带 10 条测试（真 git 仓库，不 mock）。见 STATUS §4.65 | XS | ✅ 漏签的提交让 CI 红；本地一条命令能先跑 |
 | 3.12 | 第三方组件上架与审核 | DESIGN §17：M7 后置 | L | 不排期 |
+| 3.13 | 组件的 server 侧报错只有英文 | `plugins/bundled/**` 的字符串字面量不许有 CJK（`i18n-guard` 的硬约束），于是 CSV 导出与审批流在 server facet 里抛的错（`… would be misaligned` / `… cannot be reviewed again`）原样显示在中文界面上。web 侧另有 `window.__tenonLocale` 通道，server 侧没有 | S | 给 activate 的 `ActivateInput` 加 locale（或允许 `plugins/` 里出现 `msg()` 双语表），并让宿主的调用点传当前语言 |
 
 ---
 
