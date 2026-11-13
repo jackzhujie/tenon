@@ -25,6 +25,7 @@ pnpm build:web
 | 库快照 / 回滚 / 迁移 | `pnpm e2e:diff`、`pnpm e2e:postgres` |
 | 发布、导出 | `pnpm e2e:release`、`pnpm e2e:export`、`pnpm e2e:docker` |
 | 组件、Hub | `pnpm e2e:component`、`pnpm e2e:hub` |
+| 诊断信息 / 脱敏规则 | `pnpm shot:diagnostics`（真窗口里点开对话框，逐字符比对界面与原文） |
 | Agent 角色 / 工具 | `pnpm e2e:e2e` |
 
 ## 提交
