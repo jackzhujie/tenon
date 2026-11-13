@@ -22,7 +22,8 @@
  * - 邮箱必须等于 **author 或 committer** 之一：`git commit -s` 写的是 committer，
  *   而 `rebase` / `--author` 之后两者可能不同，任一匹配都代表「这个人签了」。
  * - 合并提交不看（`--no-merges`）：它没有自己的内容，且 GitHub 合并时代签不了。
- * - 机器人跳过（`*[bot]`）：dependabot 的提交不带 trailer，也没人能给它补。
+ * - 机器人跳过：dependabot 的提交不带 trailer，也没人能给它补。**判断不能只看后缀** ——
+ *   真地址是 `49699333+dependabot[bot]@users.noreply.github.com`，`[bot]` 在中间。
  *
  * ## 为什么不用 GitHub 的 DCO App
  *
