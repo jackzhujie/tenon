@@ -658,7 +658,9 @@ export function ReleaseDialog({
           {result !== null && (
             <div className="space-y-2 rounded-lg border border-ok/30 bg-ok/5 px-3 py-2.5">
               <div className="flex items-center gap-2">
-                <span className="text-[12.5px] text-ok">已发布 {result.version}</span>
+                <span className="text-[12.5px] text-ok">
+                  {t('release.done.published', { version: result.version })}
+                </span>
                 <span className="font-mono text-[10.5px] text-faint">
                   {result.commitSha.slice(0, 7)} → {result.branch}
                 </span>
@@ -753,11 +755,7 @@ export function ReleaseDialog({
                 {exporting === 'docker' ? t('release.export.running', { seconds: exportElapsed }) : t('release.export.docker')}
               </Button>
             </div>
-            <p className="text-[10.5px] leading-relaxed text-faint">
-              静态包：拷到有 Node 的机器上跑 start.sh（自带生产依赖）。Docker：同一份产物 +
-              Dockerfile/compose，docker compose up -d 即起，数据库也一起带。
-              两者都只认一个 DATABASE_URL。导出会真跑一次构建（几十秒到两分钟），进度在左下角日志里。
-            </p>
+            <p className="text-[10.5px] leading-relaxed text-faint">{t('release.export.help')}</p>
             {exportError !== null && (
               <p className="rounded border border-bad/30 bg-[#241413] px-2 py-1.5 text-[11px] leading-relaxed text-bad">
                 {exportError}
@@ -772,13 +770,16 @@ export function ReleaseDialog({
                   <CopyButton text={exported.dir} label={t('release.copyPath')} />
                 </div>
                 <p className="text-[10.5px] text-faint">
-                  {Math.round(exported.bytes / 1024 / 1024)}MB · {exported.files} 个文件 ·{' '}
-                  {exported.target === 'docker'
-                    ? t('release.export.dockerContext')
-                    : exported.hasApi
-                      ? t('release.export.staticWithApi')
-                      : t('release.export.staticOnly')}
-                  。产物里的 README 写了怎么起。
+                  {t('release.export.summary', {
+                    size: Math.round(exported.bytes / 1024 / 1024),
+                    files: exported.files,
+                    kind:
+                      exported.target === 'docker'
+                        ? t('release.export.dockerContext')
+                        : exported.hasApi
+                          ? t('release.export.staticWithApi')
+                          : t('release.export.staticOnly'),
+                  })}
                 </p>
               </div>
             )}

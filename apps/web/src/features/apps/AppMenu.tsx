@@ -107,7 +107,7 @@ export function AppMenu({ apps, activeApp, onSelect, onCreate, onDelete, onRenam
                      */
                     <div className="bg-[#241413] px-3 py-2" data-tenon-confirm-delete>
                       <p className="text-[12px] leading-relaxed text-bad">
-                        删除「{app.name}」？代码、数据库、日志和已发布的备份会一起删掉，不能恢复。
+                        {t('apps.deleteConfirm', { name: app.name })}
                       </p>
                       <div className="mt-1.5 flex justify-end gap-1.5">
                         <button

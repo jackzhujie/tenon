@@ -305,18 +305,25 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
                 />
               ))}
             {total !== null && total.apps.length > 4 && (
-              <p className="text-[10px] text-faint">…另有 {total.apps.length - 4} 个应用</p>
+              <p className="text-[10px] text-faint">
+                {t('usage.total.more', { count: total.apps.length - 4 })}
+              </p>
             )}
             {total !== null && total.failed.length > 0 && (
               <p className="text-[10px] leading-4 text-warn">
-                {total.failed.length} 个应用的账本读不到（没算进合计）：{total.failed.map((item) => item.name).join('、')}
+                {t('usage.total.failed', {
+                  count: total.failed.length,
+                  names: total.failed.map((item) => item.name).join(', '),
+                })}
               </p>
             )}
             {total !== null && total.apps.every((app) => !app.known) && total.apps.length > 0 && (
               <p className="text-[10px] leading-4 text-faint">{t('usage.noLedger')}</p>
             )}
             {totalError !== null && (
-              <p className="text-[10px] leading-4 text-warn">读不到汇总：{totalError}</p>
+              <p className="text-[10px] leading-4 text-warn">
+                {t('usage.total.error', { detail: totalError })}
+              </p>
             )}
           </div>
 
@@ -342,9 +349,7 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
           </div>
 
           <div className="border-t border-line-soft px-3 py-2">
-            <p className="mb-1.5 text-[11px] text-faint">
-              额度（用完就不让再发；留空 = 不设限）
-            </p>
+            <p className="mb-1.5 text-[11px] text-faint">{t('usage.budget.title')}</p>
             <label className="flex items-center gap-2 py-0.5 text-[11.5px] text-muted">
               <span className="w-20 shrink-0">token</span>
               <input
@@ -436,12 +441,12 @@ export function UsagePanel({ usage, stopped, disabled, onSetBudget }: UsagePanel
 
             <p className="mt-1 text-[10px] leading-relaxed text-faint">
               {t('usage.global.note.before')}
-            <span className="text-muted">{t('usage.global.note.emphasis')}</span>
+              <span className="text-muted">{t('usage.global.note.emphasis')}</span>
               {t('usage.global.note.after')}
               {global !== null && global.unreadable > 0 && (
                 <span className="text-warn">
                   {' '}
-                  有 {global.unreadable} 个应用账本读不到，那两个数里不含它们。
+                  {t('usage.global.unreadable', { count: global.unreadable })}
                 </span>
               )}
             </p>

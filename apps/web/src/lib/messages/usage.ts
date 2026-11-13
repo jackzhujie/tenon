@@ -30,6 +30,12 @@ export const usageEn = {
   'usage.global.note.after':
     ' and resets on the 1st. The lifetime cap never resets — when you hit it, raise it or clear it by hand.',
   'usage.global.emptyHint': 'Empty = that gate stays unlimited',
+
+  'usage.total.more': '…and {count} more apps',
+  'usage.total.failed': '{count} app(s) have no readable ledger (not counted): {names}',
+  'usage.total.error': 'Could not read the totals: {detail}',
+  'usage.budget.title': 'Budget (no more turns once used up; leave empty = no limit)',
+  'usage.global.unreadable': '{count} app(s) have no readable ledger — the two numbers above exclude them.',
 } as const
 
 export type UsageKey = keyof typeof usageEn
@@ -62,4 +68,10 @@ export const usageZh: Record<UsageKey, string> = {
   'usage.global.note.emphasis': '自然月',
   'usage.global.note.after': '算，下月 1 日自动回到零；总量那道不会自己解开，撞上就得手动调高或清空。',
   'usage.global.emptyHint': '置空 = 那道闸不设限',
+
+  'usage.total.more': '…另有 {count} 个应用',
+  'usage.total.failed': '{count} 个应用的账本读不到（没算进合计）：{names}',
+  'usage.total.error': '读不到汇总：{detail}',
+  'usage.budget.title': '额度（用完就不让再发；留空 = 不设限）',
+  'usage.global.unreadable': '有 {count} 个应用账本读不到，那两个数里不含它们。',
 }

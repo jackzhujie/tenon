@@ -384,7 +384,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
           {priceForm !== null && (
             <div className="mb-2 rounded-md border border-line bg-panel-2 p-2">
               <div className="mb-1 text-[10px] text-faint">
-                价格（美元 / 百万 token）·
+                {t('model.price.heading')}
                 <span className="font-mono text-ink"> {priceForm.modelId}</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -488,7 +488,7 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
               </div>
 
               <label className="mt-2 flex flex-col gap-0.5 text-[10px] text-faint">
-                端点（OpenAI 兼容，通常以 /v1 结尾）
+                {t('model.baseUrl.label')}
                 <input
                   value={form.baseUrl}
                   onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
@@ -531,8 +531,8 @@ export function ModelPanel({ model, onChanged }: ModelPanelProps) {
           <div className="mt-2 border-t border-line pt-2 text-[10px] text-faint">
             {t('model.note.encrypted')}
             {t('model.note.price.before')}
-    <span className="text-warn">{t('model.note.price.emphasis')}</span>
-            ，「按美元设额度」也就不起作用。
+            <span className="text-warn">{t('model.note.price.emphasis')}</span>
+            {t('model.note.price.after')}
           </div>
         </div>
       )}

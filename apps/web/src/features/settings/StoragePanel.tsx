@@ -164,7 +164,10 @@ export function StoragePanel() {
               <div className="mb-1 flex items-baseline gap-2">
                 <span className="text-[18px] text-ink">{formatBytes(report.totalBytes)}</span>
                 <span className="text-[10.5px] text-faint">
-                  备份库 {formatBytes(report.backupsBytes)} · 其他 {formatBytes(report.sharedBytes)}
+                  {t('storage.breakdown', {
+                    backups: formatBytes(report.backupsBytes),
+                    other: formatBytes(report.sharedBytes),
+                  })}
                 </span>
               </div>
 
@@ -218,7 +221,10 @@ export function StoragePanel() {
                   <div className="text-[10.5px] text-muted">
                     {t('storage.snapshots.title')}
                     <span className="ml-1 text-faint">
-                      {snapshotCount} 份（{formatBytes(snapshotBytes)}）· 每应用留最近
+                      {t('storage.snapshots.summary', {
+                        count: snapshotCount,
+                        size: formatBytes(snapshotBytes),
+                      })}
                       <select
                         value={keep}
                         onChange={(event) => {
@@ -258,7 +264,10 @@ export function StoragePanel() {
                   <div className="text-[10.5px] text-muted">
                     {t('storage.gc.title')}
                     <span className="ml-1 text-faint">
-                      {report.backups.length} 个 · {formatBytes(report.backupsBytes)}
+                      {t('storage.gc.count', {
+                        count: report.backups.length,
+                        size: formatBytes(report.backupsBytes),
+                      })}
                     </span>
                   </div>
                   <button
@@ -279,9 +288,11 @@ export function StoragePanel() {
 
               {outcome !== null && (
                 <div className="mt-2 rounded border border-ok/30 bg-ok/10 px-2 py-1.5 text-[10.5px] text-ok">
-                  已释放 {formatBytes(outcome.freedBytes)}
+                  {t('storage.freed', { size: formatBytes(outcome.freedBytes) })}
                   {outcome.notes.length > 0 && (
-                    <span className="text-muted">（{outcome.notes.join('；')}）</span>
+                    <span className="text-muted">
+                      {t('storage.freed.notes', { notes: outcome.notes.join('; ') })}
+                    </span>
                   )}
                   {outcome.removed.length > 0 && (
                     <div className="mt-1 space-y-0.5 text-[9.5px] text-faint">
@@ -290,7 +301,11 @@ export function StoragePanel() {
                           {path}
                         </div>
                       ))}
-                      {outcome.removed.length > 3 && <div>…还有 {outcome.removed.length - 3} 项</div>}
+                      {outcome.removed.length > 3 && (
+                        <div>
+                          {t('storage.freed.more', { count: outcome.removed.length - 3 })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

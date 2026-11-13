@@ -295,6 +295,12 @@ function check(name: string, ok: boolean, detail = ''): void {
 try {
   /* ---------- 3. 建应用 + 装内置 1.0.0 + 从 Hub 装 1.1.0 ---------- */
 
+  /*
+   * 界面语言先钉成中文：这一趟的断言全是中文文案（"下载并安装"、"已装"、"导出 CSV"）。
+   * 不钉的话，在英文系统上跑会整片红 —— 看起来像功能坏了，其实只是脚本在按中文找按钮。
+   */
+  await rpc('settings.set', { values: { 'ui.locale': 'zh' } })
+
   const created = await rpc<{ app: { id: string } }>('app.create', { name: '组件更新演示' })
   const appId = created.app.id
   const repoDir = appPaths(resolveHome({ TENON_HOME: home }), appId).repoDir

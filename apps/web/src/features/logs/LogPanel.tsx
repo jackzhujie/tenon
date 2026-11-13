@@ -148,7 +148,7 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
             )}
             title={t('log.errors', { count: errorCount })}
           >
-            {errorCount} 错误
+            {t('log.errors', { count: errorCount })}
           </span>
         )}
 

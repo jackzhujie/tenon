@@ -38,6 +38,13 @@ export const settingsEn = {
   'storage.gc.tip': 'Packs loose objects only — no reachable commit is removed',
   'storage.gc.action': 'Compact',
 
+  'storage.breakdown': 'backups {backups} · other {other}',
+  'storage.freed': 'Freed {size}',
+  'storage.freed.notes': '({notes})',
+  'storage.freed.more': '…and {count} more',
+  'storage.snapshots.summary': '{count} ({size}) · keep the most recent',
+  'storage.gc.count': '{count} · {size}',
+
   /* ---- 模型 ---- */
   'model.title': 'Model',
   'model.preset.localLmStudio': 'Local LM Studio',
@@ -77,6 +84,9 @@ export const settingsEn = {
     'Keys live in an encrypted local vault (not in env vars, not in logs, not uploaded). Changes apply immediately — no restart.',
   'model.note.price.before': 'Prices are optional, but without them ',
   'model.note.price.emphasis': 'cost cannot be computed',
+  'model.note.price.after': ', so the USD budget does nothing.',
+  'model.price.heading': 'Price (USD per million tokens) ·',
+  'model.baseUrl.label': 'Endpoint (OpenAI-compatible, usually ends with /v1)',
 } as const
 
 export type SettingsKey = keyof typeof settingsEn
@@ -116,6 +126,13 @@ export const settingsZh: Record<SettingsKey, string> = {
   'storage.gc.tip': '只打包松散对象，不删除任何可达提交',
   'storage.gc.action': '压缩',
 
+  'storage.breakdown': '备份库 {backups} · 其他 {other}',
+  'storage.freed': '已释放 {size}',
+  'storage.freed.notes': '（{notes}）',
+  'storage.freed.more': '…还有 {count} 项',
+  'storage.snapshots.summary': '{count} 份（{size}）· 每应用留最近',
+  'storage.gc.count': '{count} 个 · {size}',
+
   'model.title': '模型',
   'model.preset.localLmStudio': '本地 LM Studio',
   'model.notice.saveFailed': '保存了，但没能用起来',
@@ -152,4 +169,7 @@ export const settingsZh: Record<SettingsKey, string> = {
   'model.note.encrypted': '密钥存在本机加密库里（不进环境变量、不进日志、不上传）。保存后立刻生效，不需要重启。',
   'model.note.price.before': '价格不填也能用，只是',
   'model.note.price.emphasis': '算不出花了多少钱',
+  'model.note.price.after': '，「按美元设额度」也就不起作用。',
+  'model.price.heading': '价格（美元 / 百万 token）·',
+  'model.baseUrl.label': '端点（OpenAI 兼容，通常以 /v1 结尾）',
 }

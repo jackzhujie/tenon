@@ -362,7 +362,9 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                     </div>
                     {component.mounts.length > 0 && (
                       <div className="mt-1 text-[10px] text-faint">
-                        挂载：{component.mounts.map((mount) => mount.slot).join('、')}
+                        {t('plugin.mounts', {
+                          slots: component.mounts.map((mount) => mount.slot).join(', '),
+                        })}
                       </div>
                     )}
                     {!component.loaded && component.enabled && (
@@ -374,12 +376,18 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
 
               {problems.length > 0 && (
                 <div className="mt-2 rounded-md border border-bad/40 bg-bad/5 p-2">
-                  <div className="mb-1 text-[11px] text-bad">装不上的 {problems.length} 条</div>
+                  <div className="mb-1 text-[11px] text-bad">
+                    {t('plugin.problems.count', { count: problems.length })}
+                  </div>
                   <ul className="flex flex-col gap-1">
                     {problems.map((item, index) => (
                       <li key={`${item.code}-${index}`} className="text-[10.5px] text-muted">
                         <span className="font-mono text-[9.5px] text-faint">{item.code}</span> {item.message}
-                        {item.hint !== null && <span className="text-faint">（{item.hint}）</span>}
+                        {item.hint !== null && (
+                          <span className="text-faint">
+                            {t('plugin.problems.hint', { hint: item.hint })}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -394,9 +402,12 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                 <div className="mt-2 border-t border-line pt-2 text-[10px] text-faint">
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate">
-                      官方 Hub：<span className="font-mono text-muted">{hub.hubUrl}</span>
+                      {t('plugin.hub.label')}
+                      <span className="font-mono text-muted">{hub.hubUrl}</span>
                       {hub.keyFingerprint !== null && (
-                        <span className="ml-1 font-mono">· 密钥 {hub.keyFingerprint}</span>
+                        <span className="ml-1 font-mono">
+                          {t('plugin.hub.key', { fp: hub.keyFingerprint })}
+                        </span>
                       )}
                       {/*
                         「随包内置 / 环境变量」这一句是为了回答"我这个包为什么连的是这个地址"。
@@ -462,9 +473,10 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                               )}
                               {item.blockedBy.length > 0 && (
                                 <div className="mt-0.5 text-[9.5px] text-warn">
-                                  装了也用不上：应用{' '}
-                                  <span className="font-mono">{item.blockedBy.join('、')}</span>{' '}
-                                  声明的版本区间不接受 v{item.latest}（要改装配声明里的区间）
+                                  {t('plugin.update.blocked', {
+                                    apps: item.blockedBy.join(', '),
+                                    version: item.latest,
+                                  })}
                                 </div>
                               )}
                             </li>
@@ -483,11 +495,13 @@ export function PluginsPanel({ appId }: PluginsPanelProps) {
                   {hub?.configured === true ? (
                     <>
                       <span className="font-mono text-muted">{hub.hubUrl}</span>
-                      {hubCount > 0 && <span> · {hubCount} 个来自 Hub</span>}
+                      {hubCount > 0 && <span>{t('plugin.store.fromHub', { count: hubCount })}</span>}
                     </>
                   ) : hub?.note != null ? (
                     /* 配了但不对（只给了一半 / 文件坏了）：这是"商店为什么是空的"的答案 */
-                    <span className="text-warn">Hub 配置有问题：{hub.note}</span>
+                    <span className="text-warn">
+                      {t('plugin.store.hubBroken', { note: hub.note })}
+                    </span>
                   ) : (
                     t('plugin.store.hubPending')
                   )}

@@ -86,6 +86,12 @@ export const releaseEn = {
   'release.export.staticWithApi': 'Static bundle · with backend (migrations run automatically)',
   'release.export.staticOnly': 'Static bundle · frontend only',
 
+  'release.done.published': 'Published {version}',
+  'release.export.help':
+    'Static bundle: copy it to a machine with Node and run start.sh (production deps included). Docker: the same output plus Dockerfile/compose — docker compose up -d brings it up, database included. Both read a single DATABASE_URL. Exporting really runs a build (tens of seconds to two minutes); progress shows in the log at the bottom left.',
+  'release.export.summary':
+    '{size}MB · {files} files · {kind}. The README inside explains how to start it.',
+
   /* ---- 历史 ---- */
   'release.history.title': 'Release history',
   'release.history.empty': 'Nothing published yet.',
@@ -193,6 +199,12 @@ export const releaseZh: Record<ReleaseKey, string> = {
   'release.export.dockerContext': 'Docker 上下文（cd 进去 docker compose up -d）',
   'release.export.staticWithApi': '静态包 · 含后端（迁移会自动跑）',
   'release.export.staticOnly': '静态包 · 纯前端',
+
+  'release.done.published': '已发布 {version}',
+  'release.export.help':
+    '静态包：拷到有 Node 的机器上跑 start.sh（自带生产依赖）。Docker：同一份产物 + Dockerfile/compose，docker compose up -d 即起，数据库也一起带。两者都只认一个 DATABASE_URL。导出会真跑一次构建（几十秒到两分钟），进度在左下角日志里。',
+  'release.export.summary':
+    '{size}MB · {files} 个文件 · {kind}。产物里的 README 写了怎么起。',
 
   'release.history.title': '发布历史',
   'release.history.empty': '还没有发布过。',

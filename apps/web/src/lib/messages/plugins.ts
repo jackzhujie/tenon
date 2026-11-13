@@ -52,6 +52,16 @@ export const pluginsEn = {
   'plugin.installing.installing': 'Installing…',
   'plugin.install.download': 'Download and install',
   'plugin.install.add': 'Add to this app',
+
+  'plugin.mounts': 'Mounted: {slots}',
+  'plugin.problems.count': '{count} could not load',
+  'plugin.problems.hint': '({hint})',
+  'plugin.hub.label': 'Official Hub: ',
+  'plugin.hub.key': '· key {fp}',
+  'plugin.update.blocked':
+    "Won't take effect: the app(s) {apps} pin a version range that excludes v{version} — widen it in the assembly file",
+  'plugin.store.fromHub': '· {count} from Hub',
+  'plugin.store.hubBroken': 'Hub is misconfigured: {note}',
 } as const
 
 export type PluginsKey = keyof typeof pluginsEn
@@ -105,4 +115,14 @@ export const pluginsZh: Record<PluginsKey, string> = {
   'plugin.installing.installing': '安装中…',
   'plugin.install.download': '下载并安装',
   'plugin.install.add': '装到此应用',
+
+  'plugin.mounts': '挂载：{slots}',
+  'plugin.problems.count': '装不上的 {count} 条',
+  'plugin.problems.hint': '（{hint}）',
+  'plugin.hub.label': '官方 Hub：',
+  'plugin.hub.key': '· 密钥 {fp}',
+  'plugin.update.blocked':
+    '装了也用不上：应用 {apps} 声明的版本区间不接受 v{version}（要改装配声明里的区间）',
+  'plugin.store.fromHub': '· {count} 个来自 Hub',
+  'plugin.store.hubBroken': 'Hub 配置有问题：{note}',
 }

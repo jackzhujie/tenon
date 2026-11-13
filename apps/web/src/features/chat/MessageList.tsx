@@ -349,7 +349,9 @@ function SubagentCard({
         <span className="shrink-0 text-[12px] text-brand-soft">
           {roleLabel(role) ?? t('chat.subagent.name')}
         </span>
-        <span className="shrink-0 text-[10.5px] text-faint">{rows.length} 步</span>
+        <span className="shrink-0 text-[10.5px] text-faint">
+          {t('chat.subagent.steps', { count: rows.length })}
+        </span>
         <span className="ml-auto shrink-0 text-[10px] text-faint">
           {open ? t('chat.card.collapse') : t('chat.card.expand')}
         </span>

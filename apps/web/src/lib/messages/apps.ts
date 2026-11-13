@@ -28,6 +28,9 @@ export const appsEn = {
   'apps.new.templateFailed': 'Could not load templates — the default react-vite will be used.',
   'apps.new.creating': 'Creating…',
   'apps.new.create': 'Create',
+
+  'apps.deleteConfirm':
+    'Delete "{name}"? Its code, database, logs and published backups go with it. This cannot be undone.',
 } as const
 
 export type AppsKey = keyof typeof appsEn
@@ -57,4 +60,6 @@ export const appsZh: Record<AppsKey, string> = {
   'apps.new.templateFailed': '模板列表没拉到，将使用默认的 react-vite。',
   'apps.new.creating': '创建中…',
   'apps.new.create': '创建',
+
+  'apps.deleteConfirm': '删除「{name}」？代码、数据库、日志和已发布的备份会一起删掉，不能恢复。',
 }
