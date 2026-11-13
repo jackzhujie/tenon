@@ -48,6 +48,13 @@ const server = await startServer({
 })
 console.log(`服务 ${server.url}`)
 
+/*
+ * 界面语言先钉成中文：下面用文字找按钮（「未配置模型」「添加提供商」）。
+ * 不钉的话在英文系统上一条都点不到 —— 而症状是"截图空白"，不是报错。
+ */
+server.core.settings.set({ 'ui.locale': 'zh' })
+
+
 function electronMain(): string {
   return `const { app, BrowserWindow } = require('electron')
 const url = ${JSON.stringify(server.url)}

@@ -35,6 +35,14 @@ const server = await startServer({
   webDir: join(repo, 'apps', 'web', 'dist'),
 })
 
+/*
+ * 下面的断言在中文界面里找字（「子 Agent」/「运行中」/「已结束」）。
+ * 这台机器的系统语言是 en-US，不钉的话界面说英文，那些 `includes` 全部落空 ——
+ * 表现是断言被跳过或红，看起来像功能坏了。
+ * 只写设置表不走 `setLocale()`：这里断言的全是界面文案，服务端消息一条都没断。
+ */
+server.core.settings.set({ 'ui.locale': 'zh' })
+
 const ANSWER = `## 排查结论
 
 **根因不在代码里**，在这台机器的 \`PATH\` 上。

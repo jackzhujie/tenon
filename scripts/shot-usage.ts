@@ -48,6 +48,9 @@ try {
     webDir: join(repo, 'apps', 'web', 'dist'),
   })
 
+  /* 断言在中文界面里找字（「全部应用」「还没跑过」）：系统语言是 en-US，得钉住 */
+  server.core.settings.set({ 'ui.locale': 'zh' })
+
   async function rpc<T>(method: string, input: unknown = {}): Promise<T> {
     const response = await fetch(`${server?.url}/rpc/${method}`, {
       method: 'POST',

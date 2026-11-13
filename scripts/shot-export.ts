@@ -32,6 +32,9 @@ const server: RunningServer = await startServer({
   webDir: join(repo, 'apps', 'web', 'dist'),
 })
 
+/* 断言在中文界面里找字（「正在连接」）：系统语言是 en-US 时界面说英文，这里得钉住 */
+server.core.settings.set({ 'ui.locale': 'zh' })
+
 async function rpc<T>(method: string, input: unknown = {}): Promise<T> {
   const response = await fetch(`${server.url}/rpc/${method}`, {
     method: 'POST',

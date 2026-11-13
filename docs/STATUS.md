@@ -3526,12 +3526,44 @@ Hub 地址与密钥 / 版本区间不接受 / 来自 Hub 计数 / 配置有问�
 验证：`check:i18n` 0 处、`shot:locale` 通过（中英切换 + 英文界面无 CJK）、
 `shot:plugins` 12 项全过、994 项测试、lint 0 error / 10 warning、typecheck 18 project。
 
+### 4.69 17 条提交第一次上 CI：两个只在真环境现形的问题
+
+i18n 六层 + DCO + 按键式诊断 + 护栏，17 条提交都先在本地跑绿才提交，但**一次都没推**。
+CI 最后一次运行是 11-11（`f32b934`），而那之后的所有东西 —— `dco` job、`check:i18n` 步骤、
+新的 `scripts/test/` 目录 —— 从没在真 runner 上跑过。
+
+推上去之后 `dco` job 一次就绿（`fetch-depth: 0` + `ref: pull_request.head.sha` 那两条推演是对的），
+另外两个平台各红一处，**都是"本机绿、CI 红"**，而且成因同类：
+
+| 平台 | 红在哪 | 真因 |
+|---|---|---|
+| windows | `check:i18n` 报几百处中文 | `walk` 用 `join` 拼出 `apps\web\src\lib\messages\...`，判据写的是 `lib/messages`（正斜杠）→ `includes` 永远不成立 → **整个中文文案表被当成界面代码扫** |
+| macOS | `e2e:hub` 第 7 节「提示里说了付费」 | runner 的系统语言是 en-US，而 i18n 之后服务端会按英文说 → `... is a paid component and cannot be downloaded yet`，断言在找「购买」 |
+
+两个都是**描述符 / 环境假设**问题，不是逻辑错。所以修法也不是改判断，是**归一**：
+
+- `isMessagesFile` 先把 `\` 和 `/` 统一再比，并且前后补 `/`（顺带让 `lib/messages-v2/` 不再蹭豁免）。
+  `scripts/test/check-i18n.test.ts` 10 条，其中 4 条**手动喂 Windows 风格字符串** ——
+  这类 bug 在 mac 上跑一万遍也复现不了，测试不能依赖 host 平台。
+- `e2e:hub` 起服务后 `rpc('settings.set', { values: { 'ui.locale': 'zh' } })`（真实用户的切语言路径，
+  同时更新设置表与进程语言）。顺带补了 4 个截图脚本（`shot:chat` / `shot:export` / `shot:settings` /
+  `shot:release`），它们的断言也在中文界面里找字，只是平时没人跑所以没人发现。
+
+**为什么值得记**：CI 的价值不是"把测试再跑一遍"，是**跑在你不会用的系统上**。这次的代价极小
+（两处各几分钟），但它俩都不可能在本机被发现 —— 一个需要 Windows 的分隔符，一个需要 en-US 的默认语言。
+顺带一提：`e2e:diff` / `e2e:release` 早就写了 `setLocale('zh')`，只有 `hub` 漏了 ——
+**"靠自觉"的规则漏掉一个必然发生**，所以补了护栏 `scripts/test/e2e-locale.test.ts`：
+断言里出现中文字面量的 `e2e-*` / `shot-*` 脚本，必须显式钉语言（5 处豁免写清"断的是脚本自己造的内容"）。
+
+验证：`e2e:hub` / `e2e:diff` / `e2e:release` 三条本地全过（本机就是 en-US，等于模拟 CI）；
+`check:i18n` 0 处；新增 11 条测试（i18n 判据 10 + 脚本语言 1）。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
 |---|---|
 | **"清完了"只对当时的判据成立 —— i18n 护栏已经栽了两次** | 第一版只扫 `packages/*/src`，漏掉 `generator/templates` 的 28 处；第二版三条判据漏掉「中文 + `{}` 插值」的 24 处（`已释放 {x}`、`{n} 错误`、`<div>装不上的 {n} 条</div>`，见 §4.68）。共性是**判据按"形状"枚举，而形状总会漏一种**。补护栏时先问"什么写法是我的正则匹配不到的"，再去数还剩多少 |
-| **脚本的断言语言必须和它驱动的界面语言一起钉死** | `shot:plugins` 的断言全是中文文案，但脚本没设 `ui.locale` —— 在英文系统上跑 4 条整片红，看起来像功能坏了（实际界面好好的）。截图类脚本一律先 `settings.set ui.locale`，再按该语言断言 |
+| **脚本的断言语言必须和它驱动的界面语言一起钉死** | `shot:plugins` 的断言全是中文文案，但脚本没设 `ui.locale` —— 在英文系统上跑 4 条整片红，看起来像功能坏了（实际界面好好的）。截图类脚本一律先 `settings.set ui.locale`，再按该语言断言。**同一个坑第二次踩在 CI 上**：`e2e:hub` 第 7 节断言「提示里说了付费」，而 CI runner 是 en-US → i18n 之后服务端按英文说 → 断言在找「购买」，整条红（`e2e:diff` / `e2e:release` 早就 `setLocale('zh')`，只有 hub 漏了）。现在有护栏 `scripts/test/e2e-locale.test.ts`：**断言里出现中文字面量的 `e2e-*` / `shot-*` 脚本，必须显式钉语言**，否则测试红 |
 | **改组件的 `.ts` 之后测试仍读到旧消息** | `packages/server/test/*` 直接 `import` 的是 `plugins/bundled/*/server.js` —— `build:plugins` 的产物（在 `.gitignore` 里）。改了 `.ts` 不重建，跑的还是旧 bundle，症状是「改了半天没生效」。`pnpm test` 有 `pretest` 会先构建，但 `vitest run <单个文件>` **不会** |
 | **`grep -c Signed-off-by` 数出来的是假数** | 本仓库数出 71，真正的 trailer 是 **0** —— 多出来的全是提交正文里**提到**这个词（讲这条规则本身的那些提交）。判签名只能用 `%(trailers:key=Signed-off-by,valueonly)`：git 只把末尾那段连续的行当 trailer，正文中间的示例行不算，按行 grep 必然误判。推而广之：任何「数一数」的统计只对当时那个匹配口径成立 |
 | **浅克隆里 `git rev-list base..head` 报 `bad revision`** | `actions/checkout` 默认 `fetch-depth: 1`，base 那个 sha 根本不在本地。而门禁把「没跑成」判成失败（这是对的，否则坏了也算绿）→ **每个 PR 都红**。要 `fetch-depth: 0`；另外 PR 上的 `GITHUB_SHA` 是 GitHub 造的 **merge 提交**，不是要查的 head，得显式 `ref: pull_request.head.sha` |

@@ -175,6 +175,18 @@ try {
   })
   console.log(`   server = ${server.url}`)
 
+  /*
+   * 语言先钉成中文：下面第 7 节断言的是"提示里说清了为什么不能下载"，看的是中文原话。
+   * 不钉的话，CI runner 的系统语言是 en-US → 服务端按英文说 →
+   * `tenon.official.approval is a paid component and cannot be downloaded yet`
+   * 而断言在找「购买」或「付费」，整条红。看起来像功能坏了，其实只是脚本在按中文找词。
+   *
+   * 走真实的 `settings.set`（用户的切语言路径）而不是直接 `setLocale()`：
+   * 它同时更新设置表与进程级语言，和界面上点一下的效果一样。
+   * 要验英文那一侧，去跑 `packages/server/test/locale.test.ts`。
+   */
+  await rpc(server, 'settings.set', { values: { 'ui.locale': 'zh' } })
+
   const status = await rpc<{
     configured: boolean
     hubUrl: string | null
