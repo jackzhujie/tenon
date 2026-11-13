@@ -26,7 +26,7 @@ import {
   type PluginRoot,
 } from '@tenon/component-host'
 import { appPaths, type ComponentStore, type TenonHome } from '@tenon/core'
-import { msg, TenonError, type ComponentProblem } from '@tenon/protocol'
+import { getLocale, msg, TenonError, type ComponentProblem } from '@tenon/protocol'
 import { createAssistant, type AgentRuntime, type AssistantCapability } from '@tenon/agent'
 
 /**
@@ -67,6 +67,11 @@ export interface FacetActivation {
    */
   readonly storage?: ComponentStorage
   readonly log: (line: string) => void
+  /**
+   * 当前界面语言。**是函数不是值** —— 激活结果跟着应用缓存，而语言随时会改。
+   * 组件要给人看的报错（会出现在界面上）取它；写日志、写仓库的字仍用英文。
+   */
+  readonly getLocale: () => string
 }
 
 export interface FacetModule {
@@ -172,6 +177,12 @@ export async function activateComponents(options: ActivateOptions): Promise<Acti
         brain: options.brain,
         // 没权限时**不传这个字段**，而不是传 undefined：组件拿到的是"没有这个属性"
         ...(storage === undefined ? {} : { storage }),
+        /*
+         * 语言传**函数**不传值。组件的报错会显示在界面上，而这块激活结果跟着应用
+         * 缓存（语言改了也不重建），传值的话"切到中文之后组件的报错还是英文"，
+         * 直到应用重启为止。getter 让它在每次说话时现取。
+         */
+        getLocale,
         log,
       })
       loaded.push(target.id)

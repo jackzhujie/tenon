@@ -9,8 +9,10 @@
  * ## 三类例外，都按「为什么」而不是「哪一行」豁免
  *
  * 1. `protocol/src/messages/**` —— 文案表本身，两语言就是它的用途
- * 2. `plugins/bundled/*​/web.ts` —— 组件自带的 en/zh 小表：组件是独立分发单元，
- *    不能依赖宿主的文案表（那会把 30KB 文案塞进每个组件）
+ * 2. `plugins/bundled/*​/web.ts` 与 `*​/server.ts` —— 组件自带的 en/zh 小表：组件是
+ *    独立分发单元，不能依赖宿主的文案表（那会把 30KB 文案塞进每个组件）。
+ *    半边的语言来源不同（web 从 `window.__tenonLocale`，server 从 `ActivateInput.getLocale`），
+ *    但"各带一张小表"是同一件事，所以按**文件名**豁免，不按半边
  * 3. 提示词里 `"Did not run" / "没跑成"` —— **故意同时点名两种语言**：检查项结论会随
  *    界面语言变，模型必须两版都认得
  *
@@ -30,8 +32,8 @@ const SCOPES = ['packages', 'plugins']
 const ALLOWED = [
   // 文案表：两语言就是它的用途
   /^packages[\\/]protocol[\\/]src[\\/]messages[\\/]/,
-  // 组件自带的 en/zh 小表
-  /^plugins[\\/]bundled[\\/][^\\/]+[\\/]web\.ts$/,
+  // 组件自带的 en/zh 小表（浏览器半边与服务端半边各一张，理由见文件头第 2 条）
+  /^plugins[\\/]bundled[\\/][^\\/]+[\\/](web|server)\.ts$/,
 ]
 
 function walk(dir: string, out: string[] = []): string[] {

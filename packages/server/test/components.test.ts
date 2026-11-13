@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHost, memoryLinkPair, type Host } from '@earendil-works/chord'
 import { writeAssembly } from '@tenon/component-host'
+import { getLocale, setLocale } from '@tenon/protocol'
 import { activateComponents, type Principal } from '../src/components.js'
 import { activate, type AssistantBrain } from '../../../plugins/bundled/tenon.official.ai-assistant/server.js'
 import { Assistant } from '../../../plugins/bundled/tenon.official.ai-assistant/contract.js'
@@ -111,6 +112,42 @@ describe('装载 server facet', () => {
     expect(activated.loaded).toEqual(['tenon.test.good'])
     expect(activated.problems[0]?.message).toContain('故意的')
     await activated.host.close()
+  })
+
+  /**
+   * 接线级：宿主必须把语言**当函数**递下去（`getLocale`），不是递一个值。
+   *
+   * 为什么这条不能省：下面组件自己的测试验的是"拿到 getter 就会变"，而那一半全绿
+   * 也说明不了宿主真的递了东西 —— 漏传时组件退回英文，界面上只是"中文环境里冒出
+   * 一句英文"，没有任何东西会红。摘掉 `components.ts` 里那个 `getLocale,` 就会红在这里。
+   */
+  it('activate 拿到的是语言 getter（不是快照）', async () => {
+    await fixture(
+      'tenon.test.locale',
+      'export function activate(input) { globalThis.__tenonLocaleProbe = input.getLocale }',
+    )
+    const repoDir = await assemble(['tenon.test.locale'])
+
+    setLocale('zh')
+    const activated = await activateComponents({
+      appId: 'app-4',
+      repoDir,
+      roots: [{ kind: 'bundled', dir: roots }],
+      tenonVersion: '0.0.0',
+      brain,
+    })
+    try {
+      const probe = (globalThis as { __tenonLocaleProbe?: () => string }).__tenonLocaleProbe
+      expect(typeof probe).toBe('function')
+      expect(probe?.()).toBe('zh')
+      // 换语言之后同一个 getter 要给出新值 —— 快照会让这里还是 zh
+      setLocale('en')
+      expect(probe?.()).toBe('en')
+      expect(probe?.()).toBe(getLocale())
+    } finally {
+      setLocale('zh')
+      await activated.host.close()
+    }
   })
 
   it('装配声明坏掉时不抛：host 照样建好，问题留给 component.list', async () => {

@@ -26,6 +26,36 @@ export interface ActivateInput {
   readonly appId: string
   readonly brain: AssistantBrain
   readonly log?: (line: string) => void
+  /** 当前界面语言。**getter 不是值**：激活结果跟着应用缓存，语言却随时会改 */
+  readonly getLocale?: () => string
+}
+
+/*
+ * ── 语言 ────────────────────────────────────────────────
+ *
+ * 服务端半边拿不到 `window.__tenonLocale`（那是浏览器半边的通道），语言由宿主在
+ * `activate` 时递一个 getter 进来，每次要说话时现取。各组件自带 en/zh 小表，
+ * 不 import 宿主文案表 —— 组件是独立分发单元。
+ */
+type Locale = 'en' | 'zh'
+
+const TEXT = {
+  principal: {
+    en: (appId: string, other: string) => `this component belongs to app ${appId}, not ${other}`,
+    zh: (appId: string, other: string) => `这个组件属于应用 ${appId}，不是 ${other}`,
+  },
+  emptyQuestion: {
+    en: () => 'the question cannot be empty',
+    zh: () => '问题不能为空',
+  },
+  busy: {
+    en: () => 'the previous question is still being answered',
+    zh: () => '上一个问题还在回答中',
+  },
+  failed: {
+    en: (reason: string) => `Could not answer: ${reason}`,
+    zh: (reason: string) => `没能回答：${reason}`,
+  },
 }
 
 /**
@@ -38,13 +68,15 @@ const LINGER_MS = 30 * 60_000
 
 export function activate(input: ActivateInput): void {
   const { host, appId, brain, log } = input
+  /** 现取，不快照 —— 见 TEXT 上面那段 */
+  const locale = (): Locale => (input.getLocale?.() === 'zh' ? 'zh' : 'en')
 
   host.serve(
     Assistant,
     ({ appId: inputAppId }, principal, self) => {
       if (inputAppId !== appId || principal.appId !== appId) {
         // 一个组件的对象不该被别的应用拿到：input 与 principal 都必须指向这个应用
-        throw invalid('principal', `this component belongs to app ${appId}, not ${inputAppId}`)
+        throw invalid('principal', TEXT.principal[locale()](appId, inputAppId))
       }
 
       // 名字不能叫 status（chord 的 Ref 自带 status）—— 见 contract.ts 的说明
@@ -60,9 +92,9 @@ export function activate(input: ActivateInput): void {
 
         ask: async ({ text }, ctx) => {
           const question = text.trim()
-          if (question === '') throw invalid('input', 'the question cannot be empty')
+          if (question === '') throw invalid('input', TEXT.emptyQuestion[locale()]())
           // 不排队：并发提问会让两条回答交错写进同一个 transcript，读起来像模型精神分裂
-          if (phase.value === 'thinking') throw invalid('busy', 'the previous question is still being answered')
+          if (phase.value === 'thinking') throw invalid('busy', TEXT.busy[locale()]())
 
           messages.change(ctx, (list) => [...list, { role: 'user', text: question }])
           phase.replace(ctx, 'thinking')
@@ -78,7 +110,7 @@ export function activate(input: ActivateInput): void {
              */
             const reason = error instanceof Error ? error.message : String(error)
             log?.(`[assistant] failed to answer: ${reason}`)
-            messages.change(ctx, (list) => [...list, { role: 'system', text: `Could not answer: ${reason}` }])
+            messages.change(ctx, (list) => [...list, { role: 'system', text: TEXT.failed[locale()](reason) }])
           } finally {
             phase.replace(ctx, 'idle')
           }

@@ -134,7 +134,7 @@
 | 3.10 | Linux 桌面端 | README：M7 后置；CI 出 AppImage 但无 GUI 验证 | M | 真机启动 + 冒烟；或明确宣布不做 |
 | 3.11 | ✅ **DCO 真的开始拦人了 —— 已完成（2026-11-13）** | `CONTRIBUTING` 从 M0 就写着「必须带 `Signed-off-by`」，而仓库里 71 个提交一个都没有。它是**漏了也不会让任何东西坏掉**的那类规则，所以没人发现。现在 CI 多一个独立的 `dco` job，本地可先跑 `pnpm check:dco`。判定交给 git 自己的 trailer 解析器（正文里提到这个词不算：`grep -c` 在本仓库数出 71，真 trailer 是 0）；只看新增提交、不追溯历史；merge 与 bot 提交跳过，签名邮箱匹配 author 或 committer 之一即可。脚本自带 10 条测试（真 git 仓库，不 mock）。见 STATUS §4.65 | XS | ✅ 漏签的提交让 CI 红；本地一条命令能先跑 |
 | 3.12 | 第三方组件上架与审核 | DESIGN §17：M7 后置 | L | 不排期 |
-| 3.13 | 组件的 server 侧报错只有英文 | `plugins/bundled/**` 的字符串字面量不许有 CJK（`i18n-guard` 的硬约束），于是 CSV 导出与审批流在 server facet 里抛的错（`… would be misaligned` / `… cannot be reviewed again`）原样显示在中文界面上。web 侧另有 `window.__tenonLocale` 通道，server 侧没有 | S | 给 activate 的 `ActivateInput` 加 locale（或允许 `plugins/` 里出现 `msg()` 双语表），并让宿主的调用点传当前语言 |
+| 3.13 | ✅ **组件 server 侧的报错也会说中文了 —— 已完成（2026-11-13）** | `ActivateInput` 多一个 `getLocale`（**函数不是值**），`activateComponents` 激活时把 protocol 的 `getLocale` 递下去；三个组件的 server 半边各带一张 en/zh 小表（与 `web.ts` 同一套做法，11 处文案）。为什么必须是 getter：激活结果跟着应用**缓存**，语言随时会改 —— 快照会让"切到中文之后组件的报错还是英文"直到应用重启。`i18n-guard` 的豁免从 `web.ts` 扩到 `(web\|server).ts`，理由写在文件头。测试：组件 8 项（含「同一个激活结果里换语言立刻生效」）+ 接线级 1 项（摘掉 `components.ts` 里那行 `getLocale,` 就会红）。见 STATUS §4.66 | S | ✅ 中文界面上组件报错说中文；英文界面说英文；切语言立刻生效 |
 
 ---
 

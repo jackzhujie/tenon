@@ -38,12 +38,19 @@ afterEach(async () => {
  * **必须 await activate**：组件的 activate 可以是 async 的（审批流要先从存储恢复数据，
  * 再 `host.serve`）。不等它就去连接，会撞上"这个 contract 还没人 serve" —— 而生产代码
  * 里 `activateComponents` 是 await 的，所以是测试要跟上，不是组件写错。
+ *
+ * `locale` 传的是**函数**：组件拿到的也是函数（`ActivateInput.getLocale`），
+ * 这样才验得了"同一个激活结果里切语言，报错跟着变"。
  */
-async function connect(activate: (input: {
-  host: Host<Principal>
-  appId: string
-  brain: typeof brain
-}) => void | Promise<void>): Promise<Host<Principal>> {
+async function connect(
+  activate: (input: {
+    host: Host<Principal>
+    appId: string
+    brain: typeof brain
+    getLocale: () => string
+  }) => void | Promise<void>,
+  locale: () => 'zh' | 'en' = () => 'zh',
+): Promise<Host<Principal>> {
   const appId = 'app-1'
   const server = createHost<Principal>({
     name: 'server',
@@ -52,7 +59,7 @@ async function connect(activate: (input: {
     dev: true,
     onError: (error) => console.log('server host:', error instanceof Error ? error.message : error),
   })
-  await activate({ host: server, appId, brain })
+  await activate({ host: server, appId, brain, getLocale: locale })
   hosts.push(server)
 
   const [serverSide, clientSide] = memoryLinkPair()
@@ -116,9 +123,8 @@ describe('导出 CSV', () => {
         .then(() => 'allowed', (error: unknown) => (error instanceof Error ? error.message : String(error)))
     })
     expect(outcome).not.toBe('allowed')
-    // 组件 server 侧的报错是英文单语：`plugins/bundled/**` 的字符串字面量不许有 CJK
-    // （i18n-guard 的硬约束，见 STATUS §2「生成应用的模板与导出产物」那行）
-    expect(String(outcome)).toContain('misaligned')
+    // 组件 server 侧的报错跟界面语言走（`ActivateInput.getLocale`），测试默认 zh
+    expect(String(outcome)).toContain('错位')
   })
 })
 
@@ -160,8 +166,33 @@ describe('审批流', () => {
     })
     expect(outcome.empty).not.toBe('allowed')
     expect(outcome.again).not.toBe('allowed')
-    // 同上：组件 server 侧英文单语
-    expect(String(outcome.again)).toContain('cannot be reviewed again')
+    expect(String(outcome.again)).toContain('不能再审')
+  })
+
+  /**
+   * 「语言是 getter 不是快照」这条设计只有一种方式能守住：在**同一个激活结果**上换语言。
+   *
+   * 换成快照的话，这个测试会红在第二段 —— 因为激活时就记住了 zh，之后不会变。
+   * 而现实里正是这个顺序：应用先在中文下跑，用户去设置页切成英文，然后组件报错。
+   */
+  it('报错跟着界面语言走 —— 同一个激活结果里换语言也立刻生效', async () => {
+    let locale: 'zh' | 'en' = 'zh'
+    const ui = await connect(activateApproval, () => locale)
+
+    const submitEmpty = async (): Promise<string> =>
+      ui.root(async (ctx) => {
+        const ref = await ctx.get(Approval, { appId: 'app-1' })
+        return ref
+          .submit({ title: '   ' }, ctx)
+          .then(
+            () => 'allowed',
+            (error: unknown) => (error instanceof Error ? error.message : String(error)),
+          )
+      })
+
+    expect(await submitEmpty()).toContain('标题不能为空')
+    locale = 'en'
+    expect(await submitEmpty()).toContain('the title cannot be empty')
   })
 
   it('状态跨 root 还在（linger）', async () => {

@@ -18,6 +18,34 @@ export interface ActivateInput {
   readonly appId: string
   readonly brain: { complete(input: { appId: string; text: string }): Promise<string> }
   readonly log?: (line: string) => void
+  /** 当前界面语言。**getter 不是值**：激活结果跟着应用缓存，语言却随时会改 */
+  readonly getLocale?: () => string
+}
+
+/*
+ * ── 语言 ────────────────────────────────────────────────
+ *
+ * 报错最终显示在界面上，所以要跟界面语言走。服务端半边拿不到 `window.__tenonLocale`
+ * （那是浏览器半边的东西），语言由宿主在 `activate` 时递一个 getter 进来。
+ * 各组件自带 en/zh 小表，不 import 宿主文案表 —— 组件是独立分发单元。
+ */
+type Locale = 'en' | 'zh'
+
+const TEXT = {
+  principal: {
+    en: (appId: string, other: string) => `this component belongs to app ${appId}, not ${other}`,
+    zh: (appId: string, other: string) => `这个组件属于应用 ${appId}，不是 ${other}`,
+  },
+  emptyHeader: {
+    en: () => 'this table has no header row, so it cannot be exported as CSV',
+    zh: () => '这张表没有表头，导不出 CSV',
+  },
+  shape: {
+    en: (row: number, cells: number, columns: number) =>
+      `row ${row} has ${cells} cells but the header has ${columns} — the export would be misaligned`,
+    zh: (row: number, cells: number, columns: number) =>
+      `第 ${row} 行有 ${cells} 个单元格，表头是 ${columns} 列 —— 导出来会错位`,
+  },
 }
 
 const LINGER_MS = 10 * 60_000
@@ -41,12 +69,14 @@ function safeName(raw: string): string {
 
 export function activate(input: ActivateInput): void {
   const { host, appId, log } = input
+  /** 现取，不快照 —— 见 TEXT 上面那段 */
+  const locale = (): Locale => (input.getLocale?.() === 'zh' ? 'zh' : 'en')
 
   host.serve(
     ExportTable,
     ({ appId: inputAppId }, principal, self) => {
       if (inputAppId !== appId || principal.appId !== appId) {
-        throw invalid('principal', `this component belongs to app ${appId}, not ${inputAppId}`)
+        throw invalid('principal', TEXT.principal[locale()](appId, inputAppId))
       }
       const phase = self.state('phase', Type.String(), 'idle')
       const lastFile = self.state('lastFile', Type.String(), '')
@@ -59,12 +89,12 @@ export function activate(input: ActivateInput): void {
         rows: rowsState,
 
         export: async ({ filename, columns, rows }, ctx) => {
-          if (columns.length === 0) throw invalid('empty', 'this table has no header row, so it cannot be exported as CSV')
+          if (columns.length === 0) throw invalid('empty', TEXT.emptyHeader[locale()]())
           const wrong = rows.findIndex((row) => row.length !== columns.length)
           if (wrong !== -1) {
             throw invalid(
               'shape',
-              `row ${wrong + 1} has ${rows[wrong]?.length ?? 0} cells but the header has ${columns.length} — the export would be misaligned`,
+              TEXT.shape[locale()](wrong + 1, rows[wrong]?.length ?? 0, columns.length),
             )
           }
           const file = safeName(filename)

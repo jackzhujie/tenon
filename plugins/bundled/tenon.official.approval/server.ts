@@ -37,6 +37,43 @@ export interface ActivateInput {
   /** 清单里没声明 `db:read` / `db:write` 时是 undefined */
   readonly storage?: StorageLike
   readonly log?: (line: string) => void
+  /**
+   * 当前界面语言。**传的是 getter，不是值** —— 激活结果跟着应用缓存
+   * （`components.ts`：预览反复起停不该重建对象），而语言随时会被改。
+   * 快照的后果是"切到中文之后，组件的报错还是英文"，直到应用重启。
+   */
+  readonly getLocale?: () => string
+}
+
+/*
+ * ── 语言 ────────────────────────────────────────────────
+ *
+ * 浏览器半边从 `window.__tenonLocale` 拿语言（见 `web.ts`），服务端半边拿不到 ——
+ * 它在服务器进程里，跨端只有 `activate` 那一次调用，所以语言由宿主递一个 getter 进
+ * （`ActivateInput.getLocale`），每次报错时现取。
+ *
+ * 组件是**独立分发单元**：不 import 宿主的文案表（那会把几十 KB 塞进每个组件），
+ * 各带一张 en/zh 小表 —— 与 `web.ts` 同一套做法。
+ */
+type Locale = 'en' | 'zh'
+
+const TEXT = {
+  principal: {
+    en: (appId: string, other: string) => `this component belongs to app ${appId}, not ${other}`,
+    zh: (appId: string, other: string) => `这个组件属于应用 ${appId}，不是 ${other}`,
+  },
+  emptyTitle: {
+    en: () => 'the title cannot be empty',
+    zh: () => '标题不能为空',
+  },
+  missing: {
+    en: (id: string) => `no item with id ${id}`,
+    zh: (id: string) => `没有编号为 ${id} 的单子`,
+  },
+  settled: {
+    en: (id: string, state: string) => `${id} is already ${state} and cannot be reviewed again`,
+    zh: (id: string, state: string) => `${id} 已经是「${state}」，不能再审一次`,
+  },
 }
 
 const LINGER_MS = 2 * 60 * 60_000
@@ -84,6 +121,8 @@ async function restore(storage: StorageLike | undefined, log?: (line: string) =>
 
 export async function activate(input: ActivateInput): Promise<void> {
   const { host, appId } = input
+  /** 现取，不快照 —— 见 TEXT 上面那段 */
+  const locale = (): Locale => (input.getLocale?.() === 'zh' ? 'zh' : 'en')
 
   if (input.storage === undefined) {
     input.log?.('[approval] no db:read / db:write permission; approvals live in memory only (lost on restart)')
@@ -94,7 +133,7 @@ export async function activate(input: ActivateInput): Promise<void> {
     Approval,
     ({ appId: inputAppId }, principal, self) => {
       if (inputAppId !== appId || principal.appId !== appId) {
-        throw invalid('principal', `this component belongs to app ${appId}, not ${inputAppId}`)
+        throw invalid('principal', TEXT.principal[locale()](appId, inputAppId))
       }
       const phase = self.state('phase', Type.String(), 'idle')
       /*
@@ -131,7 +170,7 @@ export async function activate(input: ActivateInput): Promise<void> {
 
         submit: async ({ title }, ctx) => {
           const text = title.trim()
-          if (text === '') throw invalid('empty', 'the title cannot be empty')
+          if (text === '') throw invalid('empty', TEXT.emptyTitle[locale()]())
           const id = `AP-${nextId++}`
           items.change(ctx, (list) => [...list, { id, title: text, state: 'submitted' }])
           phase.replace(ctx, 'submitted')
@@ -142,9 +181,9 @@ export async function activate(input: ActivateInput): Promise<void> {
 
         decide: async ({ id, approve }, ctx) => {
           const item = items.value.find((entry) => entry.id === id)
-          if (item === undefined) throw invalid('missing', `no item with id ${id}`)
+          if (item === undefined) throw invalid('missing', TEXT.missing[locale()](id))
           if (item.state !== 'submitted') {
-            throw invalid('settled', `${id} is already ${item.state} and cannot be reviewed again`)
+            throw invalid('settled', TEXT.settled[locale()](id, item.state))
           }
           items.change(ctx, (list) =>
             list.map((entry) =>

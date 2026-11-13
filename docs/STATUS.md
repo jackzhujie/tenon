@@ -223,7 +223,7 @@ GUI 类（`apps` / `component` / `inspector` / `e2e` / `real` / `packaged`）**�
 | **界面语言** | **中英两套，跟随系统、英文兜底**；真相存服务端 `settings.ui.locale`，本机 `localStorage` 只做首屏缓存（避免闪）。切入口在顶栏，不藏在设置里 |
 | **系统生成的文本** | **服务端也按这个语言说话**：`packages/protocol/src/locale.ts` 持有进程级当前语言（服务端启动读设置、`settings.set` 时更新，网页在 Provider 里同步同一个值），`messages/*.ts` 是"服务端会念给用户听"的文案表（错误消息 + 门禁结论 + 组件系统 + 远端指路）。**控制台日志与 git 历史仍是单一英文** —— 它们会离开这台机器、被 `git log` 与 grep 读，两种语言的历史等于搜不齐。判定口诀：**会离开这台机器的写英文，只在界面上出现的做双语** |
 | **给模型看的字** | **一律英文，且不随界面语言变**：角色提示词（`roles.ts`）、工具 description 与参数说明、工具结果与错误（`tools/*.ts`）、`formatTscReport`、写进应用仓库的 `docs/AGENTS.md`。理由不是"英文更好"，是两部分别成立的事实：① 这些字同时是模型的输入，混语言会改模型行为（开始用中文思考、把工具名写成中文），而且没法测；② 其中一半会跟着应用仓库离开本机。**唯一例外**：引用检查项结论时要同时点名 `Did not run` / `没跑成` —— 那是"给人看的字"，会随界面语言变，模型必须两版都认得。护栏在 `packages/agent/test/prompts-english.test.ts`（角色提示词 + 全部工具描述扫 CJK） |
-| **组件（注入进应用页面的脚本）** | **跟界面语言，但不是一次翻译**：组件跑在预览 iframe 里、拿不到 i18n Context，语言由网关注入时递过去（`window.__tenonLocale` + `tenon:locale` 消息/事件），切语言时 `PreviewPanel` 往 iframe 广播。组件内部各带一张 `en`/`zh` 小表（**不依赖 `@tenon/protocol` 的整张文案表** —— 那会把 30KB 文案塞进每个组件），状态类文字按"当前状态"重画。三个名字共用 `protocol/src/component-locale.ts` 的常量 |
+| **组件（注入进应用页面的脚本）** | **跟界面语言，但不是一次翻译**：组件跑在预览 iframe 里、拿不到 i18n Context，语言由网关注入时递过去（`window.__tenonLocale` + `tenon:locale` 消息/事件），切语言时 `PreviewPanel` 往 iframe 广播。组件内部各带一张 `en`/`zh` 小表（**不依赖 `@tenon/protocol` 的整张文案表** —— 那会把 30KB 文案塞进每个组件），状态类文字按"当前状态"重画。三个名字共用 `protocol/src/component-locale.ts` 的常量。**服务端半边（server facet）另走一条**：它在服务器进程里，跨端只有 `activate` 一次，所以宿主递 `getLocale` **函数而不是值**（激活结果跟着应用缓存，语言随时会改）—— 见 §4.66 |
 | **生成应用的模板与导出产物** | **一律英文，不跟界面语言走**。`packages/generator/templates/**` 是**应用的源码**（生成后进用户仓库、也是模型读它来改代码）；`export.ts` 渲染的 README / start.sh / .env.example / Dockerfile / compose 会部署到别处。跟着界面语言翻的后果是：同一份模板在中英文机器上产出两种代码，同一份部署包发给中英文同事两种文档。**护栏 `i18n-guard.test.ts` 扫全仓字符串字面量**（`packages/*/src` + `plugins/bundled` + `generator/templates`），回流当场红 |
 
 ---
@@ -3393,10 +3393,59 @@ author 与 committer 不同 / `[bot]` 地址在中间 / merge 跳过 / 区间只
 
 测试计数 961 → 971。
 
+### 4.66 组件 server 侧的报错也会说中文了（BACKLOG 3.13）
+
+**上一轮留下的尾巴**：i18n 收尾时 `plugins/bundled/**` 的字符串字面量不许有 CJK
+（`i18n-guard` 的硬约束），三个组件的 server 半边只好把报错改成英文。结果中文用户在
+界面上看到的是 `row 1 has 1 cells but the header has 2 — the export would be misaligned`。
+当时那条测试也跟着断言英文（§4.65 第五节顺手改的）—— **两边都是"绿"的，而用户看到英文。**
+
+#### 一、语言必须是函数，不能是值
+
+组件的 server 半边跑在服务器进程里，拿不到 `window.__tenonLocale`（那是浏览器半边的通道），
+跨进程只有 `activate` 那一次调用。所以宿主递一个 getter（`ActivateInput.getLocale`）：
+
+| 传值（错） | 传函数（对） |
+|---|---|
+| 激活时记住语言 → 用户去设置页切了语言 → 组件的报错还是旧语言，**直到应用重启** | 每次报错时现取 → 切语言立刻生效 |
+
+为什么"激活那一刻"是真实的风险点：激活结果**跟着应用缓存**（`components.ts` 的设计，
+预览反复起停不该重建对象、状态不能归零），所以它就发生一次。
+
+#### 二、小表还是共享文案表
+
+组件是**独立分发单元**：不 import 宿主的文案表（那会把 30KB 塞进每个组件）。
+`web.ts` 早就各带一张 en/zh 小表，server 侧照抄 —— 于是 `i18n-guard` 的豁免从 `web.ts`
+扩到 `(web|server).ts`，理由按「为什么」写：不是"这个文件特殊"，是"组件自带小表"这件
+事在两个半边都成立。
+
+11 处文案：审批流 4（principal / 空标题 / 无此单 / 已决再审）、CSV 导出 3（principal /
+无表头 / 列数错位）、AI 小助手 4（principal / 空问题 / 正忙 / 回答失败）。
+
+#### 三、验证
+
+| 测什么 | 怎么测 | 结果 |
+|---|---|---|
+| 带插值也对 | 组件测试 7 → 8 项，断言回到中文（「错位」「不能再审」） | ✅ |
+| **同一个激活结果里换语言** | 两次 `submit('   ')`，中间改 getter 的返回值 | ✅ zh → en 立刻变 |
+| **宿主真的递了 getter** | 假组件把 `input.getLocale` 存到 `globalThis`，测试再改 `setLocale` | ✅ 摘掉 `components.ts` 里那行 `getLocale,` 就会红 |
+
+最后一条是**接线级**：组件自己的测试全绿也说明不了宿主递了东西 —— 漏传时组件退回英文，
+界面上只是"中文环境里冒出一句英文"，没有任何东西会红。
+
+#### 四、一个把人骗了十分钟的坑
+
+改完 `.ts` 跑测试，还是英文。**测试 import 的是 `plugins/bundled/*/server.js`** ——
+那是 `build:plugins` 的产物（在 `.gitignore` 里）。`pnpm test` 有 `pretest` 会先构建，
+但 `vitest run <单个文件>` 不会。所以"改了没生效"其实是"跑的是旧 bundle"。记进 §5。
+
+测试计数 971 → 973。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
 |---|---|
+| **改组件的 `.ts` 之后测试仍读到旧消息** | `packages/server/test/*` 直接 `import` 的是 `plugins/bundled/*/server.js` —— `build:plugins` 的产物（在 `.gitignore` 里）。改了 `.ts` 不重建，跑的还是旧 bundle，症状是「改了半天没生效」。`pnpm test` 有 `pretest` 会先构建，但 `vitest run <单个文件>` **不会** |
 | **`grep -c Signed-off-by` 数出来的是假数** | 本仓库数出 71，真正的 trailer 是 **0** —— 多出来的全是提交正文里**提到**这个词（讲这条规则本身的那些提交）。判签名只能用 `%(trailers:key=Signed-off-by,valueonly)`：git 只把末尾那段连续的行当 trailer，正文中间的示例行不算，按行 grep 必然误判。推而广之：任何「数一数」的统计只对当时那个匹配口径成立 |
 | **浅克隆里 `git rev-list base..head` 报 `bad revision`** | `actions/checkout` 默认 `fetch-depth: 1`，base 那个 sha 根本不在本地。而门禁把「没跑成」判成失败（这是对的，否则坏了也算绿）→ **每个 PR 都红**。要 `fetch-depth: 0`；另外 PR 上的 `GITHUB_SHA` 是 GitHub 造的 **merge 提交**，不是要查的 head，得显式 `ref: pull_request.head.sha` |
 | **机器人的 `[bot]` 不在邮箱末尾** | 真地址是 `49699333+dependabot[bot]@users.noreply.github.com` —— `endsWith('[bot]')` 永远为假，于是 dependabot 的提交会稳定地让门禁红。用 `/\[bot\]/i` 判（名字一侧才是后缀） |
