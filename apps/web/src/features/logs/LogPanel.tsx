@@ -21,6 +21,7 @@ import { cn } from '../../lib/cn.js'
 import { buildLogPrompt } from '../../lib/log-prompt.js'
 import { useT } from '../../lib/i18n.js'
 import type { LogsKey } from '../../lib/messages/logs.js'
+import { DiagnosticsDialog } from './DiagnosticsDialog.js'
 
 const SOURCE_KEY: Record<LogSource, LogsKey> = {
   web: 'log.source.web',
@@ -85,6 +86,7 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all')
   const [hiddenSources, setHiddenSources] = useState<LogSource[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [diagOpen, setDiagOpen] = useState(false)
   const listRef = useRef<HTMLDivElement | null>(null)
   const seenErrorRef = useRef(0)
 
@@ -129,6 +131,8 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
           onClick={() => setOpen((value) => !value)}
           className="flex items-center gap-1.5 text-[11.5px] text-muted hover:text-ink"
           title={open ? t('log.collapse') : t('log.expand')}
+          /** 截图脚本靠它开合面板，别去按文案匹配（文案会跟语言变） */
+          data-log-toggle
         >
           <ChevronDownIcon
             className={cn('size-3 transition-transform', open ? 'rotate-0' : '-rotate-90')}
@@ -205,6 +209,20 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
                 title={t('log.clearTitle')}
               >
                 {t('log.clear')}
+              </Button>
+              {/*
+               * 放在日志面板里而不是设置页：用户"觉得哪里不对"的那一刻就在这里，
+               * 挪到设置页等于让他先离开现场、再去回忆刚才发生了什么。
+               */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="px-1.5 text-[10.5px] text-faint hover:text-ink"
+                onClick={() => setDiagOpen(true)}
+                title={t('log.diag.intro')}
+                data-diagnostics
+              >
+                {t('log.diag.button')}
               </Button>
             </>
           )}
@@ -301,6 +319,10 @@ export function LogPanel({ appId, logs, onClear, onAskFix }: LogPanelProps) {
             )
           })}
         </div>
+      )}
+
+      {diagOpen && (
+        <DiagnosticsDialog appId={appId} onClose={() => setDiagOpen(false)} />
       )}
     </div>
   )

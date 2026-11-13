@@ -37,6 +37,22 @@ export const logsEn = {
   'log.prompt.truncated': '\n… (truncated)',
   'log.prompt.context': 'Earlier log lines (context):',
   'log.prompt.outro': 'When done, tell me which files you changed and why.',
+
+  /* ---- 诊断信息：用户按一下才生成，永远不自动发送 ---- */
+  'log.diag.title': 'Diagnostics',
+  'log.diag.button': 'Diagnostics',
+  'log.diag.intro':
+    'Nothing is sent automatically. Below is the exact text — already redacted — that you would share. Read it first: only you know what counts as private in your project.',
+  'log.diag.redactions': '{count} redactions applied',
+  'log.diag.loading': 'Building the report…',
+  'log.diag.failed': 'Could not build the report: {detail}',
+  'log.diag.copy': 'Copy',
+  'log.diag.copied': 'Copied',
+  'log.diag.issue': 'Open a new issue',
+  'log.diag.close': 'Close',
+  'log.diag.issueTitle': 'Diagnostics report',
+  'log.diag.issueBody':
+    'Paste the diagnostics below (the app copies it for you first), then say what you were doing when it broke.\n\n',
 } as const
 
 export type LogsKey = keyof typeof logsEn
@@ -72,4 +88,19 @@ export const logsZh: Record<LogsKey, string> = {
   'log.prompt.truncated': '\n…（截断）',
   'log.prompt.context': '前面几行日志（上下文）：',
   'log.prompt.outro': '改完告诉我：改了哪个文件、为什么这么改。',
+
+  /* ---- 诊断信息：用户按一下才生成，永远不自动发送 ---- */
+  'log.diag.title': '诊断信息',
+  'log.diag.button': '诊断信息',
+  'log.diag.intro':
+    '不会自动上报。下面是会被发出去的原文（已脱敏），先看一眼 —— 你的项目里什么算隐私，只有你知道。',
+  'log.diag.redactions': '已脱敏 {count} 处',
+  'log.diag.loading': '正在生成报告…',
+  'log.diag.failed': '生成报告失败：{detail}',
+  'log.diag.copy': '复制',
+  'log.diag.copied': '已复制',
+  'log.diag.issue': '打开新建 Issue',
+  'log.diag.close': '关闭',
+  'log.diag.issueTitle': '诊断报告',
+  'log.diag.issueBody': '把下面的诊断信息贴在这里（点按钮时会先复制），再说一句出问题时你在做什么：\n\n',
 }

@@ -36,6 +36,7 @@ export {
 } from './push.js'
 export * from './schema-change.js'
 export * from './release.js'
+export * from './redact.js'
 export * from './taskgraph.js'
 export * from './typecheck.js'
 export * from './usage.js'

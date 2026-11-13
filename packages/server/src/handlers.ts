@@ -42,6 +42,7 @@ import {
   type PluginRoot,
 } from '@tenon/component-host'
 import type { ComponentRuntime } from './components.js'
+import { buildDiagnostics } from './diagnostics.js'
 import type { AgentRuntime } from '@tenon/agent'
 import type { PreviewManager } from '@tenon/gateway'
 import { exportStamp, exportStatic } from './export.js'
@@ -563,6 +564,21 @@ export function createHandlers(deps: ServerDeps): HandlerMap {
     }),
 
     'logs.clear': async (input) => ({ cleared: preview.clearLogs(input.appId) }),
+
+    /*
+     * 只**生成**，不发送 —— 发不发由用户点（复制 / 贴到 Issue）。
+     * 为什么不做自动上报，写在 `diagnostics.ts` 文件头与 STATUS §4.67。
+     */
+    'diagnostics.report': async (input) =>
+      buildDiagnostics({
+        version: deps.version,
+        core,
+        appId: input.appId,
+        entries:
+          input.appId === undefined
+            ? []
+            : preview.logs(input.appId, { limit: input.limit, minLevel: 'warn' }),
+      }),
 
     'plan.get': async (input) => {
       const chat = requireChat(agent)

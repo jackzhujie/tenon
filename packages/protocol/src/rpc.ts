@@ -337,6 +337,33 @@ export const rpcMethods = {
     output: z.object({ cleared: z.number().int().nonnegative() }),
   },
 
+  /**
+   * 诊断信息（"出错了，要不要把这份发给作者"）。
+   *
+   * **刻意没有自动上报**：本地优先的产品里，任何默认外发都是把承诺打个折。
+   * 所以这里只负责"生成一份能给人看的报告"，发不发、发给谁由用户点。
+   *
+   * 为什么服务端生成而不是前端拼：日志缓冲、版本、平台都在服务端；更要紧的是
+   * **脱敏只有这一份实现** —— 让界面各处自己拼，迟早有一处忘了脱。
+   *
+   * `text` 是**纯文本原文**，不是结构化数据：界面要把它原样摊开给人看，
+   * 结构化再渲染的话，人看到的就不是真正要发出去的东西了。
+   */
+  'diagnostics.report': {
+    input: z.object({
+      /** 带上这个应用的错误日志。不给就只发环境信息 */
+      appId: Id.optional(),
+      limit: z.number().int().positive().max(100).default(30),
+    }),
+    output: z.object({
+      text: z.string(),
+      /** 替换了几处。界面显示「已脱敏 N 处」，让人能确认确实处理过 */
+      redactions: z.number().int().nonnegative(),
+      /** 报告格式版本：将来加字段时，收到的报告能自己对上号 */
+      format: z.string(),
+    }),
+  },
+
   'plan.get': {
     input: z.object({ appId: Id }),
     output: z.object({ tasks: z.array(PlanTask) }),
