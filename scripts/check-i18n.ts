@@ -17,6 +17,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const WEB_SRC = 'apps/web/src'
 const MESSAGES_DIR = 'lib/messages'
@@ -109,7 +110,7 @@ function stripBlockComments(lines: string[]): string[] {
  * 而「行首是中文」在代码里几乎只有一种含义 —— 这一行是给人看的字。误报的两个来源
  * 都被别处挡住了：注释在前面就跳过了，字符串里的中文第 1 条已经命中。
  */
-function looksLikeCopy(code: string): boolean {
+export function looksLikeCopy(code: string): boolean {
   const quoted = /'[^'\n]*[\u4e00-\u9fa5][^'\n]*'|"[^"\n]*[\u4e00-\u9fa5][^"\n]*"|`[^`]*[\u4e00-\u9fa5][^`]*`/.test(
     code,
   )
@@ -136,10 +137,26 @@ function looksLikeCopy(code: string): boolean {
   return /^[\u4e00-\u9fa5，。：；、！？「」『』（）【】…·—]/.test(bare)
 }
 
+/**
+ * 这个文件是不是文案表本身（整目录豁免）。
+ *
+ * 先把两种分隔符都归一成 `/` 再判：`walk` 用 `join` 拼路径，Windows 上得到的是
+ * `apps\web\src\lib\messages\apps.ts`，直接拿 `lib/messages` 去 `includes` 永远不成立 ——
+ * 于是整个文案表被当成界面文件扫，中文表里那几百条全算"硬编码中文"。
+ *
+ * 这个 bug 只在 Windows 的 CI 上现形（本地 macOS 一直绿），直到这轮第一次推上去跑。
+ * 门禁误报的代价不比漏报小：一直红着的门禁，最后一定会被人关掉。
+ *
+ * 前后补 `/` 而不是裸 `includes`：`lib/messages-v2/` 不是文案表，裸匹配会把它一起豁免。
+ */
+export function isMessagesFile(file: string): boolean {
+  return file.replace(/\\/g, '/').includes(`/${MESSAGES_DIR}/`)
+}
+
 function scanSources(): Hit[] {
   const hits: Hit[] = []
   for (const file of walk(WEB_SRC)) {
-    if (file.includes(MESSAGES_DIR)) continue
+    if (isMessagesFile(file)) continue
     const raw = readFileSync(file, 'utf8').split('\n')
     const code = stripBlockComments(raw)
     code.forEach((line, index) => {
@@ -183,24 +200,32 @@ function scanEnglishTables(): Hit[] {
   return hits
 }
 
-const leftovers = scanSources()
-const englishWithHan = scanEnglishTables()
+export function main(): number {
+  const leftovers = scanSources()
+  const englishWithHan = scanEnglishTables()
 
-if (leftovers.length > 0) {
-  console.error(`\n✗ 界面文件里还有 ${leftovers.length} 处中文没走文案表：\n`)
-  for (const hit of leftovers) console.error(`  ${hit.file}:${hit.line}\n    ${hit.text}`)
-  console.error(
-    '\n改法：把文案挪进 apps/web/src/lib/messages/<feature>.ts 的 en / zh 两张表，' +
-      '代码里用 t(\'feature.key\')。\n' +
-      '确实是品牌字/命令示例的，在该行写注释 i18n-ignore。\n',
-  )
+  if (leftovers.length > 0) {
+    console.error(`\n✗ 界面文件里还有 ${leftovers.length} 处中文没走文案表：\n`)
+    for (const hit of leftovers) console.error(`  ${hit.file}:${hit.line}\n    ${hit.text}`)
+    console.error(
+      '\n改法：把文案挪进 apps/web/src/lib/messages/<feature>.ts 的 en / zh 两张表，' +
+        "代码里用 t('feature.key')。\n" +
+        '确实是品牌字/命令示例的，在该行写注释 i18n-ignore。\n',
+    )
+  }
+
+  if (englishWithHan.length > 0) {
+    console.error(`\n✗ 英文文案表里混进了 ${englishWithHan.length} 处中文：\n`)
+    for (const hit of englishWithHan) console.error(`  ${hit.file}:${hit.line}\n    ${hit.text}`)
+    console.error('\n英文表里出现中文，说明这一条压根没翻译 —— 而它藏在不会被误报的目录里。\n')
+  }
+
+  if (leftovers.length > 0 || englishWithHan.length > 0) return 1
+  console.log('✓ 没有未走文案表的中文')
+  return 0
 }
 
-if (englishWithHan.length > 0) {
-  console.error(`\n✗ 英文文案表里混进了 ${englishWithHan.length} 处中文：\n`)
-  for (const hit of englishWithHan) console.error(`  ${hit.file}:${hit.line}\n    ${hit.text}`)
-  console.error('\n英文表里出现中文，说明这一条压根没翻译 —— 而它藏在不会被误报的目录里。\n')
+/** 直接运行才执行（被测试 import 时不要跑） */
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exit(main())
 }
-
-if (leftovers.length > 0 || englishWithHan.length > 0) process.exit(1)
-console.log('✓ 没有未走文案表的中文')
