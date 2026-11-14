@@ -187,8 +187,8 @@ macOS 那份会在 CI 里**真启动一次**（`smoke:desktop:packaged`）；Win
 runner 没有 GUI 会话，那边只验"打得出来"。
 
 推 `v*` tag 时会把这些产物挂成一个 **GitHub Release**（含 `SHA256SUMS.txt`），
-这样不用登录、链接也不会过期。最近的预览版：
-**[v0.0.0-alpha.4](https://github.com/jackzhujie/tenon/releases/tag/v0.0.0-alpha.4)**。
+这样不用登录、链接也不会过期。最新版本：
+**[v0.1.0](https://github.com/jackzhujie/tenon/releases/tag/v0.1.0)**。
 
 > 未签名：mac 首次打开要右键 →「打开」（或 `xattr -dr com.apple.quarantine`），
 > Windows 会弹 SmartScreen「未知发布者」→ 更多信息 → 仍要运行。

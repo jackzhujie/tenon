@@ -1,6 +1,6 @@
 {
   "name": "tenon",
-  "version": "0.0.0-alpha.4",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Tenon（榫）— 本地优先、可自托管的对话式 AI 全栈应用搭建平台",
