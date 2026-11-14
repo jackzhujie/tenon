@@ -1,6 +1,6 @@
 {
   "name": "@tenon/desktop",
-  "version": "0.0.0-alpha.3",
+  "version": "0.0.0-alpha.4",
   "private": true,
   "type": "module",
   "description": "Electron 壳：spawn 本机 server、读 TENON_READY、把浏览器换成窗口（业务一行都不在这里）",
