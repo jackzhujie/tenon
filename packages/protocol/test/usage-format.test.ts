@@ -36,6 +36,19 @@ describe('formatTokens', () => {
     expect(formatTokens(2_400_000)).toBe('2.4M')
   })
 
+  it('M 量级保留两位小数：合计要能被分项解释', () => {
+    /*
+     * 用户报过这个："全部应用 34M，分项是 34M + 13.5k，加起来对不上"。
+     * 求和本身没错（34.0135M），是一位小数的 M 只有 100k 分辨率，把 13.5k 吃掉了。
+     * 两位小数下 34.01M，末位能看见那 13.5k。
+     */
+    expect(formatTokens(34_013_500)).toBe('34.01M')
+    expect(formatTokens(34_000_000)).toBe('34M')
+    expect(formatTokens(34_500_000)).toBe('34.5M')
+    // 100M 以上还是取整：三位数再带两位小数，chip 里放不下
+    expect(formatTokens(123_456_789)).toBe('123M')
+  })
+
   it('负数与非数字都当 0（面板上出现 NaN 比不显示更糟）', () => {
     expect(formatTokens(-5)).toBe('0')
     expect(formatTokens(Number.NaN)).toBe('0')

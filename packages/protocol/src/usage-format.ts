@@ -16,12 +16,16 @@ import { msg } from './messages/index.js'
  * 保留一位小数到 99.9k（`>= 100` 才取整）：跨应用汇总出现之后，用户会**把几行加起来
  * 对一眼**。若 10k 以上直接取整，`6.3k + 4.2k` 会和合计 `10k` 对不上 —— 这种"数字不
  * 自洽"的观感比多一个字符严重得多。代价是表头那个 chip 宽一个字符。
+ *
+ * **M 量级取两位小数**（2026-11-15 修）：同一个理由，只是量级大 1000 倍。
+ * 一位小数的 M 只有 100k 的分辨率 —— 合计 `34M` 与分项 `34M + 13.5k` 会看起来对不上
+ * （用户实际就是这么报的）。两位小数下变成 `34.01M`，那 13.5k 就能在末位上看见了。
  */
 export function formatTokens(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens <= 0) return '0'
   if (tokens < 1000) return String(Math.round(tokens))
   if (tokens < 1_000_000) return `${trimZero(tokens / 1000)}k`
-  return `${trimZero(tokens / 1_000_000)}M`
+  return `${trimZero(tokens / 1_000_000, 2)}M`
 }
 
 /**
@@ -77,8 +81,15 @@ export function globalBudgetMessage(
   return msg('error.budget.globalTotalExhausted', { used: usedText, limit })
 }
 
-function trimZero(value: number): string {
+/**
+ * 去掉尾部多余的 0：`34.00` → `34`、`2.40` → `2.4`、`34.01` 原样保留。
+ *
+ * 100 以上一律取整（三位数再带小数就太长了），除非调用方显式要求更多位。
+ * 注意不能对没有小数点的字符串做 `\.?0+$` —— `100` 会被吃成 `1`。
+ */
+function trimZero(value: number, precision = 1): string {
   // 100 以上才取整：见 formatTokens 的注释（跨应用汇总要对得上）
-  const fixed = value >= 100 ? value.toFixed(0) : value.toFixed(1)
-  return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed
+  const digits = value >= 100 ? 0 : precision
+  const fixed = value.toFixed(digits)
+  return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed
 }

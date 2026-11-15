@@ -54,7 +54,10 @@ export function UpdateBanner({ update }: { update: AppUpdate }) {
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center gap-2 border-b px-4 py-1.5 text-[11.5px]',
+        // `overflow-hidden` 是兜底：错误消息里常带一长串没有空格的 URL
+        // （electron-updater 会把找不到的产物地址原样贴进来），
+        // 一个不可断行的长词会把整条横幅撑得比窗口还宽 —— 于是整个页面出现横向滚动条。
+        'flex shrink-0 items-center gap-2 overflow-hidden border-b px-4 py-1.5 text-[11.5px]',
         isError
           ? 'border-bad/30 bg-[#241413]'
           : 'border-line-soft bg-panel-2/60',
@@ -67,10 +70,24 @@ export function UpdateBanner({ update }: { update: AppUpdate }) {
         )}
       />
 
-      <span className={cn('shrink-0', isError ? 'text-bad' : 'text-muted')}>{state.message}</span>
+      {/*
+       * 不用 `shrink-0`：那是"宁可撑破也不压缩"，而这行正是会被长 URL 撑破的那一行。
+       * 改成 `min-w-0 truncate`（flex 子项要 truncate 必须先有 min-width:0）+ `title`，
+       * 横幅保持单行，全文在悬停里能看全。
+       */}
+      <span
+        className={cn('min-w-0 truncate', isError ? 'text-bad' : 'text-muted')}
+        title={state.message}
+      >
+        {state.message}
+      </span>
 
       {/* 出错时把"下一步能做什么"直接写出来，别让用户自己猜 */}
-      {state.hint !== null && <span className="truncate text-faint">{state.hint}</span>}
+      {state.hint !== null && (
+        <span className="min-w-0 truncate text-faint" title={state.hint}>
+          {state.hint}
+        </span>
+      )}
 
       {/* 下载进度：一条 80px 的细条，比百分比数字更能看出"在动" */}
       {busy && (
