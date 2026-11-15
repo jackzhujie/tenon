@@ -215,7 +215,8 @@ jobs:
           # `release/mac` 之类的解包目录是给冒烟用的，不必上传；只看安装包本体。
           # 刻意不用 `find -printf`：那是 GNU 的，macOS 的 BSD find 不认（会直接报错退出）
           for f in apps/desktop/release/*.dmg apps/desktop/release/*.zip \
-                   apps/desktop/release/*.exe apps/desktop/release/*.AppImage; do
+                   apps/desktop/release/*.exe apps/desktop/release/*.AppImage \
+                   apps/desktop/release/*.yml apps/desktop/release/*.blockmap; do
             [ -e "$f" ] || continue
             printf '  %s  %s 字节\n' "$(basename "$f")" "$(wc -c < "$f" | tr -d ' ')"
           done
@@ -229,6 +230,21 @@ jobs:
             apps/desktop/release/*.zip
             apps/desktop/release/*.exe
             apps/desktop/release/*.AppImage
+            # ★ 更新元数据（`latest-mac.yml` / `latest.yml` / `latest-linux.yml`）。
+            # 缺了它们的后果不是"自动更新差一点"，而是**永远失败**：
+            # 客户端去 Release 找 `latest-mac.yml`，404，界面弹
+            # 「Cannot find latest-mac.yml in the latest release artifacts」。
+            # 而 `publish: github` 早就让 electron-builder 生成了这几个文件 ——
+            # 只是以前没有传上去。代码全对、产物少三个文件，这类漏最难看出来。
+            #
+            # 不写 `*.yml`：同目录还有个 `builder-debug.yml`（排障用的中间产物），
+            # 通配会把它一起带进 Release。三个名字写全，少一个平台也不会静默：
+            # `if-no-files-found` 是整组判定的，只要该平台有产物就不会报"一个都没有"。
+            apps/desktop/release/latest-mac.yml
+            apps/desktop/release/latest.yml
+            apps/desktop/release/latest-linux.yml
+            # 差分下载用；没有它只能整包下（能用，只是每次几十 MB）
+            apps/desktop/release/*.blockmap
           if-no-files-found: error
           # 130MB 级产物，保留 14 天够试用；长期归档应该走 Release，不是 artifact
           retention-days: 14
@@ -256,6 +272,64 @@ jobs:
 
       # 校验和解决的是"下载有没有坏"，不是"东西是不是我发的"（没有签名就做不到后者）。
       # 大文件在这台机器上实测会 EOF —— 有个 sha256 至少能区分"没下完"和"包本身坏了"。
+      #
+      # ★ mac 的两个架构各生成一份**同名**的 `latest-mac.yml`（都叫 latest-mac.yml，
+      #   内容只含自己那一架构），一起上传到 Release 会互相覆盖 —— 被覆盖掉的那个架构
+      #   以后永远更新不了。所以先合并成一份 `files: [arm64…, x64…]` 再上传。
+      #
+      # 为什么是字符串拼接而不是解析 YAML：这个 job **不 checkout**（只要产物），
+      # 也就没有 node_modules，拿不到 yaml 库。而这份文件的形状由 electron-builder
+      # 固定生成（`files:` 下面是一串缩进项，再往下是顶格的 `path:`），按缩进切够用。
+      - name: 合并 mac 的更新元数据（两个架构共用一份 latest-mac.yml）
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs')
+
+          const dirs = ['dist/tenon-mac-arm64', 'dist/tenon-mac-x64']
+          const found = dirs.map((d) => `${d}/latest-mac.yml`).filter((f) => fs.existsSync(f))
+          if (found.length === 0) {
+            console.log('没有 latest-mac.yml（mac 那两个 job 可能都失败了），跳过')
+            process.exit(0)
+          }
+
+          /** 切出 `files:` 到下一个顶格键之间的那些行 */
+          function filesBlock(lines) {
+            const start = lines.findIndex((line) => line.startsWith('files:'))
+            if (start === -1) throw new Error('latest-mac.yml 里没有 files:')
+            let end = lines.length
+            for (let i = start + 1; i < lines.length; i++) {
+              if (lines[i].trim() !== '' && !lines[i].startsWith(' ')) { end = i; break }
+            }
+            return { start, end, entries: lines.slice(start + 1, end).filter((line) => line.trim() !== '') }
+          }
+
+          const baseLines = fs.readFileSync(found[0], 'utf8').split('\n')
+          const base = filesBlock(baseLines)
+          const extra = []
+          for (const file of found.slice(1)) {
+            const other = filesBlock(fs.readFileSync(file, 'utf8').split('\n')).entries
+            for (const entry of other) {
+              // 同一个 url 出现两次说明两份 yml 撞了架构，写进去会让 updater 选错
+              if (!base.entries.includes(entry) && !extra.includes(entry)) extra.push(entry)
+            }
+          }
+
+          const merged = [...baseLines.slice(0, base.end), ...extra, ...baseLines.slice(base.end)]
+          fs.writeFileSync('dist/latest-mac.yml', merged.join('\n'))
+          // 数 `- url:` 的行才是"几条"，`entries` 是行（每条占 url/sha512/size 三行）
+          const count = [...base.entries, ...extra].filter((line) => line.trim().startsWith('- url:')).length
+          console.log(`合并 ${String(found.length)} 份，files 里现在有 ${String(count)} 条`)
+          console.log(merged.join('\n'))
+
+          // 子目录里那两份同名文件必须删掉：上传时 `dist/*/*.yml` 会连它们一起抓，
+          // 同名的两个资产进同一个 Release，gh 会报冲突（或悄悄覆盖掉刚合并好的那份）
+          for (const file of found) fs.rmSync(file)
+          NODE
+
+      # 校验和解决的是"下载有没有坏"，不是"东西是不是我发的"（没有签名就做不到后者）。
+      # 大文件在这台机器上实测会 EOF —— 有个 sha256 至少能区分"没下完"和"包本身坏了"。
+
       - name: 生成 SHA256SUMS
         shell: bash
         run: |
@@ -330,7 +404,10 @@ jobs:
         run: |
           shopt -s nullglob
           TAG="${GITHUB_REF_NAME}"
-          files=(dist/*/*.dmg dist/*/*.zip dist/*/*.exe dist/*/*.AppImage dist/SHA256SUMS.txt)
+          # `dist/latest-mac.yml` 是合并后的那一份（上面那步生成并删掉了子目录里的两份）；
+          # `dist/*/*.yml` 这时只剩 win 的 latest.yml 与 linux 的 latest-linux.yml
+          files=(dist/*/*.dmg dist/*/*.zip dist/*/*.exe dist/*/*.AppImage \
+                 dist/*/*.yml dist/*/*.blockmap dist/latest-mac.yml dist/SHA256SUMS.txt)
 
           # 带预发布后缀的 tag（如 v0.0.0-alpha.1）标成 prerelease，别让人以为这是正式版
           extra=()
