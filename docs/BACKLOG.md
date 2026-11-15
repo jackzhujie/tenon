@@ -15,7 +15,7 @@
 
 | 闭环 | 差在哪 | 一句话后果 |
 |---|---|---|
-| **装得出去** | ✅ 真 Hub 已上线（§2.1）、真远端 push 已通（§3.9）；仍欠签名 / 遥测 | 组件生态已能更新；但包还没签名，用户装了就停在那一版 |
+| **装得出去** | 🚧 真 Hub 已上线（§2.1）、真远端 push 已通（§3.9）、更新元数据已随包发布（§1.1）；仍欠签名 | 组件生态能更新、包能自己检查更新；但包还没签名，macOS 装完要右键打开一次 |
 | **卖得出去** | ✅ 商业授权入口已补（§2.2，`COMMERCIAL.md` + 邮箱）；仍欠组织级能力（设计稿）与付费组件的交易链路 | 想买的人找得到门了；但买到的只是授权本身，组织级功能还没代码 |
 | **用得长久** | ✅ 用户体系（§1.3）、存储清理（§3.3）、跨应用用量总闸（§3.1）、中英两套话（§3.5）都已补；仍欠遥测 | 没登录的人拦得住、盘不会无限涨、总花费也拦得住、两种语言都能用；但出错没人上报 |
 
@@ -29,10 +29,10 @@
 
 | 项 | 内容 |
 |---|---|
-| 现状 | ✅ 壳侧做完了：`electron-updater` 6.8.11（锁版本）+ `publish: github` + preload 桥 + 界面横幅 + 10 项单测。见 STATUS §4.60 |
+| 现状 | ✅ 壳侧做完了：`electron-updater` 6.8.11（锁版本）+ `publish: github` + preload 桥 + 界面横幅 + 10 项单测。见 STATUS §4.60。✅ **更新元数据已随包发布（2026-11-16，0.1.1）**：`latest-mac.yml` / `latest.yml` / `latest-linux.yml` 以前从来没进过 Release（`desktop.yml` 只传 dmg/zip/exe/AppImage），于是每次检查都 404 —— 用户看到的是一句「Cannot find latest-mac.yml in the latest release artifacts」+ 一长串 URL。现在三份随包上传（mac 两架构合并成一份），公网三个 URL 实测 200。见 STATUS §4.70 |
 | 后果（已解） | 修好的 bug 不再要求用户自己去下安装包 —— 只要那个包装了签名，检查/下载/重启安装是通的 |
 | 仍卡 | **macOS 的 Squirrel.Mac 拒绝未签名更新** —— 与 1.2 是同一笔证书账；Windows NSIS 不需要签名 |
-| 还没验的 | 打包版真机走完"检查到新版 → 下载 → 重启换版本"。mac 要等 1.2；Windows 有机器即可单独验 |
+| 还没验的 | 打包版真机走完"检查到新版 → 下载 → 重启换版本"。**这一条只能靠真升级验**：装了 0.1.1 之后，等下一版发出来点一次。mac 还要等 1.2（未签名点安装会被 Squirrel 拒，updater 已有降级文案）；Windows 有机器即可单独验 |
 | 落点 | `apps/desktop/src/{updater,preload,main}.ts`、`apps/desktop/electron-builder.yml`、`apps/web/src/{hooks/useAppUpdate.ts,features/update/UpdateBanner.tsx}`、`apps/desktop/test/updater.test.ts` |
 
 ### 1.2 签名与公证 —— ⏳ 接线已完成（2026-11-09），只等证书

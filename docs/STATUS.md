@@ -3558,6 +3558,50 @@ CI 最后一次运行是 11-11（`f32b934`），而那之后的所有东西 —�
 验证：`e2e:hub` / `e2e:diff` / `e2e:release` 三条本地全过（本机就是 en-US，等于模拟 CI）；
 `check:i18n` 0 处；新增 11 条测试（i18n 判据 10 + 脚本语言 1）。
 
+### 4.70 更新元数据从来没进过 Release —— 自动更新停在"找不到文件"
+
+用户装的是 0.1.0 的包，打开就弹一句红条：
+
+```
+更新失败：Cannot find latest-mac.yml in the latest release artifacts
+(https://github.com/jackzhujie/tenon/releases/download/v0.1.0/latest-mac.yml)
+```
+
+**不是网络问题，是产物少三个文件。** `electron-builder.yml` 里有 `publish: github`，
+所以 electron-builder 每次都会生成 `latest-mac.yml` / `latest.yml` / `latest-linux.yml`
+（客户端靠它判断"有没有新版、下哪个文件、sha512 对不对"）。而 `desktop.yml` 的上传清单
+只有 dmg / zip / exe / AppImage —— 这三份**从来没进过 Release**，于是 `checkForUpdates()`
+每次都拿 404。
+
+为什么一直没人发现：不装包就看不到。§4.60 把"壳侧已落地"写进了 BACKLOG §1.1，
+10 项单测也全绿 —— 但那些验的是"状态机怎么变"，没有一条验"发出去的包里有没有
+能让状态机动起来的那个文件"。**这就是"打包成功"和"用户能更新"之间的距离。**
+
+修法三处（`.github/workflows/desktop.yml`）：
+
+1. package job 的上传清单加 `latest-mac.yml` / `latest.yml` / `latest-linux.yml`
+   与 `*.blockmap`（差分下载用）。**不写 `*.yml`**：同目录还有 `builder-debug.yml`，
+   通配会把这个排障中间产物一起塞进 Release。
+2. release job 先把 mac 的两份 `latest-mac.yml` 合并。两个架构各生成一份**同名**文件、
+   内容只含自己那一架构 —— 一起传进同一个 Release 会互相覆盖，被盖掉的那个架构
+   以后永远更新不了。合并**不解析 YAML**（这个 job 不 checkout，没有 node_modules，
+   拿不到 yaml 库），按缩进切 `files:` 段再拼；这份文件的形状由 electron-builder
+   固定生成，够用。合并完删掉子目录里那两份，免得 `dist/*/*.yml` 上传时撞名。
+3. 上传资产列表加 `dist/latest-mac.yml`、`dist/*/*.yml`、`dist/*/*.blockmap`。
+
+顺带把用户报的另一个现象也修了：那条红条里的 URL 没有空格，而横幅里的消息用了
+`shrink-0`，一个不可断行的长词直接把整行撑得比窗口宽 → 整页出现横向滚动条。
+改成 `min-w-0 truncate` + `title`（flex 子项要 truncate 必须先有 `min-width: 0`）。
+
+**验证**（0.1.1）：四个平台全绿；Release 里 `latest-mac.yml` 的 `files` 是 4 条
+（arm64 zip/dmg + x64 zip/dmg），`path` 指向 arm64 zip；三个 yml 的公网 URL 实测
+`HTTP 200`，内容里的 `size` 与资产一致；`latest.yml` 指 `setup.exe`、
+`latest-linux.yml` 指 AppImage 且带 `blockMapSize`。
+
+**还没验的**：真机走一次"检查到新版 → 下载 → 重启换版本"。这一条只能靠真升级 ——
+装上 0.1.1，等下一版发出来点一次。mac 上未签名仍会在**安装**这一步被 Squirrel 拒
+（`updater.ts` 里已有那句降级文案，会指去手动下载）。
+
 ## 5. 已知陷阱（都踩过，别重踩）
 
 | 陷阱 | 说明 |
@@ -3845,6 +3889,7 @@ CI 最后一次运行是 11-11（`f32b934`），而那之后的所有东西 —�
 | **按行扫字符串，跨行拼接的会误判（两个方向都会）** | 同一个原因造成两次错判：① 漏 —— `new TenonError(\n  'CODE',\n  '中文消息')` 整行没有中文（这条已记在上面的多行字符串坑）；② 误报 —— 提示词里 `"... — \"Did not run\" / "` + `"没跑成" — ..."` 是跨行拼接的，只看本行会以为"只有中文"。护栏的豁免因此要看**上一行**。写这类扫描器时，行粒度只适合"防回流"，不适合"算总数" |
 | **生成的 JS 里出现撇号会截断单引号字符串** | `res.end('... Check this process's log.')` —— 这段是**当代码生成**的（`serve.mjs` 模板），语法错在 `tsc` 里看不出来（它只是个字符串），只有 `checkJs` 那条测试会红。改这类"代码生成代码"的文案时避开撇号，或改用双引号；同理 `${}` 与反引号也要当心（见上面那条） |
 | **按路径"分类文件"的判据，Windows 上会整体失效** | 描述符不一致：`walk` 用 `join` 拼出 `apps\web\src\lib\messages\apps.ts`，判据写的是 `lib/messages`（正斜杠）→ `includes` 在 Windows 上**永远不成立**，于是整个中文文案表被当成界面代码逐行扫，几百条全算"漏网"。`check-i18n` 因此在本机（macOS）连绿三天、第一次上 Windows CI 就红。规矩：凡是拿路径做判断的地方，先 `replace(/\\/g, '/')` 再比，且**别用裸 `includes`**（`lib/messages-v2/` 会蹭到豁免），要前后补 `/`。这类问题的测试必须**手动喂 Windows 风格字符串**，别依赖 host 平台 —— 在 mac 上跑一万遍也是绿的 |
+| **"打包成功"和"发出去的包能用"之间隔着几个文件** | `electron-builder` 生成了 `latest*.yml`（客户端靠它发现新版），而 CI 的上传清单只写了安装包本体 —— 于是自动更新每次检查都 404，报 `Cannot find latest-mac.yml in the latest release artifacts`，而构建日志全绿、单测全过。**凡是"产物 → 分发"这一步，都要有一条断言检查"发出去的东西是不是客户端真正会去取的那些"**。同类：Hub 的 `index.json` 与 bundle 必须一起传（§4.63 已踩过一回）。另外 mac 两个架构生成同名 yml，一起传会互相覆盖 —— 多架构工具链里的"同名不同内容"一律先合并再上传 |
 
 
 ---
