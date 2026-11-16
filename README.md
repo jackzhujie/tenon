@@ -2,10 +2,29 @@
 
 [![CI](https://github.com/jackzhujie/tenon/actions/workflows/ci.yml/badge.svg)](https://github.com/jackzhujie/tenon/actions/workflows/ci.yml)
 
-> 本地优先、开源、可自托管的**对话式 AI 全栈应用搭建平台**（桌面端 + Web 端同构）。
-> 用自然语言把应用从 0 做到上线：React + NestJS + PostgreSQL 全栈 + Git 版本 + Docker 部署，且这个应用能被 Agent 持续迭代。
+**说一句话，得到一个能上线的全栈应用 —— 代码留在你自己的机器上。**
 
-**非官方开源项目，与字节跳动 / 飞书无任何关联。** 「飞书」「妙搭」为字节跳动商标，仅用于产品对比说明。
+> 开源 · 本地优先 · 可自托管。桌面端与 Web 端同构，React + NestJS + PostgreSQL。
+
+我说：「做一个报销审批系统：待审列表、金额合计，能通过和驳回」。
+它读了现有代码、写了两个文件，右侧预览当场热更新 —— 下图就是那一轮：
+
+![一段对话，一个应用](docs/images/chat-and-preview.png)
+
+**不用装 Node** → **[下载最新版](https://github.com/jackzhujie/tenon/releases/latest)**（macOS / Windows / Linux，免安装依赖）
+
+## 为什么不是又一个 bolt.new
+
+| | Tenon | bolt.new / Lovable / v0 |
+|---|---|---|
+| 代码在哪 | **你的机器**（`~/.tenon`），随时 `git log`、`git clone` 拿走 | 云端沙箱 |
+| 后端 | 真 NestJS + PostgreSQL，能导出 Docker 部署 | 多数只到前端 + 平台托管 |
+| 数据 | 本地数据库，不上传 | 对方服务器 |
+| 每一轮改动 | 一个 Git 提交，能回滚到任意一轮、看某一次改了什么 | 多数没有版本历史 |
+| 授权 | 生成的应用归你（Apache-2.0，**不传染**） | 看各家条款 |
+
+代价也写清楚：**要自己配模型 Key**（OpenAI 兼容即可），**不做云端托管**，也不打算做 ——
+它替你把"从想法到能上线的代码"这段路走完，部署到哪由你决定。
 
 > **为什么叫「榫」**：榫卯不用一根钉子，靠构件咬合承重 —— 正如应用由标准化组件咬合而成，Agent 只负责设计与搭接。详见 [DESIGN.md §1.5](docs/DESIGN.md)。
 
@@ -49,11 +68,18 @@ GLM / Kimi / Ollama…），保存即生效，不用重启。Key 本地加密存
 
 ## 平台
 
-| 平台 | 状态 |
-|---|---|
-| macOS（Apple Silicon / Intel） | 首发。有 `.app`（未签名公证） |
-| Windows x64 | **核心 + Web 模式已在 CI 里跑通**（lint / 类型 / 841 项测试 / 前端构建）。桌面安装包还没产出 —— `electron-builder` 只在 macOS 上打过 `--dir` |
-| Linux | 桌面端 M7 后置；**核心测试在 CI 的 ubuntu 里跑**（服务端本身没问题，缺的是桌面壳的打包与验证） |
+三个平台都有安装包（见 [Releases](https://github.com/jackzhujie/tenon/releases/latest)），但**验证深度不一样**：
+
+| 平台 | 产物 | 验证到哪一步 |
+|---|---|---|
+| macOS（Apple Silicon / Intel） | `.dmg` + `.zip` | CI 里**真启动过**打包产物（`smoke:desktop:packaged`） |
+| Windows x64 | `-setup.exe`（NSIS） | 只验到"打得出来、装得上没验" —— CI 的 runner 没有 GUI 会话 |
+| Linux x64 | `.AppImage` | 同上 |
+
+**产物未签名**：macOS 首次打开要右键 →「打开」（或 `xattr -dr com.apple.quarantine /Applications/Tenon.app`），
+Windows 会弹 SmartScreen「未知发布者」→「更多信息」→「仍要运行」。这不是包坏了，是证书还在办。
+
+**非官方开源项目，与字节跳动 / 飞书无任何关联。** 「飞书」「妙搭」为字节跳动商标，仅用于产品对比说明。
 
 CI 是**三平台矩阵**（ubuntu / macOS / Windows）。这不是为了好看：这套东西到处在
 spawn 子进程、拼路径、判断退出码，差别全藏在"本地绿、CI 红"里 —— 铺开第一次就抓到
